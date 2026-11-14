@@ -29,4 +29,5 @@ Run all four before a commit. CI runs the same commands.
 - Write the minimal code that solves the problem.
 - Never special-case test inputs or hardcode expected values to pass a test.
 - Tests use temp directories and pass `Inputs` with `HOME` and `XDG_CONFIG_HOME` set to temp paths. Never read the real `~/.config`.
+- Platforms: Linux, macOS and Windows are all supported. The binary contains no shell-specific code. Tests must pass on all three.
 - Commit messages: short Conventional Commits subject, trailer `Assisted-by: Claude:claude-haiku-5-5`, no `Co-Authored-By`.

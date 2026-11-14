@@ -76,7 +76,11 @@ fn path_prints_user_and_project_locations() {
 
     let out = run(&repo, root.path(), &["config", "path"], &[]);
 
-    let user = root.path().join("xdg/oncebitten/config.toml");
+    let user = root
+        .path()
+        .join("xdg")
+        .join("oncebitten")
+        .join("config.toml");
     assert!(
         out.contains(&format!("user     {} (missing)", user.display())),
         "{out}"

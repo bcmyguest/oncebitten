@@ -255,17 +255,60 @@ pub struct Loaded {
     pub origins: BTreeMap<String, Origin>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Windows,
+    Unix,
+}
+
+impl Platform {
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Platform::Windows
+        } else {
+            Platform::Unix
+        }
+    }
+
+    fn is_absolute(self, path: &str) -> bool {
+        match self {
+            Platform::Unix => path.starts_with('/'),
+            Platform::Windows => {
+                let bytes = path.as_bytes();
+                let drive = bytes.len() >= 3
+                    && bytes[0].is_ascii_alphabetic()
+                    && bytes[1] == b':'
+                    && matches!(bytes[2], b'\\' | b'/');
+                drive || path.starts_with(r"\\")
+            }
+        }
+    }
+}
+
 pub fn user_config_path(vars: &BTreeMap<String, String>) -> Result<PathBuf> {
+    user_config_path_for(vars, Platform::current())
+}
+
+pub fn user_config_path_for(
+    vars: &BTreeMap<String, String>,
+    platform: Platform,
+) -> Result<PathBuf> {
     let base = match vars
         .get("XDG_CONFIG_HOME")
-        .filter(|dir| Path::new(dir.as_str()).is_absolute())
+        .filter(|dir| platform.is_absolute(dir))
     {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(
-            vars.get("HOME")
-                .context("neither XDG_CONFIG_HOME nor HOME is set")?,
-        )
-        .join(".config"),
+        None => match platform {
+            Platform::Windows => PathBuf::from(
+                vars.get("APPDATA")
+                    .context("neither XDG_CONFIG_HOME nor APPDATA is set")?,
+            ),
+            Platform::Unix => PathBuf::from(
+                vars.get("HOME")
+                    .context("neither XDG_CONFIG_HOME nor HOME is set")?,
+            )
+            .join(".config"),
+        },
     };
     Ok(base.join("oncebitten").join(CONFIG_FILE))
 }

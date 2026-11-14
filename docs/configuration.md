@@ -6,7 +6,7 @@ Every setting has a key in a TOML file and an environment variable. The **Env va
 
 1. Environment variables `ONCEBITTEN_*`.
 2. Project file `.oncebitten/config.toml`. The loader checks the working directory, then each parent up to and including the git root (the first directory holding `.git`). Outside a git repository, no project file is read.
-3. User file `$XDG_CONFIG_HOME/oncebitten/config.toml`. Without an absolute `XDG_CONFIG_HOME`, `~/.config/oncebitten/config.toml`.
+3. User file `$XDG_CONFIG_HOME/oncebitten/config.toml` when `XDG_CONFIG_HOME` is an absolute path, on every OS. Otherwise on Windows `%APPDATA%\oncebitten\config.toml`, and on Linux and macOS `~/.config/oncebitten/config.toml`.
 4. Built-in defaults.
 
 The loader merges per key. A key set in a higher layer replaces only that key. A `rules.sources` list replaces the whole list; its entries never merge across layers.

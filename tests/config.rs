@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oncebitten::config::{load, project_config_path, Inputs, Origin};
+use oncebitten::config::{
+    load, project_config_path, user_config_path_for, Inputs, Origin, Platform,
+};
 use tempfile::TempDir;
 
 struct Sandbox {
@@ -247,4 +249,102 @@ fn project_config_above_the_git_root_is_ignored() {
     );
 
     assert_eq!(project_config_path(&sandbox.repo()), None);
+}
+
+fn vars(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+fn assert_user_file_under(path: &Path, base: &str) {
+    assert!(path.starts_with(base), "{}", path.display());
+    assert!(
+        path.ends_with("oncebitten/config.toml"),
+        "{}",
+        path.display()
+    );
+}
+
+#[test]
+fn windows_user_path_comes_from_appdata() {
+    let path = user_config_path_for(
+        &vars(&[("APPDATA", r"C:\Users\b\AppData\Roaming")]),
+        Platform::Windows,
+    )
+    .unwrap();
+
+    assert_user_file_under(&path, r"C:\Users\b\AppData\Roaming");
+}
+
+#[test]
+fn windows_absolute_xdg_config_home_takes_precedence() {
+    let path = user_config_path_for(
+        &vars(&[
+            ("XDG_CONFIG_HOME", r"D:\cfg"),
+            ("APPDATA", r"C:\Users\b\AppData\Roaming"),
+        ]),
+        Platform::Windows,
+    )
+    .unwrap();
+
+    assert_user_file_under(&path, r"D:\cfg");
+}
+
+#[test]
+fn windows_unc_xdg_config_home_is_absolute() {
+    let path = user_config_path_for(
+        &vars(&[
+            ("XDG_CONFIG_HOME", r"\\server\share\cfg"),
+            ("APPDATA", r"C:\Users\b\AppData\Roaming"),
+        ]),
+        Platform::Windows,
+    )
+    .unwrap();
+
+    assert_user_file_under(&path, r"\\server\share\cfg");
+}
+
+#[test]
+fn windows_relative_xdg_config_home_is_ignored() {
+    let path = user_config_path_for(
+        &vars(&[
+            ("XDG_CONFIG_HOME", "cfg"),
+            ("APPDATA", r"C:\Users\b\AppData\Roaming"),
+        ]),
+        Platform::Windows,
+    )
+    .unwrap();
+
+    assert_user_file_under(&path, r"C:\Users\b\AppData\Roaming");
+}
+
+#[test]
+fn windows_without_appdata_is_an_error_and_home_is_not_used() {
+    let message = error_chain(user_config_path_for(
+        &vars(&[("HOME", r"C:\Users\b")]),
+        Platform::Windows,
+    ));
+
+    assert!(message.contains("APPDATA"), "{message}");
+}
+
+#[test]
+fn unix_user_path_uses_home_and_ignores_appdata() {
+    let path = user_config_path_for(
+        &vars(&[
+            ("HOME", "/home/b"),
+            ("APPDATA", r"C:\Users\b\AppData\Roaming"),
+        ]),
+        Platform::Unix,
+    )
+    .unwrap();
+
+    assert!(path.starts_with("/home/b"), "{}", path.display());
+    assert!(
+        path.ends_with(".config/oncebitten/config.toml"),
+        "{}",
+        path.display()
+    );
 }
