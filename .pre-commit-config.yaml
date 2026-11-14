@@ -1,0 +1,26 @@
+# Lint/format the `oncebitten` crate. Scoped by `files:` so the hooks only fire
+# when Rust sources change. Requires cargo on PATH (rustup).
+# `default_install_hook_types` makes a plain `pre-commit install` wire BOTH the
+# pre-commit stage (fmt/clippy below) and the commit-msg stage (Conventional
+# Commits check) — the latter keeps subjects machine-parseable for release notes.
+default_install_hook_types: [pre-commit, commit-msg]
+repos:
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+  - repo: local
+    hooks:
+      - id: oncebitten-fmt
+        name: cargo fmt (oncebitten)
+        entry: cargo fmt --all -- --check
+        language: system
+        files: \.rs$
+        pass_filenames: false
+      - id: oncebitten-clippy
+        name: cargo clippy (oncebitten)
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        files: \.rs$
+        pass_filenames: false
