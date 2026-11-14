@@ -1,98 +1,144 @@
-# Spike: drive OpenShell from Rust to lint bad.py and fixed.py offline
+# Spike: replay an ast-grep rule in an OpenShell sandbox from Rust
+
+Second run, 2026-11-14. It replaces the first spike, which grepped for `utcnow`,
+read remote exit code 1 as "rule fired", and passed when the input file was missing.
+
+Code: `/tmp/spike-openshell2` (throwaway). Gateway: the first spike's, on
+`127.0.0.1:17670`, unauthenticated dev mode, openshell v0.1.8, Docker driver.
 
 ## Verdict
 
-**Works with caveats.** A Rust program using `std::process::Command` drives the `openshell` CLI: it creates a sandbox with a read-only corpus and no network, runs a grep check on `bad.py` and `fixed.py`, deletes the sandbox, and prints `PASS`. Caveats: Linux and Docker only, pre-release v0.1.8, local gateway run in unauthenticated dev mode, and exec-based isolation checks rather than a production review.
+**Works.** A Rust driver (`std::process::Command` + `openshell` CLI) replays the
+ast-grep rule `py-utcnow` in a sandbox with no network and a read-only `/corpus`.
+It reports `Fired(1)` for `bad.py` and `Clean` for `fixed.py`. Each of the eight
+failure scenarios below ends as could-not-run, and none reads as a pass.
+Verified: `driver bad.py fixed.py`, plus the scenario commands below.
 
-## Environment
+Caveat: "read-only corpus" means files baked into the image under a `read_only`
+filesystem policy. OpenShell has no host bind mount (`sandbox create --help` lists
+`--from` and `--upload` only). Verified by the help output.
 
-- Docker daemon reachable by the user; local `docker build` works. Base image `nvcr.io/nvidia/base/ubuntu:24.04` pulled by the Docker driver.
-- No sudo used. No root, no system config touched. `install.sh` was read but not run.
-- `install.sh` (read only): uses `sudo` for apt/dpkg/snap, writes system paths and systemd units. Not executed.
-- Installed by copying release tarballs into user paths:
-  - CLI: `~/.local/bin/openshell` (from `openshell-x86_64-unknown-linux-musl.tar.gz`, v0.1.8). Checksum OK.
-  - Gateway: `/tmp/spike-openshell/dl/gw` (from `openshell-gateway-x86_64-unknown-linux-gnu.tar.gz`). Checksum not verified: the checksum file matched only the CLI line.
+## Pieces
 
-## Commands used
+- **Checker** (`checker/src/main.rs`, 30 lines): Rust on `ast-grep-core`/`-config`/`-language`
+  0.51.2, Python grammar only. Usage `checker <rule.yml> <file>`. It prints one JSON line,
+  `{"status":"fired"|"clean","file":...,"matches":[{"rule","line","text"}]}`
+  or `{"status":"error","reason":...}`, and always exits 0. Built static in
+  `rust:1-alpine`: `file` reports `static-pie linked`, 4.9 MB stripped. Verified.
+  Host `cargo build --target x86_64-unknown-linux-musl` fails without `x86_64-linux-musl-gcc`;
+  `CC=cc` fails at link. Verified.
+- **Rule**: `/tmp/spike-astgrep/rules/py-utcnow.yml` (`datetime.utcnow()` and
+  `datetime.datetime.utcnow()`), copied to `/rules` in the image.
+- **Images**: `spike2-baked` = ubuntu 24.04 + `/corpus` + `/rules` + `/opt/oncebitten/checker`;
+  `spike2-plain` = the same without the checker, for the upload route.
+- **Policy** (`policy.yaml`): `read_only` for `/corpus /rules /opt /bin /usr /lib /etc /proc /dev/urandom`;
+  `read_write` for `/sandbox /tmp /dev/null`; `network_policies: {}`.
+- **Driver** (`driver/src/main.rs`, 83 lines): create, optional upload, one exec per
+  file, delete always. Env knobs: `MODE=upload`, `IMAGE`, `CHECKER`, `GATEWAY_ENDPOINT`
+  (passed as `--gateway-endpoint`), `OPENSHELL_BIN`.
 
-```
-openshell gateway add http://127.0.0.1:17670 --local
-openshell-gateway --config gateway.toml --disable-tls --compute-driver docker   # env OPENSHELL_LOCAL_TLS_DIR=/tmp/spike-openshell/tls
-openshell-gateway generate-certs --output-dir /tmp/spike-openshell/tls
-openshell sandbox create --name <n> --from spike-corpus:ro --detach --no-auto-providers --no-tty --policy policy-ro-nonet.yaml
-openshell sandbox exec <n> -- sh -c 'grep -q utcnow /corpus/bad.py'   # rc 0 bad, 1 fixed
-openshell sandbox delete <n>
-```
+### Classification rule (driver)
 
-gateway.toml: `version = 2` under `[openshell]`, plus `[openshell.gateway.auth] allow_unauthenticated_users = true`.
+The driver accepts **Fired** only when stdout holds exactly one JSON line with
+`status=fired`, non-empty `matches`, `file` equal to the requested path, and CLI exit 0.
+It accepts **Clean** only for `status=clean`, empty `matches`, matching `file`, and exit 0.
+Everything else, including `status=error`, no JSON, extra lines and a JSON/exit-code
+mismatch, becomes **CouldNotRun(reason)** carrying rc and stderr. Exit codes count as
+evidence and never decide the verdict.
 
-Policy (`policy-ro-nonet.yaml`): `filesystem_policy` with `read_only` for `/corpus`, `/bin`, `/usr`, `/lib`, `/etc`, `/proc`, `/dev/urandom`; `read_write` for `/tmp`, `/dev/null`; `network_policies: {}`.
+## Scenarios
 
-Image: `Dockerfile` = `FROM nvcr.io/nvidia/base/ubuntu:24.04` + `COPY corpus /corpus`, built as `spike-corpus:ro`. Fixtures are in the image, not uploaded.
+All rows verified by running `/tmp/spike-openshell2/driver/target/release/driver` with the
+listed env and args. Driver exit: 0 = all files classified fired/clean, 2 = any could-not-run.
 
-## Timings (5 runs, warm image)
+| Scenario | Command | Expected | Observed | Result |
+|---|---|---|---|---|
+| Real violation, baked checker | `driver bad.py fixed.py` | bad fired, fixed clean | `bad.py: Fired(1)`, `fixed.py: Clean`, rc 0 (5 runs) | PASS |
+| Real violation, uploaded checker | `MODE=upload driver bad.py fixed.py` | same | same, rc 0 (3 runs) | PASS |
+| Missing input file | `driver nope.py` | could-not-run | `CouldNotRun("checker error: input /corpus/nope.py: No such file ...")`, exec rc 0 | PASS |
+| Missing checker (wrong path) | `CHECKER=/opt/oncebitten/missing driver bad.py` | could-not-run | `CouldNotRun("expected 1 JSON line, got 0; rc=127 ...No such file")` | PASS |
+| Missing checker (upload skipped) | `IMAGE=spike2-plain:latest driver bad.py` | could-not-run | same shape, rc 127 | PASS |
+| Gateway unreachable | `GATEWAY_ENDPOINT=http://127.0.0.1:17699 driver bad.py` | could-not-run | `COULD-NOT-RUN all files: sandbox create failed: rc=1 ... transport error` | PASS |
+| Sandbox create failure | `IMAGE=does-not-exist:nope driver bad.py` | could-not-run | `COULD-NOT-RUN ... rc=1 ... ImagePullFailed ... 404` | PASS |
+| openshell binary absent | `OPENSHELL_BIN=/nonexistent/openshell driver bad.py` | could-not-run | `COULD-NOT-RUN all files: spawn openshell: No such file` | PASS |
+| Checker exits 0, prints nothing | `CHECKER=/bin/true driver bad.py` | could-not-run | `CouldNotRun("expected 1 JSON line, got 0; rc=0")` | PASS |
+| Checker exits 1, prints nothing (old spike's "fired") | `CHECKER=/bin/false driver bad.py` | could-not-run | `CouldNotRun("expected 1 JSON line, got 0; rc=1")` | PASS |
 
-| Step | Range |
+The shared gateway stayed up throughout; `openshell status` reported `Connected` before the run.
+
+## openshell CLI exit codes for its own failures
+
+Verified with `openshell ...; echo $?` (gateway-down rows use `--gateway-endpoint http://127.0.0.1:17699`).
+
+| Failure | rc | Message head |
+|---|---|---|
+| Gateway unreachable: `sandbox create`/`list` | 1 | `connect error: transport error` |
+| Gateway unreachable: `status` | 1 | `tcp connect error ... Connection refused` |
+| `sandbox create`, image missing | 1 | `ImagePullFailed ... 404` |
+| `sandbox create`, name > 19 chars | 1 | `name exceeds maximum length (25 > 19)` |
+| `sandbox create`, policy file missing | 1 | `failed to inspect sandbox policy` |
+| `sandbox create --upload` into read-only path | 1 | `sandbox upload failed ... Permission denied`; **the sandbox stays `Ready`** |
+| `sandbox exec`/`upload`, unknown sandbox | 1 | `sandbox not found` |
+| `sandbox delete`, unknown sandbox | **0** | `already deleted` |
+| Unknown flag or subcommand | 2 | clap usage error |
+| `sandbox exec --timeout 1 -- sleep 5` | 124 | (none) |
+
+`sandbox exec` passes the remote exit code through unchanged: remote 1, 2, 3, 127 gave
+CLI rc 1, 2, 3, 127; a remote `kill -9 $$` gave 137. Verified. CLI failures use 1 and 2,
+which collide with remote codes, so rc alone cannot tell "gateway broke" from "command
+exited 1". Exec runs commands through `/bin/bash` (stderr `/bin/bash: line 1: ...`), so a
+missing binary returns 127 from bash. Verified.
+
+## Isolation checks (sandbox from `spike2-baked` + `policy.yaml`)
+
+Verified via `openshell sandbox exec --no-tty ob2-man -- ...`:
+- `echo x > /corpus/bad.py` and `touch /corpus/new`: `Permission denied`.
+- `bash` `/dev/tcp/1.1.1.1/443` and `/dev/udp/1.1.1.1/53`: `connect: Permission denied`.
+- Runs as uid 1000 `ubuntu`. `/opt/oncebitten/checker` is root-owned, mode 755.
+
+Unverified: the enforcement mechanism (Landlock or seccomp is likely; I observed only
+the behavior); DNS through a resolver socket; behavior on Docker-less hosts.
+
+## Timings (warm image, local gateway)
+
+Measured by the driver's `timing` stderr lines (`Instant` around each `Command`).
+
+| Step | Observed |
 |---|---|
-| `sandbox create` | 512–712 ms |
-| `exec` grep bad.py | ~217 ms |
-| `exec` grep fixed.py | ~216 ms |
-| `sandbox delete` | ~5.1 s |
+| `sandbox create` | 493-516 ms (10 runs) |
+| `sandbox upload` checker (4.9 MB) | 46-50 ms (3 runs) |
+| `sandbox exec` checker, one file | 9-12 ms |
+| `sandbox delete` | 79-90 ms, once 5092 ms |
+| Whole baked run, 2 files | 621 ms (`time driver bad.py fixed.py`) |
 
-First create that pulled the image: ~2.9 s. The full Rust run took 639 ms, with delete included in that figure, so it reflects a different delete path from the table. Treat the table as the measured figures.
+Cost of each route to get the checker in:
+- **Baked**: one-off build of the static binary 39.7 s (`time docker run rust:1-alpine ... cargo build`,
+  includes image pull); `docker build` of the image with the binary 0.29-0.32 s. Per run: 0 ms extra;
+  create took the same time as the plain image. Verified.
+- **Upload**: about 48 ms per sandbox, and the executable bit survives. Verified.
 
-## Isolation: verified vs assumed
+Exec now takes ~10 ms, against ~217 ms in the first spike. I did not find the cause;
+the first spike went through `sh -c`, this one calls the binary directly. Unverified.
 
-Verified:
-- Default sandbox: TCP to example.com:443 and to a raw IP refused.
-- Positive control (policy allows only example.com:443 for bash): example.com:443 connects, 1.1.1.1:443 refused. The denials come from the policy.
-- No-network policy: TCP refused.
-- Read-only `/corpus`: `grep` works, writes fail.
-- Exec runs as uid 1000 (`ubuntu`).
-- Exit codes propagate: `sandbox exec` returns the remote exit code (0/1 observed).
-- Stdout and stderr are captured by `Command::output()`.
+## What step 4 of PLAN.md needs
 
-Assumed (not verified):
-- The filesystem policy is enforced by Landlock or a similar kernel mechanism. I observed the behavior only.
-- The network policy holds for DNS and for UDP.
+Step 4: "Replay: fires on bad, passes on fixed, passes on valid corpus."
 
-## Getting files in
-
-- `openshell sandbox upload` works. It needs `--no-git-ignore` when a parent `.git` exists (`/tmp/.git` here). It nests the source: uploading `corpus` to `/sandbox/corpus` created `/sandbox/corpus/corpus`.
-- Upload into a read-only path fails with `Permission denied`.
-- Baking files into a `--from` image is the route that works with a read-only repo. The repo is not mounted: the CLI copies the image's content.
-
-## Failure modes observed
-
-- Gateway down: `failed to connect to gateway 'openshell' at http://127.0.0.1:17670 ... transport error`. The program prints `CANNOT RUN` and exits 2.
-- Docker driver without `generate-certs` output: sandbox create refused for missing launch-scoped gateway authentication.
-- Sandbox name over 19 characters: `name exceeds maximum length`.
-- Sandbox unavailable without Docker: not tested.
-
-## Rust program
-
-`/tmp/spike-openshell/rust-spike/src/main.rs`, 43 lines (over the ~30-line target, because the failure paths are explicit). Exit codes: 0 PASS, 1 FAIL (rule did not behave as expected), 2 CANNOT RUN. The `OPENSHELL_BIN` env var overrides the binary path. Output on the last run: `bad.py exit=1 fixed.py exit=0`, `PASS`.
-
-## SDK as a git dependency
-
-- `crates/openshell-sdk` at rev `2e5589b2`: async Rust client for gateways. Deps include tonic, tokio, reqwest, rustls, oauth2, hyper, and tokio-tungstenite.
-- Workspace requires `rust-version = "1.94"`, edition 2024. Local rustc 1.97.1.
-- `openshell-core` build script uses a vendored `protoc` unless `PROTOC` is set. Not needed on this machine (`protoc` absent; build succeeded).
-- Verified: a throwaway crate with `openshell-sdk = { git = ..., package = "openshell-sdk" }` runs `cargo check` in 43 s cold, rc 0.
-- Not verified: API stability, crates.io availability, and any call against the gateway through the SDK.
-
-## Windows
-
-From `WINDOWS.md` on `main` (read via `gh api`):
-- Native Windows runs on the `windows` branch only, with Microsoft MXC ProcessContainer isolation (x64 and ARM64).
-- Docker, Podman, Kubernetes and MicroVM are not native Windows backends.
-- The `windows` branch is not production-qualified: outer-fence guarantees are asserted for compatibility, not verified; loopback exposure to host services; no foreground attach; no gateway restart recovery.
-- Native Windows needs `wxc-exec.exe` MXC 1.0.0 and `--probe` capability. Command-based create needs `allow_driver_config = true`.
-- Verified: release v0.1.8 has no Windows assets (only Linux and Apple Darwin tarballs and Linux .deb/.rpm/.snap).
-- Assumed: WSL 2 running the Linux CLI and gateway works. WINDOWS.md says WSL 2 is separate from native Windows, which implies it is a Linux install. Not tested.
-
-Fallback when no sandbox runtime exists (proposal, not tested): report `CANNOT RUN` as an explicit lint status, not a pass. Options are (a) run the check unsandboxed with a labelled status, (b) require WSL 2 with Docker, (c) skip the check in CI. Choose one before implementation.
-
-## Recommendation
-
-Use the CLI now: it works, needs no crate, and the exit codes are clear. Revisit the SDK once it has a crates.io release or a stable API, since a git dependency pins a commit and needs Rust 1.94 or later.
+1. A checker with a JSON contract: one line per file (or per run), `status` in
+   `fired|clean|error`, matches with rule id and line, exit 0 when it ran. Ship it as a
+   static musl binary, built in Alpine or with a musl cross toolchain, because the host
+   toolchain cannot build it here.
+2. The driver's classification rule above, with unit tests over captured `Output`
+   values for every scenario row. Never map rc 1 to "fired".
+3. A decision on corpus delivery. Read-only exists only for paths that the image
+   provides. `--upload` into a `read_only` path fails, and an uploaded corpus
+   stays writable (inferred: upload needs a `read_write` destination; untested). Options: build a per-replay image (cost unmeasured for real repos),
+   or upload to `/sandbox` and accept a writable copy. Open.
+4. Checker delivery: upload is cheap (~48 ms) and avoids an image per checker version;
+   baking costs nothing per run but needs an image rebuild per checker release.
+5. Always run `sandbox delete`: a failed `create --upload` leaves a `Ready` sandbox,
+   and delete returns 0 for unknown names, so the cleanup is safe to repeat.
+6. Sandbox names of 19 characters or fewer.
+7. A "valid corpus" fixture set (PLAN's third condition). Not tested in this spike.
+8. A label for runs without a gateway or Docker: a could-not-run status, never a pass.
+   Windows and WSL 2 remain untested; the first spike's Windows and SDK notes live in git history.
