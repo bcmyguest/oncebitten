@@ -7,6 +7,7 @@
 - Signals are free/deterministic (exit codes, test fail->pass, repeated failure, revert, correction lexicon). Model triage fires on those events mid-session (auto-mode-like side channel) and at pre-push/PR.
 - Triage model configurable `triage = "<host>:<agent>"` (claude:haiku, codex:<small>, pi:default, opencode:default) via headless CLI.
 - Replay sandbox: NVIDIA OpenShell (bad version must fire, fixed must pass, valid corpus must pass).
+- Windows: every replay requires WSL 2 plus OpenShell (no native Windows build as of v0.1.8). Without it, proposals ship unproven and inactive.
 - Proposals delivered as a commit in the current work's PR, or a PR to the rules repo.
 - Language: Rust single binary. ast-grep-core (crates.io 0.51.2, tree-sitter based) embedded for global cross-language rules; native linter (ruff/clippy/eslint) when the project already has one that fits and the rule is project-specific. OpenShell: openshell-sdk crate exists in NVIDIA/OpenShell but is not on crates.io -> shell out to `openshell` CLI first.
 - Registry layers, precedence project > rules repos (ordered) > shipped examples. Project = .oncebitten/rules/. Rules repos = user/team-owned git repos listed in config `[rules] sources = [...]`, cloned locally, synced across machines/teammates; one marked writable receives approved rules. Tool ships EXAMPLE rules only (inactive) plus an llms.txt so an LLM can help a user adopt/adapt them into their rules repo.
