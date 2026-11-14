@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use oncebitten::config::{
-    load, project_config_path, user_config_path_for, Inputs, Origin, Platform,
+    collect_vars, load, project_config_path, user_config_path_for, Inputs, Origin, Platform,
 };
 use tempfile::TempDir;
 
@@ -347,4 +347,126 @@ fn unix_user_path_uses_home_and_ignores_appdata() {
         "{}",
         path.display()
     );
+}
+
+#[test]
+fn project_rules_sources_replace_the_whole_user_list() {
+    let sandbox = Sandbox::new();
+    sandbox.write_user(
+        "[[rules.sources]]\nurl = \"https://example.com/a.git\"\n\
+         [[rules.sources]]\nurl = \"https://example.com/b.git\"\n",
+    );
+    sandbox.write_project("[[rules.sources]]\nurl = \"https://example.com/c.git\"\n");
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+
+    let urls: Vec<&str> = loaded
+        .config
+        .rules
+        .sources
+        .iter()
+        .map(|source| source.url.as_str())
+        .collect();
+    assert_eq!(urls, ["https://example.com/c.git"]);
+    assert_eq!(loaded.origins["rules.sources"], Origin::Project);
+}
+
+#[test]
+fn empty_env_variable_counts_as_unset() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project("[triage]\ndefault = \"pi:default\"\n");
+    let loaded = load(&sandbox.inputs(&[("ONCEBITTEN_TRIAGE_DEFAULT", "  ")])).unwrap();
+
+    assert_eq!(loaded.config.triage.default.agent, "default");
+    assert_eq!(loaded.origins["triage.default"], Origin::Project);
+}
+
+#[test]
+fn unknown_env_variable_loads_with_a_warning() {
+    let sandbox = Sandbox::new();
+    let loaded = load(&sandbox.inputs(&[("ONCEBITTEN_TRIAGE_DEFUALT", "pi:default")])).unwrap();
+
+    assert_eq!(loaded.config.triage.default.agent, "haiku");
+    assert_eq!(loaded.warnings.len(), 1, "{:?}", loaded.warnings);
+    assert!(
+        loaded.warnings[0].contains("ONCEBITTEN_TRIAGE_DEFUALT"),
+        "{:?}",
+        loaded.warnings
+    );
+}
+
+#[test]
+fn known_env_variables_produce_no_warning() {
+    let sandbox = Sandbox::new();
+    let loaded = load(&sandbox.inputs(&[("ONCEBITTEN_TRIAGE_DEFAULT", "pi:default")])).unwrap();
+
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn unix_empty_home_is_an_error() {
+    let message = error_chain(user_config_path_for(&vars(&[("HOME", "")]), Platform::Unix));
+
+    assert!(message.contains("HOME"), "{message}");
+}
+
+#[test]
+fn unix_relative_home_is_an_error() {
+    let message = error_chain(user_config_path_for(
+        &vars(&[("HOME", "home/b")]),
+        Platform::Unix,
+    ));
+
+    assert!(message.contains("HOME"), "{message}");
+}
+
+#[test]
+fn windows_empty_appdata_is_an_error() {
+    let message = error_chain(user_config_path_for(
+        &vars(&[("APPDATA", "")]),
+        Platform::Windows,
+    ));
+
+    assert!(message.contains("APPDATA"), "{message}");
+}
+
+#[test]
+fn windows_relative_appdata_is_an_error() {
+    let message = error_chain(user_config_path_for(
+        &vars(&[("APPDATA", r"AppData\Roaming")]),
+        Platform::Windows,
+    ));
+
+    assert!(message.contains("APPDATA"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_unrelated_variable_is_skipped() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let vars = collect_vars([
+        (OsString::from("HOME"), OsString::from("/home/b")),
+        (OsString::from("UNRELATED"), OsString::from_vec(vec![0xff])),
+    ])
+    .unwrap();
+
+    assert_eq!(vars.get("HOME").map(String::as_str), Some("/home/b"));
+    assert!(!vars.contains_key("UNRELATED"));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_relevant_variable_is_an_error() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    for name in ["HOME", "ONCEBITTEN_TRIAGE_DEFAULT"] {
+        let message = error_chain(collect_vars([(
+            OsString::from(name),
+            OsString::from_vec(vec![0xff]),
+        )]));
+
+        assert!(message.contains(name), "{message}");
+    }
 }

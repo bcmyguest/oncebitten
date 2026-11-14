@@ -87,3 +87,43 @@ fn path_prints_user_and_project_locations() {
     );
     assert!(out.contains("project  none"), "{out}");
 }
+
+#[cfg(unix)]
+#[test]
+fn show_survives_a_non_unicode_unrelated_variable() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = TempDir::new().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_oncebitten"))
+        .args(["config", "show"])
+        .current_dir(root.path())
+        .env_clear()
+        .env("HOME", root.path())
+        .env("UNRELATED", std::ffi::OsStr::from_bytes(&[0xff]))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn show_warns_about_an_unknown_variable_on_stderr() {
+    let root = TempDir::new().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_oncebitten"))
+        .args(["config", "show"])
+        .current_dir(root.path())
+        .env_clear()
+        .env("HOME", root.path())
+        .env("ONCEBITTEN_TRIAGE_DEFUALT", "pi:default")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("warning"), "{stderr}");
+    assert!(stderr.contains("ONCEBITTEN_TRIAGE_DEFUALT"), "{stderr}");
+}

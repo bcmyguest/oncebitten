@@ -20,12 +20,12 @@ Pre-push is fast feedback only (bypassable with --no-verify). The guarantee is a
 0. Scaffold: Rust crate, layered TOML config, docs skeleton modelled on smarter-compact.
 1. Spikes (written up, code thrown away): OpenShell CLI replay of one ast-grep rule from Rust; ast-grep-core with Python/Rust/JS grammars incl. Result::unwrap; one headless JSON call per host.
 2. Registry: per-rule TOML, `rules list|validate`, multi-repo resolution (repo-prefixed ids, explicit overrides, pinned revisions, writable routing, same result locally and in CI).
-3. Block engine: ast-grep + native-linter passthrough; inactive example rules as bad/fixed fixtures; llms.txt.
-4. Replay: fires on bad, passes on fixed, passes on valid corpus.
+3. Block engine: ast-grep + native-linter passthrough; inactive example rules as bad/fixed fixtures; llms.txt. Rust `unwrap` ships as clippy `unwrap_used` passthrough: ast-grep has no types and does not see inside macros.
+4. Replay: fires on bad, passes on fixed, passes on valid corpus. The real checker runs inside the sandbox and reports a structured result on stdout; exit codes alone never mean "fired". Separate tests for missing input, missing checker and sandbox/gateway failure, each classified as could-not-run.
 5. Gate: `gate pre-push|pr`, hook installer, required GitHub Action, PR-body checklist.
 6. Signal capture: hooks for Claude/Codex/Cursor/opencode/pi, no model calls.
 7. Evidence store + clustering: provenance, dedupe, independent occurrence counts, rejection memory.
-8. Triage via host contract: hooks disabled in triage call, JSON output, timeout, bounded context.
+8. Triage via host contract: hooks disabled in triage call, JSON output, timeout, bounded context. Run from an empty temp dir with `ONCEBITTEN_TRIAGE=1`, which every oncebitten hook checks and exits on. Prove hooks-off with sentinel hooks in every settings scope; refuse a host that fails the proof. Streaming hosts (opencode) need parse-then-kill.
 9. Proposal lifecycle: same-PR commit or rules-repo PR; stale proofs re-replay.
 10. Steer + checklist modes and their proofs; routing for lessons git cannot see.
 11. Lifecycle: exceptions (reason + expiry), retirement, rollback, `oncebitten doctor`.

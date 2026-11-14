@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,8 @@ use serde::{Deserialize, Serialize};
 const PROJECT_DIR: &str = ".oncebitten";
 const CONFIG_FILE: &str = "config.toml";
 const GIT_MARKER: &str = ".git";
+const ENV_PREFIX: &str = "ONCEBITTEN_";
+const PATH_VARS: &[&str] = &["HOME", "APPDATA", "XDG_CONFIG_HOME"];
 const ENV_VARS: &[(&str, &str, bool)] = &[
     ("ONCEBITTEN_TRIAGE_DEFAULT", "triage.default", false),
     ("ONCEBITTEN_TRIAGE_CLAUDE", "triage.claude", false),
@@ -238,9 +241,30 @@ impl Inputs {
     pub fn from_process() -> Result<Self> {
         Ok(Inputs {
             cwd: std::env::current_dir().context("reading the working directory")?,
-            vars: std::env::vars().collect(),
+            vars: collect_vars(std::env::vars_os())?,
         })
     }
+}
+
+/// Keeps Unicode variables. Skips non-Unicode ones unless oncebitten reads them,
+/// in which case loading fails with the variable's name.
+pub fn collect_vars(
+    vars: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for (name, value) in vars {
+        let lossy = name.to_string_lossy().into_owned();
+        match (name.into_string(), value.into_string()) {
+            (Ok(name), Ok(value)) => {
+                out.insert(name, value);
+            }
+            _ if lossy.starts_with(ENV_PREFIX) || PATH_VARS.contains(&lossy.as_str()) => {
+                bail!("environment variable {lossy} is not valid Unicode");
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,6 +277,7 @@ pub struct ConfigPaths {
 pub struct Loaded {
     pub config: Config,
     pub origins: BTreeMap<String, Origin>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -301,11 +326,13 @@ pub fn user_config_path_for(
         None => match platform {
             Platform::Windows => PathBuf::from(
                 vars.get("APPDATA")
-                    .context("neither XDG_CONFIG_HOME nor APPDATA is set")?,
+                    .filter(|dir| platform.is_absolute(dir))
+                    .context("neither XDG_CONFIG_HOME nor APPDATA is an absolute path")?,
             ),
             Platform::Unix => PathBuf::from(
                 vars.get("HOME")
-                    .context("neither XDG_CONFIG_HOME nor HOME is set")?,
+                    .filter(|dir| platform.is_absolute(dir))
+                    .context("neither XDG_CONFIG_HOME nor HOME is an absolute path")?,
             )
             .join(".config"),
         },
@@ -351,6 +378,9 @@ pub fn load(inputs: &Inputs) -> Result<Loaded> {
     let env = env_table(&inputs.vars);
     check(&env).context("invalid ONCEBITTEN_* environment variables")?;
     merge(&mut merged, &env, Origin::Env);
+    let warnings = unknown_env_vars(&inputs.vars)
+        .map(|name| format!("unknown environment variable {name} is ignored"))
+        .collect();
 
     let mut table = toml::Table::new();
     let mut origins = BTreeMap::new();
@@ -362,7 +392,11 @@ pub fn load(inputs: &Inputs) -> Result<Loaded> {
         .try_into()
         .context("merged configuration is invalid")?;
     config.validate()?;
-    Ok(Loaded { config, origins })
+    Ok(Loaded {
+        config,
+        origins,
+        warnings,
+    })
 }
 
 pub fn render(loaded: &Loaded, with_origin: bool) -> Result<String> {
@@ -432,6 +466,13 @@ fn env_table(vars: &BTreeMap<String, String>) -> toml::Table {
         set_leaf(&mut table, key, value);
     }
     table
+}
+
+fn unknown_env_vars(vars: &BTreeMap<String, String>) -> impl Iterator<Item = &str> {
+    vars.keys()
+        .map(String::as_str)
+        .filter(|name| name.starts_with(ENV_PREFIX))
+        .filter(|name| !ENV_VARS.iter().any(|(known, _, _)| known == name))
 }
 
 fn merge(

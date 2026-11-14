@@ -46,6 +46,9 @@ fn run_config(action: ConfigAction) -> Result<()> {
     match action {
         ConfigAction::Show { origin } => {
             let loaded = config::load(&inputs)?;
+            for warning in &loaded.warnings {
+                eprintln!("warning: {warning}");
+            }
             print!("{}", config::render(&loaded, origin)?);
         }
         ConfigAction::Path => {

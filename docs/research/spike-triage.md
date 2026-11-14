@@ -21,7 +21,7 @@ Hook verification method: stream events (Claude `--include-hook-events`) and sam
 - Command (verified, exit 0, 3.4 to 4.0 s wall):
   `claude -p "$P" --output-format json --setting-sources project,local --disable-slash-commands --tools "" --json-schema "$(cat schema.json)" --model haiku --no-session-persistence </dev/null`
 - Schema: verified. Result entry carries `structured_output`, which matched the schema. Claude enforces it via an internal `StructuredOutput` tool.
-- Hooks off: verified. Default run with `--include-hook-events`: 10 `hook_started` events (SessionStart x8, UserPromptSubmit x8, Stop x2, PostToolUse:Skill x2 across the stream). Same prompt with `--setting-sources project,local`: 0 hook events. `--bare` also skips hooks but reads no keychain, so auth risk; not tested.
+- Hooks off: partly verified, user-level hooks only. `--setting-sources project,local` still loads project hooks, and the test directory had none. Default run with `--include-hook-events`: 10 `hook_started` events (SessionStart x8, UserPromptSubmit x8, Stop x2, PostToolUse:Skill x2 across the stream). Same prompt with `--setting-sources project,local`: 0 hook events. `--bare` also skips hooks but reads no keychain, so auth risk; not tested.
 - Read-only: `--tools ""` verified. The only tool call was `StructuredOutput`; `permission_denials` empty.
 - Model: `--model haiku` verified (`modelUsage` shows haiku). Omit the flag for host default; not separately tested.
 - Latency: 3.4 s and 4.0 s wall with hooks off; 7.9 s with hooks on. Cost about $0.001 per call.
@@ -30,7 +30,8 @@ Hook verification method: stream events (Claude `--include-hook-events`) and sam
 ## codex (0.167.2)
 
 - Command (verified, exit 0, about 3.7 s wall):
-  `codex exec --skip-git-repo-check --json --ephemeral -s read-only -m gpt-6.1-terra --output-schema schema.json -o out.json "$P" </dev/null`
+  `codex exec --skip-git-repo-check --json --ephemeral --disable hooks -s read-only -m gpt-6.1-terra --output-schema schema.json -o out.json "$P" </dev/null`
+  The verified run omitted `--disable hooks`; the flag was verified on its own (below). The combined command was not rerun.
 - Schema: verified. `-o` file matched the schema. `--json` emits JSONL events on stdout; the answer is in `-o`.
 - Hooks off: verified. `--disable hooks` (feature flag, per invocation). Sampling found 3 `hook-runner.mjs codex` processes in the baseline (sessionStart, prompt, stop) and 0 with `--disable hooks`. Baseline also warns about hooks loaded from both `hooks.json` and `config.toml`.
 - Read-only: `-s read-only` accepted; no behavioural test.
