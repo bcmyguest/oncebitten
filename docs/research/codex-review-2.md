@@ -1,0 +1,12 @@
+1. Add feasibility spikes before increment 2: Rust→OpenShell CLI replay, ast-grep-core rule execution, and one real headless invocation per supported host.
+2. Define the gate guarantee in increment 3: pre-push is bypassable and CI runs after push; specify required server checks and how review waits for validation.
+3. Separate replay eligibility from activation: require approval of the exact artifact version and deployment scope before enforcement; prevent same-PR candidates from blocking their own approval.
+4. Move minimal OpenShell replay before gate activation; specify provisioning, supported platforms, filesystem/network isolation, timeouts, cleanup, and unavailable-sandbox behavior.
+5. Expand increment 1 with multi-repo reconciliation: namespaced IDs, duplicate versus contradictory rules, explicit overrides, pinned revisions, writable-source routing, and deterministic local/CI resolution.
+6. Add an evidence-store and clustering increment before triage: provenance, independent occurrence counting, correlated-event deduplication, root-cause hypotheses, and rejection feedback.
+7. Make increment 5 implement a host capability contract: distinguish execution machine, agent CLI, and model; verify authentication, structured output, cancellation, recursion prevention, and context disclosure.
+8. Specify ast-grep embedding dependencies beyond core: language grammars, declarative rule loading, matching semantics, and packaging; prove semantic examples such as `Result::unwrap` fit the chosen engine.
+9. Define gate inputs and failures: pushed commit ranges, staged versus committed content, native-linter availability/versioning, generated-file exclusions, and infrastructure errors versus violations.
+10. Add mode-specific proof and capability validation: explain how steer/checklist rules satisfy replay and how action-only lessons become enforceable when git cannot observe the original action.
+11. Expand increment 7 with proposal lifecycle handling: deduplication, stale proofs after edits, rejection, delivery retries, and rules-repo approval/sync before dependent project enforcement.
+12. Add an operational lifecycle increment covering reasoned exceptions with expiry, rollback, rule retirement, valid-corpus maintenance, and installation/enforcement verification across hosts.
