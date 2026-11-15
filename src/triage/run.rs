@@ -77,13 +77,11 @@ impl Runner for ProcessRunner {
                 break;
             }
             if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 return Err(RunError::Timeout);
             }
             if inv.streaming && answered(inv, &snapshot(&stdout)) {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 break;
             }
             thread::sleep(POLL);
@@ -96,6 +94,21 @@ impl Runner for ProcessRunner {
                 .and_then(|path| fs::read_to_string(path).ok()),
         })
     }
+}
+
+/// Kills the host and its descendants. On Windows an npm `.cmd` wrapper runs
+/// the real host as a child, and killing only the wrapper orphans it.
+fn kill_tree(child: &mut Child) {
+    if cfg!(windows) {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn spawn(inv: &Invocation, workdir: &Path) -> Result<Child, RunError> {
