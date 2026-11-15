@@ -24,7 +24,7 @@ use oncebitten::rule::Check;
 use oncebitten::rule::Rule;
 use oncebitten::rules::{self, Failure};
 use oncebitten::steer;
-use oncebitten::store::{self, Store};
+use oncebitten::store::{self, Decision, Store};
 use oncebitten::triage;
 use oncebitten::triage::verdict::Answer;
 
@@ -541,13 +541,30 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
         println!("proof: {note}");
     }
     println!("verdict: {}", row.verdict);
-    let occurrences: Vec<String> = row.occurrences.iter().map(i64::to_string).collect();
     println!(
         "cluster: {}  (oncebitten evidence show {})",
         row.cluster, row.cluster
     );
-    println!("occurrences: {}", occurrences.join(", "));
+    match store.decision(id)? {
+        Some(decision) => println!("{}", decided_line(&decision)),
+        None => {
+            let occurrences: Vec<String> = row.occurrences.iter().map(i64::to_string).collect();
+            println!("occurrences: {}", occurrences.join(", "));
+        }
+    }
     Ok(())
+}
+
+/// The counts a decision kept after deleting the cluster's events.
+fn decided_line(decision: &Decision) -> String {
+    let seen = |ts: Option<i64>| ts.map_or("-".to_owned(), |ts| ts.to_string());
+    format!(
+        "occurrences: {} in {} sessions, first seen {}, last seen {} (events deleted)",
+        decision.occurrences,
+        decision.sessions,
+        seen(decision.first_seen),
+        seen(decision.last_seen)
+    )
 }
 
 /// The proposals notice for the gate. It never fails the gate and never
@@ -584,6 +601,15 @@ fn run_evidence(action: EvidenceAction) -> Result<()> {
             println!("repos: {}", cluster.repos().join(", "));
             if let Some(rejection) = &cluster.rejection {
                 println!("rejected: {}", rejection.reason);
+            }
+            if let Some(decision) = &cluster.decision {
+                println!(
+                    "{} {}: rule {}",
+                    decision.outcome.as_str(),
+                    decision.ts,
+                    decision.rule.as_deref().unwrap_or("-")
+                );
+                println!("{}", decided_line(decision));
             }
             for occurrence in &cluster.occurrences {
                 let event = &occurrence.event;

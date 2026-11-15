@@ -8,8 +8,8 @@ use crate::proof::{self, Replayed, Validity};
 use crate::replay::Verdict;
 use crate::rule::{self, Rule, Status};
 use crate::rules::{self, Failure};
-use crate::store::Store;
 pub use crate::store::{Kind, ProposalRow, State};
+use crate::store::{Outcome, Store};
 use crate::triage::verdict::Answer;
 
 pub const LIST_HINT: &str = "oncebitten proposals list";
@@ -228,11 +228,21 @@ pub fn accept(store: &Store, id: &str) -> Result<PathBuf> {
         bail!("activating `{}` did not keep its proof valid", rule.id);
     }
     store.set_proposal_state(id, State::Accepted)?;
+    evidence::decide(
+        store,
+        id,
+        Outcome::Accepted,
+        Some(&rule.id),
+        None,
+        now_millis()?,
+        row.occurrences.len(),
+    )?;
     Ok(dir)
 }
 
 /// Rejects a queued result. The cluster is rejected in the evidence store, so
 /// triage does not propose it again, and a still-proposed rule is removed.
+/// The cluster's events are deleted; its decision record keeps the counts.
 pub fn reject(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
     if reason.trim().is_empty() {
         bail!("a rejection needs a non-empty reason");
@@ -246,7 +256,16 @@ pub fn reject(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
         }
     }
     store.reject(id, ts, reason.trim())?;
-    store.set_proposal_state(id, State::Rejected)
+    store.set_proposal_state(id, State::Rejected)?;
+    evidence::decide(
+        store,
+        id,
+        Outcome::Rejected,
+        row.rule.as_deref(),
+        Some(reason.trim()),
+        ts,
+        row.occurrences.len(),
+    )
 }
 
 /// The non-blocking line the gate prints when proposals wait in `repo`.
@@ -288,6 +307,13 @@ fn load_rules(inputs: &Inputs) -> Result<Vec<crate::registry::Resolved>> {
             .collect::<Vec<_>>()
             .join("; ")),
     })
+}
+
+fn now_millis() -> Result<i64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before the unix epoch")?
+        .as_millis() as i64)
 }
 
 /// Whether the replay left a valid proof, and why not when it did not.

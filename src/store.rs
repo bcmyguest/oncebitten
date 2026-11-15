@@ -69,12 +69,38 @@ CREATE TABLE IF NOT EXISTS triage_locks (
     cluster TEXT PRIMARY KEY,
     ts INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS decisions (
+    cluster TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    rule TEXT,
+    reason TEXT,
+    occurrences INTEGER NOT NULL,
+    sessions INTEGER NOT NULL,
+    first_seen INTEGER,
+    last_seen INTEGER,
+    class TEXT,
+    source TEXT,
+    tool TEXT,
+    pattern TEXT
+);
 ";
 /// Columns `proposals deliver` fills. Databases created before delivery lack
 /// them; `add_delivery_columns` adds each missing one on open.
 const DELIVERY_COLUMNS: [&str; 3] = ["target", "commit_sha", "pr_url"];
+/// Indexes for expiry. Created by `Store::expire`, never by `open`, so the
+/// gate's open builds no index on a large store.
+const EXPIRY_INDEXES: &str = "
+CREATE INDEX IF NOT EXISTS events_ts ON events (ts);
+CREATE INDEX IF NOT EXISTS signals_event ON signals (event_id);
+";
+/// Event ids a waiting proposal names; expiry keeps them until the decision.
+const WAITING_EVENTS: &str = "SELECT j.value FROM proposals p, json_each(p.occurrences) j \
+     WHERE p.state = 'waiting'";
 const PROPOSAL_COLUMNS: &str =
     "cluster, ts, repo, kind, state, rule, dir, proven, note, verdict, rationale, occurrences";
+const DECISION_COLUMNS: &str = "cluster, ts, outcome, rule, reason, occurrences, sessions, \
+     first_seen, last_seen, class, source, tool, pattern";
 
 /// Provenance the host payload supplies beside the event itself.
 /// `tool_use_id` is the host's id for one tool call; redelivery repeats it.
@@ -170,6 +196,50 @@ impl State {
             _ => None,
         }
     }
+}
+
+/// How a proposal was decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Accepted,
+    Rejected,
+}
+
+impl Outcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Outcome::Accepted => "accepted",
+            Outcome::Rejected => "rejected",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Outcome> {
+        match text {
+            "accepted" => Some(Outcome::Accepted),
+            "rejected" => Some(Outcome::Rejected),
+            _ => None,
+        }
+    }
+}
+
+/// What stays of a cluster once a decision deletes its events: the counts,
+/// the time span and enough of the cluster key to list it. `class`, `source`
+/// and `pattern` are `None` when the events were gone before the decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Decision {
+    pub cluster: String,
+    pub ts: i64,
+    pub outcome: Outcome,
+    pub rule: Option<String>,
+    pub reason: Option<String>,
+    pub occurrences: i64,
+    pub sessions: i64,
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+    pub class: Option<String>,
+    pub source: Option<String>,
+    pub tool: Option<String>,
+    pub pattern: Option<String>,
 }
 
 /// One queued triage result. `cluster` is the evidence cluster that produced
@@ -340,6 +410,93 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Records `decision` and deletes the evidence behind it. `occurrences`
+    /// pairs each event id with the signal kinds the cluster holds on it;
+    /// those signals go, and so does any event left without a signal. A
+    /// cluster decided again adds the new counts to its record.
+    pub fn decide(&self, decision: &Decision, occurrences: &[(i64, Vec<String>)]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for (event, kinds) in occurrences {
+            for kind in kinds {
+                tx.execute(
+                    "DELETE FROM signals WHERE event_id = ?1 AND kind = ?2",
+                    params![event, kind],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM events WHERE id = ?1 \
+                 AND NOT EXISTS (SELECT 1 FROM signals WHERE event_id = ?1)",
+                [event],
+            )?;
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO decisions ({DECISION_COLUMNS}) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+                 ON CONFLICT (cluster) DO UPDATE SET ts = excluded.ts, \
+                 outcome = excluded.outcome, rule = coalesce(excluded.rule, rule), \
+                 reason = excluded.reason, occurrences = occurrences + excluded.occurrences, \
+                 sessions = sessions + excluded.sessions, \
+                 first_seen = coalesce(min(first_seen, excluded.first_seen), first_seen, \
+                 excluded.first_seen), \
+                 last_seen = coalesce(max(last_seen, excluded.last_seen), last_seen, \
+                 excluded.last_seen), \
+                 class = coalesce(class, excluded.class), \
+                 source = coalesce(source, excluded.source), \
+                 tool = coalesce(tool, excluded.tool), \
+                 pattern = coalesce(pattern, excluded.pattern)"
+            ),
+            params![
+                decision.cluster,
+                decision.ts,
+                decision.outcome.as_str(),
+                decision.rule,
+                decision.reason,
+                decision.occurrences,
+                decision.sessions,
+                decision.first_seen,
+                decision.last_seen,
+                decision.class,
+                decision.source,
+                decision.tool,
+                decision.pattern,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn decision(&self, cluster: &str) -> Result<Option<Decision>> {
+        Ok(self
+            .query_decisions("WHERE cluster = ?1", &[&cluster])?
+            .into_iter()
+            .next())
+    }
+
+    /// Every decision, by cluster id.
+    pub fn decisions(&self) -> Result<Vec<Decision>> {
+        self.query_decisions("", &[])
+    }
+
+    /// Deletes events captured before `before` (ms) and their signals, except
+    /// those a waiting proposal names. Returns the number of events deleted.
+    pub fn expire(&self, before: i64) -> Result<usize> {
+        self.conn.execute_batch(EXPIRY_INDEXES)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let expired =
+            format!("SELECT id FROM events WHERE ts < ?1 AND id NOT IN ({WAITING_EVENTS})");
+        tx.execute(
+            &format!("DELETE FROM signals WHERE event_id IN ({expired})"),
+            [before],
+        )?;
+        let deleted = tx.execute(
+            &format!("DELETE FROM events WHERE id IN ({expired})"),
+            [before],
+        )?;
+        tx.commit()?;
+        Ok(deleted)
+    }
+
     /// Queues a triage result. Returns false when the cluster already has one.
     pub fn insert_proposal(&self, row: &ProposalRow) -> Result<bool> {
         let inserted = self.conn.execute(
@@ -439,6 +596,48 @@ impl Store {
         self.conn
             .execute("DELETE FROM triage_locks WHERE cluster = ?1", [cluster])?;
         Ok(())
+    }
+
+    fn query_decisions(
+        &self,
+        filter: &str,
+        args: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<Decision>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {DECISION_COLUMNS} FROM decisions {filter} ORDER BY cluster"
+        ))?;
+        let rows = stmt.query_map(args, |row| {
+            Ok((
+                row.get::<_, String>(2)?,
+                Decision {
+                    cluster: row.get(0)?,
+                    ts: row.get(1)?,
+                    outcome: Outcome::Accepted,
+                    rule: row.get(3)?,
+                    reason: row.get(4)?,
+                    occurrences: row.get(5)?,
+                    sessions: row.get(6)?,
+                    first_seen: row.get(7)?,
+                    last_seen: row.get(8)?,
+                    class: row.get(9)?,
+                    source: row.get(10)?,
+                    tool: row.get(11)?,
+                    pattern: row.get(12)?,
+                },
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (outcome, mut decision) = row?;
+            decision.outcome = Outcome::parse(&outcome).with_context(|| {
+                format!(
+                    "decision `{}` has unknown outcome `{outcome}`",
+                    decision.cluster
+                )
+            })?;
+            out.push(decision);
+        }
+        Ok(out)
     }
 
     fn query_proposals(
