@@ -8,7 +8,9 @@ use crate::steer::SteerEvent;
 use crate::store::NewEvent;
 
 const GIT_MARKER: &str = ".git";
-const COMMAND_TOOLS: &[&str] = &["bash", "shell"];
+/// Lowercase names of the shell tools: `Bash` (Claude Code, Codex), `Shell`
+/// (Cursor), `shell` (opencode), `bash` (pi, Copilot).
+pub const COMMAND_TOOLS: &[&str] = &["bash", "shell"];
 const PATH_TOOLS: &[&str] = &["edit", "write", "multiedit", "read"];
 const SESSION_KEYS: &[&str] = &["session_id", "sessionId", "sessionID", "conversation_id"];
 const EVENT_KEYS: &[&str] = &["hook_event_name", "hookEventName"];
@@ -321,10 +323,14 @@ fn cwd(value: &Value) -> Option<String> {
     })
 }
 
+pub fn is_command_tool(tool: &str) -> bool {
+    COMMAND_TOOLS.contains(&tool.to_ascii_lowercase().as_str())
+}
+
 fn tool_summary(value: &Value, tool: &str) -> String {
     let input = &tool_input(value);
     let lower = tool.to_ascii_lowercase();
-    let found = if COMMAND_TOOLS.contains(&lower.as_str()) {
+    let found = if is_command_tool(tool) {
         input["command"].as_str()
     } else if PATH_TOOLS.contains(&lower.as_str()) {
         PATH_KEYS.iter().find_map(|key| input[*key].as_str())

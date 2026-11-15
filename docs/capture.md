@@ -17,7 +17,7 @@
 | `repeat-failure` | A second failure with the same tool and normalized command in one session. Normalization collapses whitespace and replaces digits, paths and hex with `<n>`, `<path>` and `<hex>`. |
 | `test-fail-then-pass` | A test runner (`cargo test`, `pytest`, `npm test`, `vitest`, `jest`, `go test`) passes after the session's previous test run failed. |
 | `user-correction` | A prompt contains a phrase from the correction lexicon. Its detail lists the matched phrases, comma-separated and lowercased. |
-| `revert` | A Bash `git revert`, or `git checkout --` / `git restore` of a file the session edited. |
+| `revert` | A shell-tool `git revert` (Bash, Shell, shell, bash), or `git checkout --` / `git restore` of a file the session edited. Edited and command paths match when one is a path-component suffix of the other. |
 
 ### Correction lexicon
 
