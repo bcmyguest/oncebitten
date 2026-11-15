@@ -14,6 +14,14 @@ oncebitten stats [--since <days>] [--json]
 With no evidence store yet, it prints `no data: ...` and exits 0. It never creates
 the store (`oncebitten doctor` reports the same path).
 
+When the store's schema differs from this build's, stats prints
+`store version differs from this build; stats left the store unchanged` (to
+stderr with `--json`) and exits 0. It opens a current store read-only, so it
+never migrates one.
+
+A waiting draft whose cluster has no evidence left (no signal rows) counts under
+the `unknown` row. It is not dropped.
+
 ## Stages
 
 Each mistake class (`failure`, `test-fail-then-pass`, `revert`, `user-correction`)
@@ -26,7 +34,7 @@ gets one block:
 | triage runs | n/a | not recorded (see below) |
 | rule-shaped drafts | triage answers that drafted a rule | proposals queue |
 | proven | drafts whose replay proof stands | proposals queue |
-| accepted | drafts accepted | decisions record |
+| accepted | drafts accepted | proposals queue |
 | rejected | drafts rejected | proposals queue |
 | waiting | drafts not yet decided | proposals queue |
 

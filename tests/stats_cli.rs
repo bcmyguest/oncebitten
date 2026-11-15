@@ -171,3 +171,51 @@ fn since_leaves_out_records_older_than_the_window() {
     assert_eq!(failure["signals_captured"], 0, "{report}");
     assert_eq!(failure["drafts"], 0, "{report}");
 }
+
+/// Writes a store file at `version` with one table, as an older or newer build
+/// would leave it. Returns the file bytes.
+fn write_store_at_version(repo: &Repo, version: i64) -> Vec<u8> {
+    std::fs::create_dir_all(db(repo).parent().unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(db(repo)).unwrap();
+    conn.execute_batch("CREATE TABLE marker (x INTEGER);")
+        .unwrap();
+    conn.pragma_update(None, "user_version", version).unwrap();
+    drop(conn);
+    std::fs::read(db(repo)).unwrap()
+}
+
+#[test]
+fn stats_leaves_a_store_at_another_schema_unchanged() {
+    for version in [3, 99] {
+        let repo = committed_repo();
+        let before = write_store_at_version(&repo, version);
+        let output = repo.run(&["stats"], &[]);
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        assert!(
+            stdout(&output).contains("store version differs"),
+            "{}",
+            both(&output)
+        );
+        assert_eq!(
+            std::fs::read(db(&repo)).unwrap(),
+            before,
+            "stats changed a store at schema {version}"
+        );
+    }
+}
+
+#[test]
+fn a_waiting_draft_without_evidence_counts_as_unknown() {
+    let repo = committed_repo();
+    propose(&repo);
+    // Expiry spares the events of a waiting draft, so drop them directly.
+    let conn = rusqlite::Connection::open(db(&repo)).unwrap();
+    conn.execute_batch("DELETE FROM signals; DELETE FROM events;")
+        .unwrap();
+    drop(conn);
+    let report = stats_json(&repo, &[]);
+    let unknown = row(&report, "unknown");
+    assert_eq!(unknown["drafts"], 1, "{report}");
+    assert_eq!(unknown["waiting"], 1, "{report}");
+    assert_eq!(row(&report, "failure")["drafts"], 0, "{report}");
+}

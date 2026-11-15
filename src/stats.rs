@@ -10,12 +10,17 @@ use crate::store::{Decision, Kind, Rejection, SignalRow, State, Store};
 pub const NO_DATA: &str = "no data: no evidence store yet; the first capture creates it";
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const NOT_RECORDED: &str = "n/a";
-/// Funnel rows: a mistake class and the signal kinds that feed it.
-const ROWS: [(&str, &[&str]); 4] = [
+const UNKNOWN_CLASS: &str = "unknown";
+pub const VERSION_DIFFERS: &str =
+    "store version differs from this build; stats left the store unchanged";
+/// Funnel rows: a mistake class and the signal kinds that feed it. Drafts whose
+/// cluster no longer has evidence (expired by TTL) fall under `UNKNOWN_CLASS`.
+const ROWS: [(&str, &[&str]); 5] = [
     (CLASS_FAILURE, &[TOOL_FAILURE, REPEAT_FAILURE]),
     (TEST_FAIL_THEN_PASS, &[TEST_FAIL_THEN_PASS]),
     (REVERT, &[REVERT]),
     (USER_CORRECTION, &[USER_CORRECTION]),
+    (UNKNOWN_CLASS, &[]),
 ];
 
 /// One funnel row. `triage_runs` is `None`: the store records a queue row only
@@ -118,6 +123,7 @@ pub fn report(store: &Store, since_days: Option<u32>, now: i64) -> Result<Report
         let Some(index) = classes
             .get(&proposal.cluster)
             .and_then(|class| row_index(class))
+            .or_else(|| row_index(UNKNOWN_CLASS))
         else {
             continue;
         };

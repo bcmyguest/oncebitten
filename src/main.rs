@@ -725,7 +725,18 @@ fn run_stats(since: Option<u32>, json: bool) -> Result<()> {
             return Ok(());
         }
         store::Probe::Missing => stats::empty(since),
-        _ => stats::report(&open_store(&inputs)?, since, now_millis()?)?,
+        store::Probe::Current => {
+            let store = Store::open_read_only(&path)?;
+            stats::report(&store, since, now_millis()?)?
+        }
+        store::Probe::Older(_) | store::Probe::Newer(_) if json => {
+            eprintln!("{}", stats::VERSION_DIFFERS);
+            return Ok(());
+        }
+        store::Probe::Older(_) | store::Probe::Newer(_) => {
+            println!("{}", stats::VERSION_DIFFERS);
+            return Ok(());
+        }
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
