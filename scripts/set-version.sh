@@ -24,3 +24,4 @@ sed -i -E 's/("oncebitten-[a-z0-9]+-[a-z0-9]+": ")[^"]*"/\1'"$version"'"/' packa
 sed -i -E 's/^version=.*/version='"$version"'/' packaging/*/bin/oncebitten
 sed -i -E 's#(/oncebitten/)v[0-9.]+(/install\.sh)#\1v'"$version"'\2#; s/(ONCEBITTEN_VERSION=)[0-9.]+ /\1'"$version"' /' templates/*.yml
 sed -i -E 's/(oncebitten==)[0-9.]+/\1'"$version"'/' .pre-commit-hooks.yaml
+sed -i -E 's/(oncebitten==)[0-9.]+/\1'"$version"'/; s/(oncebitten@)[0-9.]+/\1'"$version"'/; s/("oncebitten": ")[0-9.]+"/\1'"$version"'"/; s/(rev: v)[0-9.]+/\1'"$version"'/' README.md docs/install.md

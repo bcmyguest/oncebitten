@@ -10,25 +10,86 @@ No route needs a Rust toolchain. Every release on GitHub carries `oncebitten-<ta
 
 ## Agent plugins
 
-The repository is a plugin marketplace for four hosts and a pi package:
+The repository is a plugin marketplace for four hosts and a pi package. Each host below has its own steps.
 
-| Host | Marketplace file | Plugin | Install |
-| --- | --- | --- | --- |
-| Claude Code | `.claude-plugin/marketplace.json` | `packaging/claude` | `/plugin marketplace add bcmyguest/oncebitten`, `/plugin install oncebitten@oncebitten` |
-| Codex | `.agents/plugins/marketplace.json` | `packaging/codex` | `codex plugin marketplace add bcmyguest/oncebitten`, then `/plugins` |
-| Copilot CLI | `.github/plugin/marketplace.json` | `packaging/copilot` | `copilot plugin marketplace add bcmyguest/oncebitten`, `copilot plugin install oncebitten@oncebitten` |
-| Cursor | `.cursor-plugin/marketplace.json` | `packaging/cursor` | Team marketplace import of the repository URL |
-| pi | `package.json` (`pi.extensions`) | `packaging/pi/package.js` | `pi install git:github.com/bcmyguest/oncebitten` |
+### Claude Code
+
+```
+/plugin marketplace add bcmyguest/oncebitten
+/plugin install oncebitten@oncebitten
+```
+
+Marketplace file `.claude-plugin/marketplace.json`, plugin `packaging/claude`. In Claude Code the plugin's `bin/` is on the agent's Bash `PATH`, so the agent can run `oncebitten evidence list` and the other commands.
+
+### Codex
+
+```sh
+codex plugin marketplace add bcmyguest/oncebitten
+```
+
+Then install `oncebitten` from `/plugins`. Marketplace file `.agents/plugins/marketplace.json`, plugin `packaging/codex`.
+
+### Copilot CLI
+
+```sh
+copilot plugin marketplace add bcmyguest/oncebitten
+copilot plugin install oncebitten@oncebitten
+```
+
+Marketplace file `.github/plugin/marketplace.json`, plugin `packaging/copilot`.
+
+### Cursor
+
+Import `https://github.com/bcmyguest/oncebitten` as a team marketplace (Dashboard, Settings, Plugins). Marketplace file `.cursor-plugin/marketplace.json`, plugin `packaging/cursor`.
+
+### pi
+
+```sh
+pi install git:github.com/bcmyguest/oncebitten
+```
+
+`package.json` (`pi.extensions`) loads `packaging/pi/package.js`. pi has no session-start hook: its first event starts the download in the background and is dropped.
+
+### opencode
+
+opencode loads plugins from npm or local files only, and oncebitten is not an opencode plugin: install the binary from [Command line](#command-line), then:
+
+```sh
+oncebitten hooks install --host opencode --scope user
+```
+
+### How the plugins work
 
 - Each plugin ships the same `bin/oncebitten` launcher and `scripts/install.sh`. The launcher runs the release binary that matches its version from `<data>/bin/<version>/`, where `<data>` is `$CLAUDE_PLUGIN_DATA`, else `$PLUGIN_DATA` (Codex), else `$XDG_DATA_HOME/oncebitten` or `~/.local/share/oncebitten`. A missing binary is installed with SHA-256 verification.
-- A `SessionStart` hook (cursor `sessionStart`) runs the launcher once with `--version`, so the download happens before any capture. pi has no such hook: its first event starts the download in the background and is dropped.
-- In Claude Code the plugin's `bin/` is on the agent's Bash `PATH`, so the agent can run `oncebitten evidence list` and the other commands.
+- A `SessionStart` hook (cursor `sessionStart`) runs the launcher once with `--version`, so the download happens before any capture.
 - The launcher is a POSIX `sh` script. On Windows it needs Git Bash (or another `sh` on `PATH`); otherwise use `install.ps1` and `oncebitten hooks install`.
-- opencode loads plugins from npm or local files only, and oncebitten is not on npm: install the binary and run `oncebitten hooks install --host opencode --scope user`.
 - Verified here: `claude plugin validate` on the marketplace and plugin; the launcher and the pi package against a local release with the real Linux binary. The Codex, Copilot and Cursor marketplace formats come from their CLIs and docs, not from a live install.
 - Do not also run `oncebitten hooks install` for a host whose plugin is installed: each event would then be captured twice, and the store drops a duplicate only when both captures land in the same millisecond. Plugins and the command line share one events database.
 
+
 ## Command line
+
+One route per tool. Each installs `oncebitten` and `oncebitten-checker`.
+
+### Python (PyPI)
+
+```sh
+uvx oncebitten --version        # run once, no install
+uv tool install oncebitten      # install into an isolated environment
+```
+
+The wheels are built per platform with maturin (`bindings = "bin"`): Linux x86_64 and aarch64 (manylinux and musllinux), macOS x86_64 and arm64, Windows x86_64.
+
+### Node (npm)
+
+```sh
+npx oncebitten --version        # run once
+npm install -g oncebitten       # install
+```
+
+`oncebitten` is a small launcher; the binary comes from the platform package in its `optionalDependencies` (`oncebitten-linux-x64`, `oncebitten-linux-arm64`, `oncebitten-darwin-x64`, `oncebitten-darwin-arm64`, `oncebitten-win32-x64`). npm installs only the one that matches your machine, so do not install with `--omit=optional`.
+
+### Shell scripts
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.sh | sh
@@ -48,6 +109,35 @@ irm https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.ps1 | ie
 
 Then install hooks for any other host: `oncebitten hooks install --host <codex|cursor|copilot|opencode|pi> --scope user`.
 
+## Teams
+
+Pin one version so every machine and CI run behaves the same.
+
+```toml
+# pyproject.toml
+[dependency-groups]
+dev = ["oncebitten==0.1.0"]
+```
+
+```sh
+uv add --dev oncebitten==0.1.0 && uv run oncebitten --version
+```
+
+```sh
+npm install --save-dev --save-exact oncebitten@0.1.0 && npx oncebitten --version
+```
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/bcmyguest/oncebitten
+    rev: v0.1.0
+    hooks:
+      - id: oncebitten-gate-python
+```
+
+`oncebitten-gate-python` installs the prebuilt wheel into the hook's virtualenv. The `==` pin in `.pre-commit-hooks.yaml` follows the release; `rev` selects it. The other hooks stay: `oncebitten-gate` builds from source, `oncebitten-gate-system` runs the binary on `PATH`.
+
 ## CI and pre-commit
 
 The templates in `templates/` install a pinned release with `install.sh`. The pre-commit hook `oncebitten-gate-system` runs the installed binary; `oncebitten-gate` builds from source instead (see [gate.md](gate.md)).
@@ -62,5 +152,7 @@ The build compiles tree-sitter grammars and SQLite, so it needs a C compiler.
 
 ## Releasing
 
-1. Set the same version in `Cargo.toml`, `package.json`, every `packaging/*` plugin manifest, `version=` in `packaging/claude/bin/oncebitten` and the pins in `templates/`. `tests/packaging.rs` and `tests/gate.rs` fail if they differ.
-2. Merge, then push a tag `v<version>`. `.github/workflows/release.yml` builds all five targets and publishes the release; it fails if the tag does not match `Cargo.toml`.
+1. Run the **Prepare release** workflow (Actions tab) on `main`. `git-cliff` picks the next version from the Conventional Commits since the last tag; `scripts/set-version.sh` pins it in `Cargo.toml`, `pyproject.toml`, `package.json`, the `packaging/*` manifests, the launcher, `templates/` and `.pre-commit-hooks.yaml`; the workflow commits, tags `v<version>` and dispatches **Release**. Tick `dry_run` to see the version only.
+2. **Release** builds the five targets once (`build.yml`) and feeds the GitHub Release (tarballs and checksums), PyPI (trusted publishing) and npm (trusted publishing with provenance), then installs the published packages on Linux, macOS and Windows (`smoke.yml`). It fails if the tag does not match `Cargo.toml`.
+
+`tests/packaging.rs` and `tests/gate.rs` fail if the pinned versions differ. `scripts/fresh-project.sh` is the install smoke test: `scripts/fresh-project.sh artifacts <dir>` for local wheel and tarballs, `scripts/fresh-project.sh published <version>` for the registries.

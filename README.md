@@ -15,27 +15,88 @@ Status: pre-alpha. Capture, evidence clustering, `check`, `replay`, the gate, st
 
 ## Install
 
-Agent plugin (capture hooks; nothing to build):
+Pick the host you use; each section is copy-pasteable. The plugins download the release binary on first use and check its SHA-256. For the command line (gate, `evidence`, `check`) see [Command line](#command-line).
 
-| Host | Install |
-| --- | --- |
-| Claude Code | `/plugin marketplace add bcmyguest/oncebitten` then `/plugin install oncebitten@oncebitten` |
-| Codex | `codex plugin marketplace add bcmyguest/oncebitten`, then install `oncebitten` from `/plugins` |
-| Copilot CLI | `copilot plugin marketplace add bcmyguest/oncebitten` then `copilot plugin install oncebitten@oncebitten` |
-| Cursor | Import `https://github.com/bcmyguest/oncebitten` as a team marketplace (Dashboard, Settings, Plugins) |
-| pi | `pi install git:github.com/bcmyguest/oncebitten` |
-| opencode | Command line install below, then `oncebitten hooks install --host opencode --scope user` |
+### Claude Code
 
-Each plugin downloads the release binary for its version on first use and checks its SHA-256.
-
-Command line, for the gate and `evidence`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.sh | sh     # macOS, Linux
-irm https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.ps1 | iex          # Windows PowerShell
+```
+/plugin marketplace add bcmyguest/oncebitten
+/plugin install oncebitten@oncebitten
 ```
 
-Both verify the release's SHA-256 before installing. Other hosts, pinning and building from source: [docs/install.md](docs/install.md).
+### Codex
+
+```sh
+codex plugin marketplace add bcmyguest/oncebitten
+```
+
+Then install `oncebitten` from `/plugins`.
+
+### Copilot CLI
+
+```sh
+copilot plugin marketplace add bcmyguest/oncebitten
+copilot plugin install oncebitten@oncebitten
+```
+
+### Cursor
+
+Import `https://github.com/bcmyguest/oncebitten` as a team marketplace (Dashboard, Settings, Plugins).
+
+### pi
+
+```sh
+pi install git:github.com/bcmyguest/oncebitten
+```
+
+### opencode
+
+opencode loads plugins from npm or local files only, so install the command line below, then:
+
+```sh
+oncebitten hooks install --host opencode --scope user
+```
+
+Do not run `hooks install` for a host whose plugin is installed: each event would be captured twice.
+
+### Command line
+
+Any one of these puts `oncebitten` and `oncebitten-checker` on your `PATH`. None needs a Rust toolchain except the last.
+
+```sh
+uvx oncebitten --version               # run once, no install (PyPI)
+uv tool install oncebitten             # install (PyPI)
+npx oncebitten --version               # run once (npm)
+npm install -g oncebitten              # install (npm)
+curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.sh | sh   # macOS, Linux
+irm https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.ps1 | iex        # Windows PowerShell
+cargo install --locked --git https://github.com/bcmyguest/oncebitten oncebitten          # from source; needs a C compiler
+```
+
+`install.sh` and `install.ps1` verify the release's SHA-256 before installing. Pinning, mirrors and variables: [docs/install.md](docs/install.md).
+
+### Teams
+
+Pin one version for everyone so the gate behaves the same on every machine and in CI.
+
+```toml
+# pyproject.toml
+[dependency-groups]
+dev = ["oncebitten==0.1.0"]
+```
+
+```json
+{ "devDependencies": { "oncebitten": "0.1.0" } }
+```
+
+```yaml
+# .pre-commit-config.yaml: prebuilt binary from PyPI, no Rust toolchain
+repos:
+  - repo: https://github.com/bcmyguest/oncebitten
+    rev: v0.1.0
+    hooks:
+      - id: oncebitten-gate-python
+```
 
 ## Usage
 
@@ -69,7 +130,7 @@ repos:
   - repo: https://github.com/bcmyguest/oncebitten
     rev: <commit or tag>
     hooks:
-      - id: oncebitten-gate          # builds from source; or oncebitten-gate-system to use the installed binary
+      - id: oncebitten-gate-python   # prebuilt wheel; or oncebitten-gate (builds from source), oncebitten-gate-system (installed binary)
 ```
 
 ```sh
