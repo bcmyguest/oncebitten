@@ -119,3 +119,51 @@ fn accept_baselines_existing_hits_so_the_gate_passes_but_a_new_hit_fails() {
     let fresh = repo.run(&["gate", "pr", "--base", "main"], &[]);
     assert_eq!(code(&fresh), 1, "{}", both(&fresh));
 }
+
+#[test]
+fn accept_from_another_repo_baselines_the_proposals_own_repo() {
+    let repo = proposed_repo();
+    let elsewhere = repo.root.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(&elsewhere)
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "{init:?}");
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_oncebitten"));
+    command
+        .args(["proposals", "accept", "c1"])
+        .current_dir(&elsewhere)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", repo.root.path().join("home"))
+        .env("XDG_CONFIG_HOME", repo.root.path().join("xdg-config"))
+        .env("XDG_DATA_HOME", repo.root.path().join("data"))
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            repo.root.path().join("empty.gitconfig"),
+        );
+    for var in ["SYSTEMROOT", "TEMP", "TMP"] {
+        if let Some(value) = std::env::var_os(var) {
+            command.env(var, value);
+        }
+    }
+    let accept = command.output().unwrap();
+    assert_eq!(code(&accept), 0, "{}", both(&accept));
+
+    assert!(
+        !elsewhere.join(".oncebitten").join("baseline.json").exists(),
+        "baseline written into the cwd repo"
+    );
+    let entries = baseline(&repo)["entries"].clone();
+    assert!(
+        entries
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["rule"] == "py-utcnow" && entry["path"] == "src/old.py"),
+        "{entries}"
+    );
+}

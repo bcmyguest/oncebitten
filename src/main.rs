@@ -475,12 +475,18 @@ fn open_store(inputs: &Inputs) -> Result<Store> {
     )?)
 }
 
-/// Accepts a proposal, then baselines the rule's existing hits. The rule is
-/// active once `accept` returns, so a failed baseline leaves it active.
+/// Accepts a proposal, then baselines the rule's existing hits in the
+/// proposal's own repo, whatever the cwd. The rule is active once `accept`
+/// returns, so a failed baseline leaves it active.
 fn run_accept(store: &Store, inputs: &Inputs, id: &str) -> Result<()> {
+    let repo = PathBuf::from(proposals::find(store, id)?.repo);
     let dir = proposals::accept(store, id)?;
     let rule = oncebitten::rule::load_rule(&dir)?;
-    match gate::baseline_rule(inputs, &rule.id) {
+    let in_repo = Inputs {
+        cwd: repo,
+        vars: inputs.vars.clone(),
+    };
+    match gate::baseline_rule(&in_repo, &rule.id) {
         Ok(path) => {
             println!(
                 "accepted {id}: {} is active; existing hits baselined in {}",
