@@ -111,3 +111,10 @@ fn missing_session_id_is_an_error() {
     let payload = r#"{"hook_event_name":"UserPromptSubmit","prompt":"x"}"#;
     assert!(normalize(Host::Claude, payload, TS).is_err());
 }
+
+#[test]
+fn copilot_json_string_tool_args_give_the_command_summary() {
+    let payload = r#"{"sessionId":"s","cwd":"/nowhere","toolName":"bash","toolArgs":"{\"command\":\"cargo build\"}","error":"boom"}"#;
+    let event = normalize(Host::Copilot, payload, TS).unwrap().unwrap();
+    assert_eq!(event.summary, "cargo build");
+}

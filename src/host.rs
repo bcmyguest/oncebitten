@@ -322,11 +322,7 @@ fn cwd(value: &Value) -> Option<String> {
 }
 
 fn tool_summary(value: &Value, tool: &str) -> String {
-    let input = INPUT_KEYS
-        .iter()
-        .map(|key| &value[*key])
-        .find(|input| input.is_object())
-        .unwrap_or(&Value::Null);
+    let input = &tool_input(value);
     let lower = tool.to_ascii_lowercase();
     let found = if COMMAND_TOOLS.contains(&lower.as_str()) {
         input["command"].as_str()
