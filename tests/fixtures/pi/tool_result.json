@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "tool_result",
+  "session_id": "01a1dcfb-cd1e-75d4-bef8-4447b5300f73",
+  "cwd": "/work/project",
+  "toolName": "bash",
+  "input": {
+    "command": "echo hi"
+  },
+  "isError": false
+}

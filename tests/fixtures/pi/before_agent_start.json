@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "before_agent_start",
+  "session_id": "01a1dcfb-cd1e-75d4-bef8-4447b5300f73",
+  "cwd": "/work/project",
+  "prompt": "say hi"
+}

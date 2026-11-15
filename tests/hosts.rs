@@ -198,7 +198,7 @@ fn event_name_and_prompt_object_aliases_resolve() {
 
 #[test]
 fn fixtures_hold_no_personal_data() {
-    for host in ["codex", "cursor", "copilot", "opencode"] {
+    for host in ["codex", "cursor", "copilot", "opencode", "pi"] {
         let dir = format!("{}/tests/fixtures/{host}", env!("CARGO_MANIFEST_DIR"));
         for entry in fs::read_dir(dir).unwrap() {
             let text = fs::read_to_string(entry.unwrap().path()).unwrap();
@@ -207,4 +207,18 @@ fn fixtures_hold_no_personal_data() {
             }
         }
     }
+}
+
+#[test]
+fn pi_fixtures_from_a_real_run_normalize() {
+    let prompt = normalize(Host::Pi, &fixture("pi", "before_agent_start"), TS)
+        .unwrap()
+        .unwrap();
+    assert_eq!(prompt.kind, KIND_PROMPT);
+    assert_eq!(prompt.summary, "say hi");
+    let tool = normalize(Host::Pi, &fixture("pi", "tool_result"), TS)
+        .unwrap()
+        .unwrap();
+    assert_eq!(tool.kind, KIND_TOOL_OK);
+    assert_eq!(tool.tool.as_deref(), Some("bash"));
 }
