@@ -76,7 +76,8 @@ fn run_rule(resolved: &Resolved, repo: &Path, changed: &[String]) -> Outcome {
         Check::AstGrep { file } => {
             let files: Vec<PathBuf> = changed
                 .iter()
-                .map(|path| repo.join(path))
+                // git reports `/`-separated paths; Windows prints them as given.
+                .map(|path| repo.join(path.split('/').collect::<PathBuf>()))
                 .filter(|path| path.is_file())
                 .collect();
             astgrep::run(file, &files)
