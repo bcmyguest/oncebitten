@@ -1,8 +1,13 @@
+pub mod capture;
 pub mod check;
 pub mod config;
 pub mod engine;
+pub mod hooks;
+pub mod host;
 pub mod lockfile;
 pub mod registry;
 pub mod rule;
 pub mod rules;
+pub mod signal;
 pub mod sources;
+pub mod store;

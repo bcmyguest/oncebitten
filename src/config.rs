@@ -12,7 +12,14 @@ const PROJECT_DIR: &str = ".oncebitten";
 const CONFIG_FILE: &str = "config.toml";
 const GIT_MARKER: &str = ".git";
 const ENV_PREFIX: &str = "ONCEBITTEN_";
-const PATH_VARS: &[&str] = &["HOME", "APPDATA", "XDG_CONFIG_HOME"];
+const PATH_VARS: &[&str] = &[
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "XDG_CONFIG_HOME",
+];
 const ENV_VARS: &[(&str, &str, bool)] = &[
     ("ONCEBITTEN_TRIAGE_DEFAULT", "triage.default", false),
     ("ONCEBITTEN_TRIAGE_CLAUDE", "triage.claude", false),
@@ -335,6 +342,23 @@ impl Platform {
     }
 }
 
+/// `HOME` first. On Windows, which sets no `HOME` by default, fall back to
+/// `USERPROFILE`, then `HOMEDRIVE` + `HOMEPATH`. Relative values count as unset.
+pub fn home_dir(vars: &BTreeMap<String, String>, platform: Platform) -> Option<PathBuf> {
+    let absolute = |value: String| platform.is_absolute(&value).then(|| PathBuf::from(value));
+    let var = |name: &str| vars.get(name).cloned();
+    let drive_path = || match (var("HOMEDRIVE"), var("HOMEPATH")) {
+        (Some(drive), Some(path)) => Some(format!("{drive}{path}")),
+        _ => None,
+    };
+    let mut candidates = vec![var("HOME")];
+    if platform == Platform::Windows {
+        candidates.push(var("USERPROFILE"));
+        candidates.push(drive_path());
+    }
+    candidates.into_iter().flatten().find_map(absolute)
+}
+
 pub fn user_config_path(vars: &BTreeMap<String, String>) -> Result<PathBuf> {
     user_config_path_for(vars, Platform::current())
 }
@@ -354,12 +378,9 @@ pub fn user_config_path_for(
                     .filter(|dir| platform.is_absolute(dir))
                     .context("neither XDG_CONFIG_HOME nor APPDATA is an absolute path")?,
             ),
-            Platform::Unix => PathBuf::from(
-                vars.get("HOME")
-                    .filter(|dir| platform.is_absolute(dir))
-                    .context("neither XDG_CONFIG_HOME nor HOME is an absolute path")?,
-            )
-            .join(".config"),
+            Platform::Unix => home_dir(vars, platform)
+                .context("neither XDG_CONFIG_HOME nor HOME is an absolute path")?
+                .join(".config"),
         },
     };
     Ok(base.join("oncebitten").join(CONFIG_FILE))

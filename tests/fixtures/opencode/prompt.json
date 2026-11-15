@@ -1,0 +1,9 @@
+{
+  "sessionID": "ses_e2329b551ffewSSutV06Q1hu35",
+  "messageID": "msg_1dcd64ab9001y2eGtOTCGZQtaK",
+  "prompt": {
+    "text": "\"Run the shell command ls, then run: cat nonexistent-file. Then say done.\"",
+    "files": []
+  },
+  "delivery": "steer"
+}

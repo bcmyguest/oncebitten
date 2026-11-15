@@ -1,0 +1,6 @@
+{
+  "sessionId": "51d94bf4-27b4-4dc9-8fc6-bc0c691f4d01",
+  "timestamp": 1794705635829,
+  "cwd": "/work/project",
+  "prompt": "Run the shell command ls, then run: cat nonexistent-file. Then say done."
+}

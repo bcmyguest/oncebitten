@@ -1,0 +1,211 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use oncebitten::config::Platform;
+use oncebitten::signal::Signal;
+use oncebitten::store::{events_db_path_for, NewEvent, Store, SUMMARY_LIMIT};
+use tempfile::TempDir;
+
+fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+fn event(session: &str, summary: &str, ts: i64) -> NewEvent {
+    NewEvent {
+        ts,
+        host: "claude".into(),
+        session_id: session.into(),
+        repo: Some("/repo".into()),
+        kind: "tool-error".into(),
+        tool: Some("Bash".into()),
+        summary: summary.into(),
+    }
+}
+
+#[test]
+fn xdg_data_home_wins_when_absolute() {
+    let path = events_db_path_for(
+        &vars(&[("XDG_DATA_HOME", "/data"), ("HOME", "/home/u")]),
+        Platform::Unix,
+    )
+    .unwrap();
+    assert_eq!(path, PathBuf::from("/data/oncebitten/events.db"));
+}
+
+#[test]
+fn relative_xdg_data_home_falls_back_to_local_share() {
+    let path = events_db_path_for(
+        &vars(&[("XDG_DATA_HOME", "relative"), ("HOME", "/home/u")]),
+        Platform::Unix,
+    )
+    .unwrap();
+    assert_eq!(
+        path,
+        PathBuf::from("/home/u/.local/share/oncebitten/events.db")
+    );
+}
+
+#[test]
+fn unix_without_absolute_home_is_an_error() {
+    assert!(events_db_path_for(&vars(&[("HOME", "relative")]), Platform::Unix).is_err());
+    assert!(events_db_path_for(&vars(&[]), Platform::Unix).is_err());
+}
+
+#[test]
+fn windows_uses_local_appdata_and_ignores_home() {
+    let path = events_db_path_for(
+        &vars(&[
+            ("LOCALAPPDATA", r"C:\Users\u\AppData\Local"),
+            ("HOME", "/h"),
+        ]),
+        Platform::Windows,
+    )
+    .unwrap();
+    assert_eq!(
+        path,
+        PathBuf::from(r"C:\Users\u\AppData\Local")
+            .join("oncebitten")
+            .join("events.db")
+    );
+}
+
+#[test]
+fn windows_without_absolute_local_appdata_is_an_error() {
+    assert!(events_db_path_for(&vars(&[("LOCALAPPDATA", "rel")]), Platform::Windows).is_err());
+}
+
+fn raw(path: &std::path::Path) -> rusqlite::Connection {
+    rusqlite::Connection::open(path).unwrap()
+}
+
+#[test]
+fn open_creates_schema_and_wal_mode() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("nested").join("events.db");
+    let _store = Store::open(&path).unwrap();
+    let conn = raw(&path);
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 1);
+    assert_eq!(mode, "wal");
+}
+
+#[test]
+fn record_then_history_returns_the_event() {
+    let store = Store::open_in_memory().unwrap();
+    let id = store.record(&event("s1", "cargo test", 1), &[]).unwrap();
+    assert!(id.is_some());
+    let history = store.session_history("claude", "s1", 10).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].summary, "cargo test");
+    assert_eq!(history[0].repo.as_deref(), Some("/repo"));
+}
+
+#[test]
+fn identical_event_is_deduplicated() {
+    let store = Store::open_in_memory().unwrap();
+    assert!(store.record(&event("s1", "x", 1), &[]).unwrap().is_some());
+    assert!(store.record(&event("s1", "x", 1), &[]).unwrap().is_none());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 1);
+}
+
+#[test]
+fn same_command_at_a_later_time_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    store.record(&event("s1", "x", 1), &[]).unwrap();
+    assert!(store.record(&event("s1", "x", 2), &[]).unwrap().is_some());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 2);
+}
+
+#[test]
+fn duplicate_event_does_not_store_its_signals() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    let signal = Signal {
+        kind: "tool-failure",
+        detail: "boom".into(),
+    };
+    store
+        .record(&event("s1", "x", 1), std::slice::from_ref(&signal))
+        .unwrap();
+    store
+        .record(&event("s1", "x", 1), std::slice::from_ref(&signal))
+        .unwrap();
+    let count: i64 = raw(&path)
+        .query_row("SELECT COUNT(*) FROM signals", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn summary_is_truncated_to_the_limit() {
+    let store = Store::open_in_memory().unwrap();
+    let long = "é".repeat(SUMMARY_LIMIT + 50);
+    store.record(&event("s1", &long, 1), &[]).unwrap();
+    let history = store.session_history("claude", "s1", 10).unwrap();
+    assert_eq!(history[0].summary.chars().count(), SUMMARY_LIMIT);
+}
+
+#[test]
+fn history_is_scoped_to_host_and_session() {
+    let store = Store::open_in_memory().unwrap();
+    store.record(&event("s1", "a", 1), &[]).unwrap();
+    store.record(&event("s2", "b", 2), &[]).unwrap();
+    let mut other_host = event("s1", "c", 3);
+    other_host.host = "codex".into();
+    store.record(&other_host, &[]).unwrap();
+    let history = store.session_history("claude", "s1", 10).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].summary, "a");
+}
+
+#[test]
+fn history_returns_the_most_recent_events_oldest_first() {
+    let store = Store::open_in_memory().unwrap();
+    for ts in 1..=5 {
+        store
+            .record(&event("s1", &format!("e{ts}"), ts), &[])
+            .unwrap();
+    }
+    let summaries: Vec<String> = store
+        .session_history("claude", "s1", 2)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.summary)
+        .collect();
+    assert_eq!(summaries, vec!["e4", "e5"]);
+}
+
+#[test]
+fn reopening_keeps_data() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    Store::open(&path)
+        .unwrap()
+        .record(&event("s1", "kept", 1), &[])
+        .unwrap();
+    let reopened = Store::open(&path).unwrap();
+    assert_eq!(
+        reopened.session_history("claude", "s1", 10).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn unknown_future_schema_version_is_an_error() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 99).unwrap();
+    }
+    assert!(Store::open(&path).is_err());
+}

@@ -1,8 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use oncebitten::capture;
 use oncebitten::check::{self, Checked};
-use oncebitten::config::{self, Inputs};
+use oncebitten::config::{self, Inputs, Platform};
 use oncebitten::engine::Outcome;
+use oncebitten::hooks::{self, Scope};
+use oncebitten::host::Host;
 use oncebitten::rules::{self, Failure};
 
 #[derive(Parser)]
@@ -18,10 +21,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Record an agent hook payload from stdin (always exits 0)
+    Capture {
+        /// Agent host that sent the payload
+        #[arg(long)]
+        host: String,
+    },
     /// Inspect the layered configuration
     Config {
         #[command(subcommand)]
         action: ConfigAction,
+    },
+    /// Install or remove the capture hooks in an agent's settings
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
     },
     /// Sync, list and validate rules
     Rules {
@@ -33,6 +47,24 @@ enum Command {
         /// Revision the working tree is compared with
         #[arg(long, default_value = "HEAD")]
         base: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksAction {
+    /// Add the capture hooks (idempotent)
+    Install {
+        #[arg(long)]
+        host: String,
+        #[arg(long, value_enum)]
+        scope: Scope,
+    },
+    /// Remove only oncebitten's capture hooks
+    Uninstall {
+        #[arg(long)]
+        host: String,
+        #[arg(long, value_enum)]
+        scope: Scope,
     },
 }
 
@@ -69,7 +101,14 @@ enum ConfigAction {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Capture { host } => {
+            if let Err(err) = capture::run_from_process(&host) {
+                eprintln!("oncebitten capture: {err:#}");
+            }
+            Ok(())
+        }
         Command::Config { action } => run_config(action),
+        Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
         Command::Check { base } => run_check(&base),
     }
@@ -148,6 +187,26 @@ fn exit_with(failure: Failure) -> ! {
             std::process::exit(2)
         }
     }
+}
+
+fn run_hooks(action: HooksAction) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let (install, host, scope) = match action {
+        HooksAction::Install { host, scope } => (true, host, scope),
+        HooksAction::Uninstall { host, scope } => (false, host, scope),
+    };
+    let host = Host::parse(&host)?;
+    let home = config::home_dir(&inputs.vars, Platform::current())
+        .context("no absolute home directory in HOME, USERPROFILE or HOMEDRIVE+HOMEPATH")?;
+    let path = hooks::target_path(host, scope, &home, &inputs.cwd);
+    let changed = if install {
+        hooks::install_exe(host, &path, &hooks::current_exe()?, Platform::current())?
+    } else {
+        hooks::uninstall(host, &path)?
+    };
+    let state = if changed { "changed" } else { "unchanged" };
+    println!("{state}  {}", path.display());
+    Ok(())
 }
 
 fn run_config(action: ConfigAction) -> Result<()> {

@@ -15,7 +15,9 @@ An empty environment variable counts as unset. `ONCEBITTEN_TRIGGERS_*` takes a c
 
 Unknown keys and invalid values fail the load. The error names the file, or the environment layer for a bad variable. An unknown `ONCEBITTEN_*` variable, such as a misspelling, is ignored with a warning on stderr.
 
-`HOME`, `APPDATA` and `XDG_CONFIG_HOME` count only when they hold an absolute path. A non-Unicode value in one of them, or in any `ONCEBITTEN_*` variable, fails the load; other non-Unicode variables are ignored.
+`HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA` and `XDG_CONFIG_HOME` count only when they hold an absolute path. A non-Unicode value in one of them, or in any `ONCEBITTEN_*` variable, fails the load; other non-Unicode variables are ignored.
+
+The home directory is `HOME`. On Windows, which sets no `HOME` by default, it falls back to `USERPROFILE`, then to `HOMEDRIVE` plus `HOMEPATH`. `oncebitten hooks` uses it for user scope; the user config and the event database on Windows keep using `APPDATA` and `LOCALAPPDATA`.
 
 `oncebitten config show --origin` prints the merged result and tags each key with its layer. `oncebitten config path` prints the user file and the project file it reads.
 

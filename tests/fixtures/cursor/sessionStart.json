@@ -1,0 +1,14 @@
+{
+  "conversation_id": "e7b30814-6f28-460a-b375-f2ca1c5b377b",
+  "generation_id": "e7b30814-6f28-460a-b375-f2ca1c5b377b",
+  "model": "composer-2.5",
+  "is_background_agent": false,
+  "session_id": "e7b30814-6f28-460a-b375-f2ca1c5b377b",
+  "hook_event_name": "sessionStart",
+  "cursor_version": "2026.10.22-27dcf5f",
+  "workspace_roots": [
+    "/work/project"
+  ],
+  "user_email": "user@example.com",
+  "transcript_path": null
+}

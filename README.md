@@ -19,9 +19,13 @@ oncebitten config show            # merged configuration as TOML
 oncebitten config show --origin   # annotate each value with its layer
 oncebitten config path            # configuration files it reads
 oncebitten check                  # run active rules against changes since HEAD
+oncebitten hooks install --host claude --scope user   # also codex, cursor, copilot, opencode, pi
+oncebitten hooks uninstall --host claude --scope user
 ```
 
 Rules: [docs/rules.md](docs/rules.md). Agent-facing summary: [llms.txt](llms.txt).
+
+Hooks record prompts and tool outcomes locally: [docs/capture.md](docs/capture.md) lists what each host reports and how each was verified.
 
 Settings and their precedence: [docs/configuration.md](docs/configuration.md).
 
