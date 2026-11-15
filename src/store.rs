@@ -487,6 +487,38 @@ impl Store {
         Ok(paths)
     }
 
+    /// Successful shell calls recorded in `repo`, newest first, without the
+    /// command `exclude`. A steer draft takes its corpus from these.
+    pub fn successful_commands(
+        &self,
+        repo: &str,
+        exclude: &str,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, ts, host, session_id, repo, kind, tool, summary, git_head FROM events \
+             WHERE repo = ?1 AND kind = ?2 AND summary != ?3 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map(params![repo, signal::KIND_TOOL_OK, exclude], |row| {
+            stored_event(row, 0)
+        })?;
+        let mut found = Vec::new();
+        for row in rows {
+            let event = row?;
+            if event
+                .tool
+                .as_deref()
+                .is_some_and(crate::host::is_command_tool)
+            {
+                found.push(event);
+                if found.len() == limit {
+                    break;
+                }
+            }
+        }
+        Ok(found)
+    }
+
     pub fn signals(&self) -> Result<Vec<SignalRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.kind, s.detail, e.id, e.ts, e.host, e.session_id, e.repo, e.kind, \

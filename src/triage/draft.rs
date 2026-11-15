@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::{astgrep, diff};
 use crate::rule::{self, is_fixture_named, is_kebab_case, Mode, Status};
+use crate::steer::SteerEvent;
 
 pub const MAX_ID_CHARS: usize = 64;
 pub const MAX_TEXT_CHARS: usize = 1000;
@@ -65,6 +66,8 @@ pub enum Engine {
     Diff,
     #[serde(rename = "native")]
     Native,
+    #[serde(rename = "steer")]
+    Steer,
 }
 
 /// `rule.toml` as a proposal writes it. Field order matches docs/rules.md.
@@ -87,9 +90,89 @@ struct RuleToml<'a> {
     when_changed: Option<&'a [String]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     require_changed: Option<&'a [String]>,
+    /// Tables come last so TOML writes them after the scalar keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    steer: Option<SteerToml<'a>>,
+}
+
+/// A steer rule's `[steer]` table. A steer draft always informs.
+#[derive(Serialize)]
+struct SteerToml<'a> {
+    action: &'a str,
+    message: &'a str,
+    trigger: TriggerToml,
+}
+
+#[derive(Serialize)]
+struct TriggerToml {
+    tool: String,
+    command: String,
+}
+
+/// The `[steer]` table for a steer draft: the recorded command's tool, matched
+/// as a whole-command regex. `None` for other engines.
+fn steer_table(draft: &Draft) -> Option<SteerToml<'_>> {
+    if draft.engine != Engine::Steer {
+        return None;
+    }
+    let event = steer_event(&draft.bad.content).ok()?;
+    let SteerEvent::Tool {
+        tool,
+        command: Some(command),
+        ..
+    } = event
+    else {
+        return None;
+    };
+    Some(SteerToml {
+        action: "inform",
+        message: draft.rationale.trim(),
+        trigger: TriggerToml {
+            tool,
+            command: format!("^{}$", regex::escape(&command)),
+        },
+    })
+}
+
+fn steer_event(content: &str) -> Result<SteerEvent> {
+    serde_json::from_str(content).context("the steer fixture is not a recorded tool event")
 }
 
 impl Draft {
+    /// Sets a steer draft's fixtures from recorded commands: `command` run with
+    /// `tool` is `bad`, and each of `corpus` is a clean event. Empty `corpus`
+    /// keeps the model's own corpus.
+    pub fn with_recorded_command(
+        &mut self,
+        tool: &str,
+        command: &str,
+        corpus: &[String],
+    ) -> Result<()> {
+        self.bad = DraftFile {
+            name: "bad.json".to_owned(),
+            content: serde_json::to_string(&SteerEvent::Tool {
+                tool: tool.to_owned(),
+                command: Some(command.to_owned()),
+                paths: Vec::new(),
+            })?,
+        };
+        if !corpus.is_empty() {
+            let mut files = Vec::with_capacity(corpus.len());
+            for (index, text) in corpus.iter().enumerate() {
+                files.push(DraftFile {
+                    name: format!("corpus-{index}.json"),
+                    content: serde_json::to_string(&SteerEvent::Tool {
+                        tool: tool.to_owned(),
+                        command: Some(text.clone()),
+                        paths: Vec::new(),
+                    })?,
+                });
+            }
+            self.corpus = Some(files);
+        }
+        Ok(())
+    }
+
     /// Checks the draft as strictly as a hand-written rule: it must load with
     /// `rule::load_rule`, its check file must compile and its globs must parse.
     pub fn validate(&self) -> Result<()> {
@@ -154,6 +237,7 @@ impl Draft {
             fired_output_contains: self.fired_output_contains.as_deref(),
             when_changed: self.when_changed.as_deref(),
             require_changed: self.require_changed.as_deref(),
+            steer: steer_table(self),
         };
         write_file(&dir.join(RULE_FILE), &toml::to_string(&rule)?)?;
         if let Some(check) = &self.check {
@@ -181,7 +265,24 @@ impl Draft {
         let native_keys = self.command.is_some()
             || self.fired_exit_codes.is_some()
             || self.fired_output_contains.is_some();
+        if matches!(self.engine, Engine::Steer) && !matches!(self.mode, Mode::Steer) {
+            bail!("engine = \"steer\" needs mode = \"steer\"");
+        }
         match self.engine {
+            Engine::Steer => {
+                if self.check.is_some() || globs || native_keys {
+                    bail!("a steer draft takes only its recorded fixtures");
+                }
+                let event = steer_event(&self.bad.content)?;
+                match event {
+                    SteerEvent::Tool {
+                        command: Some(ref c),
+                        ..
+                    } if !c.trim().is_empty() => {}
+                    _ => bail!("a steer draft's bad fixture needs a recorded command"),
+                }
+                steer_event(&self.fixed.content)?;
+            }
             Engine::AstGrep => {
                 if globs || native_keys {
                     bail!("an ast-grep draft takes only `check`");

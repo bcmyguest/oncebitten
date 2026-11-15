@@ -239,7 +239,7 @@ fn schema_describes_an_optional_draft_with_every_draft_key() {
     assert_eq!(draft["anyOf"][0]["additionalProperties"], false);
     assert_eq!(
         draft["anyOf"][0]["properties"]["engine"]["enum"],
-        serde_json::json!(["ast-grep", "diff", "native"])
+        serde_json::json!(["ast-grep", "diff", "native", "steer"])
     );
 }
 
@@ -324,4 +324,60 @@ fn a_write_failing_midway_leaves_no_rule_directory() {
     }
     assert!(answer.draft.unwrap().write(&parent).is_err());
     assert!(!parent.join("docs-with-src").exists());
+}
+
+fn steer_event(tool: &str, command: &str) -> String {
+    serde_json::json!({"event": "tool", "tool": tool, "command": command}).to_string()
+}
+
+fn steer_draft(mode: &str, engine: &str, bad: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": "no-force-push",
+        "description": "no force pushes",
+        "mode": mode,
+        "engine": engine,
+        "bad": {"name": "bad.json", "content": bad},
+        "fixed": {"name": "fixed.json", "content": steer_event("Bash", "git push")},
+        "rationale": "force pushes rewrite shared history"
+    })
+}
+
+#[test]
+fn a_steer_engine_draft_needs_mode_steer() {
+    let draft = steer_draft("block", "steer", &steer_event("Bash", "git push --force"));
+    let parsed: Draft = serde_json::from_value(draft).unwrap();
+    assert!(parsed.validate().is_err());
+}
+
+#[test]
+fn a_steer_draft_writes_an_inform_rule_with_the_recorded_command_as_bad() {
+    let draft = steer_draft(
+        "steer",
+        "steer",
+        &steer_event("Bash", "git push --force origin main"),
+    );
+    let parsed: Draft = serde_json::from_value(draft).unwrap();
+    parsed.validate().unwrap();
+    let parent = TempDir::new().unwrap();
+    let dir = parsed.write(parent.path()).unwrap();
+    let text = std::fs::read_to_string(dir.join("rule.toml")).unwrap();
+    assert!(text.contains("engine = \"steer\""), "{text}");
+    assert!(text.contains("[steer]"), "{text}");
+    assert!(text.contains("action = \"inform\""), "{text}");
+    let rule = rule::load_rule(&dir).unwrap();
+    let Check::Steer(steer) = &rule.check else {
+        panic!("expected a steer rule, got {:?}", rule.check);
+    };
+    assert_eq!(steer.action, rule::Action::Inform);
+    assert_eq!(
+        oncebitten::steer::replay(&dir, steer),
+        oncebitten::replay::Verdict::Proven
+    );
+}
+
+#[test]
+fn a_steer_fixture_must_be_a_recorded_tool_event() {
+    let draft = steer_draft("steer", "steer", "git push --force");
+    let parsed: Draft = serde_json::from_value(draft).unwrap();
+    assert!(parsed.validate().is_err());
 }

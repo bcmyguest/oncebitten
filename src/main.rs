@@ -192,8 +192,13 @@ enum ProposalsAction {
     List,
     /// Print one proposal: its rule, rationale, verdict, proof note and evidence
     Show { id: String },
-    /// Make a proposed rule active; exit 2 unless it has a valid proof
-    Accept { id: String },
+    /// Make a proposed rule active; exit 2 unless it has a valid proof.
+    /// `--deny` sets a steer rule's action to deny and re-proves it.
+    Accept {
+        id: String,
+        #[arg(long)]
+        deny: bool,
+    },
     /// Reject a proposal; its cluster is never proposed again
     Reject {
         id: String,
@@ -485,12 +490,18 @@ fn open_store(inputs: &Inputs) -> Result<Store> {
     )?)
 }
 
-/// Accepts a proposal, then baselines the rule's existing hits in the
+/// Accepts a proposal (with `deny`, a steer rule is re-proved with this
+/// binary as its matcher), then baselines the rule's existing hits in the
 /// proposal's own repo, whatever the cwd. The rule is active once `accept`
 /// returns, so a failed baseline leaves it active.
-fn run_accept(store: &Store, inputs: &Inputs, id: &str) -> Result<()> {
+fn run_accept(store: &Store, inputs: &Inputs, id: &str, deny: bool) -> Result<()> {
     let repo = PathBuf::from(proposals::find(store, id)?.repo);
-    let dir = proposals::accept(store, id)?;
+    let dir = if deny {
+        let exe = std::env::current_exe().context("locating the oncebitten binary")?;
+        proposals::accept_deny(store, id, |rule| proof::replay_steer(rule, &exe))?
+    } else {
+        proposals::accept(store, id)?
+    };
     let rule = oncebitten::rule::load_rule(&dir)?;
     let in_repo = Inputs {
         cwd: repo,
@@ -525,7 +536,7 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
             Ok(())
         }
         ProposalsAction::Show { id } => show_proposal(&store, &id),
-        ProposalsAction::Accept { id } => run_accept(&store, &inputs, &id),
+        ProposalsAction::Accept { id, deny } => run_accept(&store, &inputs, &id, deny),
         ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
         ProposalsAction::Reject {
             id,
