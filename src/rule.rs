@@ -65,6 +65,7 @@ struct RawRule {
     overrides: Option<String>,
     reason: Option<String>,
     command: Option<Vec<String>>,
+    fired_exit_codes: Option<Vec<i32>>,
     when_changed: Option<Vec<String>>,
     require_changed: Option<Vec<String>>,
 }
@@ -78,6 +79,7 @@ pub struct Rule {
     pub language: Option<String>,
     pub overrides: Option<Override>,
     pub check: Check,
+    pub fired_exit_codes: Vec<i32>,
     pub file: PathBuf,
 }
 
@@ -172,6 +174,16 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
             Some(Override { target, reason })
         }
     };
+    if raw.fired_exit_codes.is_some() && raw.engine != Engine::Native {
+        return Err(invalid(
+            file,
+            "fired_exit_codes is only for engine = \"native\"",
+        ));
+    }
+    let fired_exit_codes = raw.fired_exit_codes.unwrap_or_default();
+    if fired_exit_codes.contains(&0) {
+        return Err(invalid(file, "fired_exit_codes must not contain 0"));
+    }
     let globs_given = raw.when_changed.is_some() || raw.require_changed.is_some();
     let check = match raw.engine {
         Engine::AstGrep => {
@@ -222,6 +234,7 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
         language: raw.language,
         overrides,
         check,
+        fired_exit_codes,
         file: file.to_path_buf(),
     })
 }

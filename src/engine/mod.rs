@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 pub mod astgrep;
+pub mod native;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {

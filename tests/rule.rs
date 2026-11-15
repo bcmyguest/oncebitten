@@ -269,3 +269,35 @@ fn checklist_mode_is_rejected() {
 
     assert!(message.contains("checklist"), "{message}");
 }
+
+#[test]
+fn native_rule_loads_its_fired_exit_codes() {
+    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"block\"\n\
+status = \"active\"\nengine = \"native\"\ncommand = [\"cargo\", \"clippy\"]\nfired_exit_codes = [101]\n";
+    let (_root, dir) = rule_dir("no-unwrap", toml);
+    let rule = load_rule(&dir).unwrap();
+
+    assert_eq!(rule.fired_exit_codes, vec![101]);
+}
+
+#[test]
+fn fired_exit_codes_without_native_engine_is_an_error() {
+    let toml = format!("{AST_GREP_RULE}fired_exit_codes = [1]\n");
+    let (_root, dir) = rule_dir("no-unwrap", &toml);
+    let message = error_of(&dir);
+
+    assert!(
+        message.contains("fired_exit_codes is only for engine = \"native\""),
+        "{message}"
+    );
+}
+
+#[test]
+fn fired_exit_codes_containing_zero_is_an_error() {
+    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"block\"\n\
+status = \"active\"\nengine = \"native\"\ncommand = [\"cargo\", \"clippy\"]\nfired_exit_codes = [0]\n";
+    let (_root, dir) = rule_dir("no-unwrap", toml);
+    let message = error_of(&dir);
+
+    assert!(message.contains("must not contain 0"), "{message}");
+}

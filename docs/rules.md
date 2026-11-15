@@ -30,13 +30,14 @@ Directories whose names start with `.` are skipped, so a source clone's `.git` i
 | `overrides` | no | `<source>/<id>`; requires `reason` |
 | `reason` | with `overrides` | text |
 | `command` | `native` only | non-empty array of strings |
+| `fired_exit_codes` | `native` only, optional | array of non-zero integers; default empty |
 | `when_changed` | `diff` only | non-empty array of glob strings |
 | `require_changed` | `diff` only | non-empty array of glob strings |
 
 Engines:
 
 - `ast-grep`: needs `check.yml`.
-- `native`: runs `command`. Takes no check file.
+- `native`: runs `command` in the repository root. Takes no check file. Exit 0 is clean. An exit code listed in `fired_exit_codes` is a fired finding, and its output (stderr, else stdout) is the message. Any other exit code, a missing binary, or termination by signal is could-not-run. With no `fired_exit_codes`, the rule never fires.
 - `diff`: takes no check file. Loading checks only the fields and fixtures (`fixtures/bad.diff`, `fixtures/fixed.diff`). Matching is not built yet.
 
 Unknown keys fail the load. Every error names the file.
