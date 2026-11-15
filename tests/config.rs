@@ -358,13 +358,18 @@ fn windows_relative_xdg_config_home_is_ignored() {
 }
 
 #[test]
-fn windows_without_appdata_is_an_error_and_home_is_not_used() {
-    let message = error_chain(user_config_path_for(
-        &vars(&[("HOME", r"C:\Users\b")]),
-        Platform::Windows,
-    ));
+fn windows_without_appdata_falls_back_to_home_appdata_roaming() {
+    let path = user_config_path_for(&vars(&[("HOME", r"C:\Users\b")]), Platform::Windows).unwrap();
 
-    assert!(message.contains("APPDATA"), "{message}");
+    assert!(
+        path.starts_with(
+            std::path::PathBuf::from(r"C:\Users\b")
+                .join("AppData")
+                .join("Roaming")
+        ),
+        "{}",
+        path.display()
+    );
 }
 
 #[test]

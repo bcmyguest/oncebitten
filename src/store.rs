@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
-use crate::config::{home_dir, Platform};
+use crate::config::{home_dir, windows_app_dir, Platform};
 use crate::signal::Signal;
 
 const APP_DIR: &str = "oncebitten";
@@ -164,11 +164,9 @@ pub fn events_db_path_for(vars: &BTreeMap<String, String>, platform: Platform) -
     {
         Some(dir) => PathBuf::from(dir),
         None => match platform {
-            Platform::Windows => PathBuf::from(
-                vars.get("LOCALAPPDATA")
-                    .filter(|dir| platform.is_absolute(dir))
-                    .context("neither XDG_DATA_HOME nor LOCALAPPDATA is an absolute path")?,
-            ),
+            Platform::Windows => windows_app_dir(vars, "LOCALAPPDATA", "Local").context(
+                "none of XDG_DATA_HOME, LOCALAPPDATA or a home directory is an absolute path",
+            )?,
             Platform::Unix => home_dir(vars, platform)
                 .context("neither XDG_DATA_HOME nor HOME is an absolute path")?
                 .join(".local")
@@ -179,14 +177,21 @@ pub fn events_db_path_for(vars: &BTreeMap<String, String>, platform: Platform) -
 }
 
 pub fn events_db_path() -> Result<PathBuf> {
-    let vars = ["XDG_DATA_HOME", "HOME", "LOCALAPPDATA"]
-        .into_iter()
-        .filter_map(|key| {
-            std::env::var(key)
-                .ok()
-                .map(|value| (key.to_string(), value))
-        })
-        .collect();
+    let vars = [
+        "XDG_DATA_HOME",
+        "HOME",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        std::env::var(key)
+            .ok()
+            .map(|value| (key.to_string(), value))
+    })
+    .collect();
     events_db_path_for(&vars, Platform::current())
 }
 

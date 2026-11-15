@@ -2,7 +2,7 @@
 
 `oncebitten capture --host <host>` reads one hook payload from stdin, derives signals with no model call and no network, and records them in SQLite.
 
-- Database: `<data dir>/oncebitten/events.db`. The data dir is `$XDG_DATA_HOME` when absolute, else `~/.local/share` on Unix, else `%LOCALAPPDATA%` on Windows.
+- Database: `<data dir>/oncebitten/events.db`. The data dir is `$XDG_DATA_HOME` when absolute, else `~/.local/share` on Unix, else `%LOCALAPPDATA%` on Windows, falling back to `<home>\AppData\Local`.
 - Exits 0 on every path, prints nothing to stdout, writes one line to stderr on error.
 - `ONCEBITTEN_TRIAGE=1` makes it exit 0 without reading stdin or writing.
 - 100 captures finish in under 5 s (test `one_hundred_captures_finish_in_under_five_seconds`).

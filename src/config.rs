@@ -359,6 +359,14 @@ pub fn home_dir(vars: &BTreeMap<String, String>, platform: Platform) -> Option<P
     candidates.into_iter().flatten().find_map(absolute)
 }
 
+/// `APPDATA` or `LOCALAPPDATA` when absolute, else `<home>\AppData\<sub>`.
+pub fn windows_app_dir(vars: &BTreeMap<String, String>, var: &str, sub: &str) -> Option<PathBuf> {
+    vars.get(var)
+        .filter(|dir| Platform::Windows.is_absolute(dir))
+        .map(PathBuf::from)
+        .or_else(|| home_dir(vars, Platform::Windows).map(|home| home.join("AppData").join(sub)))
+}
+
 pub fn user_config_path(vars: &BTreeMap<String, String>) -> Result<PathBuf> {
     user_config_path_for(vars, Platform::current())
 }
@@ -373,11 +381,9 @@ pub fn user_config_path_for(
     {
         Some(dir) => PathBuf::from(dir),
         None => match platform {
-            Platform::Windows => PathBuf::from(
-                vars.get("APPDATA")
-                    .filter(|dir| platform.is_absolute(dir))
-                    .context("neither XDG_CONFIG_HOME nor APPDATA is an absolute path")?,
-            ),
+            Platform::Windows => windows_app_dir(vars, "APPDATA", "Roaming").context(
+                "none of XDG_CONFIG_HOME, APPDATA or a home directory is an absolute path",
+            )?,
             Platform::Unix => home_dir(vars, platform)
                 .context("neither XDG_CONFIG_HOME nor HOME is an absolute path")?
                 .join(".config"),

@@ -17,7 +17,7 @@ Unknown keys and invalid values fail the load. The error names the file, or the 
 
 `HOME`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA` and `XDG_CONFIG_HOME` count only when they hold an absolute path. A non-Unicode value in one of them, or in any `ONCEBITTEN_*` variable, fails the load; other non-Unicode variables are ignored.
 
-The home directory is `HOME`. On Windows, which sets no `HOME` by default, it falls back to `USERPROFILE`, then to `HOMEDRIVE` plus `HOMEPATH`. `oncebitten hooks` uses it for user scope; the user config and the event database on Windows keep using `APPDATA` and `LOCALAPPDATA`.
+The home directory is `HOME`. On Windows, which sets no `HOME` by default, it falls back to `USERPROFILE`, then to `HOMEDRIVE` plus `HOMEPATH`. `oncebitten hooks` uses it for user scope. On Windows the user config lives under `APPDATA` and the event database under `LOCALAPPDATA`; when either is unset or relative, the home directory's `AppData\Roaming` or `AppData\Local` is used instead.
 
 `oncebitten config show --origin` prints the merged result and tags each key with its layer. `oncebitten config path` prints the user file and the project file it reads.
 
