@@ -193,3 +193,26 @@ fn prompt_carries_the_context_block() {
     assert!(prompt.contains("existing rules:\n- no-unwrap"));
     assert_eq!(build_prompt_with(&input, ""), build_prompt(&input));
 }
+
+#[test]
+fn many_rules_leave_room_for_past_rejections() {
+    use oncebitten::triage::prompt::{context_block, MAX_CONTEXT_BYTES, MAX_CONTEXT_ITEMS};
+    let reasons: Vec<String> = (0..5).map(|i| format!("reason {i}")).collect();
+    let short: Vec<(String, String)> = (0..40).map(|i| (format!("rule-{i}"), "d".into())).collect();
+    let long: Vec<(String, String)> = (0..40)
+        .map(|i| (format!("rule-{i}"), "d".repeat(300)))
+        .collect();
+    for rules in [short, long] {
+        let text = context_block(&rules, &reasons);
+        let items = text.lines().filter(|line| line.starts_with("- ")).count();
+        assert!(items <= MAX_CONTEXT_ITEMS, "{items} items");
+        assert!(text.len() <= MAX_CONTEXT_BYTES, "{} bytes", text.len());
+        assert!(text.contains("rule-0"), "{text}");
+        for reason in &reasons {
+            assert!(
+                text.contains(reason.as_str()),
+                "{reason} crowded out:\n{text}"
+            );
+        }
+    }
+}

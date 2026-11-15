@@ -13,6 +13,10 @@ An ast-grep or native draft's bad fixture must quote verbatim a run of consecuti
 pub const MAX_CONTEXT_ITEMS: usize = 30;
 /// Bytes the context block may hold.
 pub const MAX_CONTEXT_BYTES: usize = 4096;
+/// Items of the context block held for past rejections, so rules cannot crowd them out.
+pub const RESERVED_REJECTION_ITEMS: usize = 10;
+/// Bytes of the context block held for past rejections.
+pub const RESERVED_REJECTION_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Occurrence {
@@ -93,43 +97,79 @@ pub fn build_prompt(input: &PromptInput) -> String {
 /// Lists existing rules and past rejections for the host to check against.
 /// `rules` pairs an id with its description; `rejections` holds reasons.
 /// Caps total items at `MAX_CONTEXT_ITEMS` and bytes at `MAX_CONTEXT_BYTES`.
+/// Rejections first take up to `RESERVED_REJECTION_ITEMS` items and
+/// `RESERVED_REJECTION_BYTES` bytes; rules fill the rest, and rejections left
+/// over take whatever room the rules leave.
 pub fn context_block(rules: &[(String, String)], rejections: &[String]) -> String {
-    let mut out = String::new();
-    let mut items = 0;
+    const RULES: &str = "existing rules:";
+    const REJECTED: &str = "rejected proposals:";
     let rule_lines: Vec<String> = rules
         .iter()
-        .map(|(id, desc)| format!("- {id}: {desc}"))
+        .map(|(id, desc)| bound(&format!("- {id}: {desc}"), MAX_SUMMARY_BYTES))
         .collect();
     let rejection_lines: Vec<String> = rejections
         .iter()
-        .map(|reason| format!("- rejected: {reason}"))
+        .map(|reason| bound(&format!("- rejected: {reason}"), MAX_SUMMARY_BYTES))
         .collect();
-    let sections = [
-        ("existing rules:", rule_lines),
-        ("rejected proposals:", rejection_lines),
-    ];
-    for (heading, lines) in sections {
-        let mut header_written = false;
+    let reserved = take(
+        &rejection_lines,
+        REJECTED,
+        RESERVED_REJECTION_ITEMS,
+        RESERVED_REJECTION_BYTES,
+    );
+    let held_bytes = section_len(REJECTED, &rejection_lines[..reserved]);
+    let ruled = take(
+        &rule_lines,
+        RULES,
+        MAX_CONTEXT_ITEMS - reserved,
+        MAX_CONTEXT_BYTES - held_bytes,
+    );
+    let rules_bytes = section_len(RULES, &rule_lines[..ruled]);
+    let rejected = take(
+        &rejection_lines,
+        REJECTED,
+        MAX_CONTEXT_ITEMS - ruled,
+        MAX_CONTEXT_BYTES - rules_bytes,
+    )
+    .max(reserved);
+    let mut out = String::new();
+    for (heading, lines) in [
+        (RULES, &rule_lines[..ruled]),
+        (REJECTED, &rejection_lines[..rejected]),
+    ] {
+        if lines.is_empty() {
+            continue;
+        }
+        out.push_str(heading);
+        out.push('\n');
         for line in lines {
-            if items == MAX_CONTEXT_ITEMS {
-                break;
-            }
-            let line = bound(&line, MAX_SUMMARY_BYTES);
-            let heading_len = if header_written { 0 } else { heading.len() + 1 };
-            if out.len() + heading_len + line.len() + 1 > MAX_CONTEXT_BYTES {
-                break;
-            }
-            if !header_written {
-                out.push_str(heading);
-                out.push('\n');
-                header_written = true;
-            }
-            out.push_str(&line);
+            out.push_str(line);
             out.push('\n');
-            items += 1;
         }
     }
     out
+}
+
+/// How many leading `lines` fit under `heading` within `items` and `bytes`.
+fn take(lines: &[String], heading: &str, items: usize, bytes: usize) -> usize {
+    let mut used = heading.len() + 1;
+    let mut count = 0;
+    for line in lines.iter().take(items) {
+        if used + line.len() + 1 > bytes {
+            break;
+        }
+        used += line.len() + 1;
+        count += 1;
+    }
+    count
+}
+
+/// Bytes `heading` and `lines` take in the block; nothing when `lines` is empty.
+fn section_len(heading: &str, lines: &[String]) -> usize {
+    if lines.is_empty() {
+        return 0;
+    }
+    heading.len() + 1 + lines.iter().map(|line| line.len() + 1).sum::<usize>()
 }
 
 /// `build_prompt` with a context block placed before the cluster details.

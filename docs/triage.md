@@ -15,7 +15,7 @@
 
 The host must return these five keys plus an optional `draft`: a proposed rule, or `null`. `mistake_class` is optional too: a missing or `null` value parses as `null`, so answers from older hosts still load. Extra keys and wrong types are rejected. An invalid draft rejects the whole answer.
 
-The prompt carries a context block before the cluster details: the ids and descriptions of the loaded rules, and the past rejection reasons. The block holds at most 30 items and 4 KiB. A rule that fails to load is left out of the block. Proposals use `mistake_class` and the rationale to flag possible duplicates; see [proposals.md](proposals.md#possible-duplicates). An invalid draft rejects the whole answer. Only a rule-shaped verdict keeps its draft; the draft fields are in [proposals.md](proposals.md#draft). The printed verdict omits the draft.
+The prompt carries a context block before the cluster details: the ids and descriptions of the loaded rules, and the past rejection reasons. The block holds at most 30 items and 4 KiB, of which up to 10 items and 1 KiB are held for past rejections, so many rules cannot crowd them out. A rule that fails to load is left out of the block. Proposals use `mistake_class` and the rationale to flag possible duplicates; see [proposals.md](proposals.md#possible-duplicates). An invalid draft rejects the whole answer. Only a rule-shaped verdict keeps its draft; the draft fields are in [proposals.md](proposals.md#draft). The printed verdict omits the draft.
 
 ## Hosts
 
