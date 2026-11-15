@@ -61,6 +61,13 @@ export const PAGES = [
     description: 'One-shot host verdicts on an evidence cluster, hooks-off proof and host support.',
   },
   {
+    slug: 'proposals',
+    source: 'docs/proposals.md',
+    group: 'Guides',
+    title: 'Proposals',
+    description: 'Rules triage drafts, their proofs, and accepting or rejecting them.',
+  },
+  {
     slug: 'steer',
     source: 'docs/steer.md',
     group: 'Guides',
