@@ -28,7 +28,7 @@
 
 - A prompt is stored as `sha256:<hex>` of its text, in `events.summary`. The text itself is not stored. The `user-correction` detail holds only the matched phrases.
 - Schema 2 (`PRAGMA user_version = 2`) migrates old databases. On first open, each stored prompt becomes its digest, and each `user-correction` detail is rebuilt from the default lexicon. A phrase that appears only in a custom list is not recovered from old rows.
-- The migration overwrites the old rows. SQLite can keep freed pages and the WAL file until they are checkpointed or the database is vacuumed.
+- The migration overwrites the old rows, then runs `VACUUM` and a `wal_checkpoint(TRUNCATE)`, so no old prompt text stays in freed pages or the WAL. It sets schema version 2 only after both succeed; if one fails, the next open retries and skips rows already digested.
 - Tool summaries (the Bash command or the file path, cut to 2000 characters) are not redacted. The agent writes them from its tool input. A command can still contain text the user typed, for example a pasted value in `echo`. Redacting them would drop the command that the `repeat-failure`, `test-fail-then-pass` and `revert` signals need.
 
 ## Hosts
@@ -60,7 +60,7 @@ oncebitten hooks uninstall --host <host> --scope <user|project>
 | cursor | `.cursor/hooks.json` | `beforeSubmitPrompt`, `postToolUse`, `postToolUseFailure`, flat `{command}` entries, `version` 1 |
 | copilot | user `.copilot/hooks/oncebitten.json`, project `.github/hooks/oncebitten.json` | file owned by oncebitten: `userPromptSubmitted`, `postToolUse` with `bash` and `powershell` commands |
 | opencode | user `.config/opencode/plugins/oncebitten.js`, project `.opencode/plugins/oncebitten.js` | JS plugin owned by oncebitten |
-| pi | user `.pi/agent/extensions/oncebitten.js`, project `.pi/extensions/oncebitten.js` | JS extension owned by oncebitten. Project scope is relative to the directory pi starts in, not the git root, and was verified by a real run. User scope is `~/.pi/agent` by pi's source; pi's `$PI_CODING_AGENT_DIR` moves that directory, and `hooks install` does not read it. |
+| pi | user `.pi/agent/extensions/oncebitten.js`, project `.pi/extensions/oncebitten.js` | JS extension owned by oncebitten. Project scope is relative to the directory pi starts in, not the git root, and was verified by a real run. User scope is `~/.pi/agent` by pi's source. When `$PI_CODING_AGENT_DIR` is non-empty, `hooks install` and `hooks uninstall` use `$PI_CODING_AGENT_DIR/extensions/oncebitten.js` instead, expanding a leading `~` as pi does; a relative value is an error. |
 
 - `<home>` is `HOME`, or on Windows `USERPROFILE`, then `HOMEDRIVE`+`HOMEPATH`.
 - Commands call this executable by absolute, canonicalized path (`std::env::current_exe`), never through `PATH`. The path is single-quoted on Unix, double-quoted on Windows (cmd), `& '...'` in the copilot `powershell` field. No `${VAR:-default}` syntax. Running install again adds nothing; after the binary moves, it rewrites the path in place.

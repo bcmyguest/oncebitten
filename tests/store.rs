@@ -292,3 +292,79 @@ fn migration_blanks_prompt_text_from_schema_one() {
     assert_eq!(detail, "never");
     assert_eq!(tool, "cargo test");
 }
+
+const SCHEMA_ONE: &str = "CREATE TABLE events (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL,
+    host TEXT NOT NULL, session_id TEXT NOT NULL, repo TEXT, kind TEXT NOT NULL, tool TEXT,
+    summary TEXT NOT NULL, payload_hash TEXT NOT NULL UNIQUE);
+    CREATE TABLE signals (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL,
+    ts INTEGER NOT NULL, host TEXT NOT NULL, session_id TEXT NOT NULL,
+    kind TEXT NOT NULL, detail TEXT NOT NULL);";
+
+fn file_bytes(path: &std::path::Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_default()
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+#[test]
+fn migration_leaves_no_prompt_text_in_the_file_or_wal() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let secret = "UNIQUE-SECRET-PROMPT-TEXT never share this";
+    {
+        let conn = raw(&path);
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        conn.execute_batch(SCHEMA_ONE).unwrap();
+        for id in 1..=200 {
+            conn.execute(
+                "INSERT INTO events VALUES (?1, ?1, 'claude', 's', NULL, 'prompt', NULL, ?2, ?3)",
+                rusqlite::params![id, format!("{secret} {id}"), format!("h{id}")],
+            )
+            .unwrap();
+        }
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let _store = Store::open(&path).unwrap();
+    let wal = dir.path().join("events.db-wal");
+    let needle = b"UNIQUE-SECRET-PROMPT-TEXT";
+    assert!(
+        !contains(&file_bytes(&path), needle),
+        "text left in the db file"
+    );
+    assert!(!contains(&file_bytes(&wal), needle), "text left in the WAL");
+}
+
+#[test]
+fn rerunning_the_migration_keeps_digested_rows() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let digested = digest("Please never touch my keys");
+    {
+        let conn = raw(&path);
+        conn.execute_batch(SCHEMA_ONE).unwrap();
+        conn.execute(
+            "INSERT INTO events VALUES (1, 1, 'claude', 's', NULL, 'prompt', NULL, ?1, 'h1')",
+            [&digested],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO signals VALUES (1, 1, 1, 'claude', 's', 'user-correction', 'never');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let _store = Store::open(&path).unwrap();
+    let conn = raw(&path);
+    let prompt: String = conn
+        .query_row("SELECT summary FROM events WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    let detail: String = conn
+        .query_row("SELECT detail FROM signals WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(prompt, digested);
+    assert_eq!(detail, "never");
+}

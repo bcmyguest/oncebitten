@@ -206,6 +206,9 @@ fn migrate(conn: &Connection) -> Result<()> {
         }
         1 => {
             redact_prompts(conn)?;
+            purge_freed_pages(conn)?;
+            // Set last: if the purge fails, the next open redoes both steps,
+            // and `redact_prompts` skips rows it already digested.
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             Ok(())
         }
@@ -248,6 +251,9 @@ fn redact_prompts(conn: &Connection) -> Result<()> {
         rows.collect::<rusqlite::Result<_>>()?
     };
     for (id, prompt) in prompts {
+        if prompt.starts_with(PROMPT_DIGEST_PREFIX) {
+            continue;
+        }
         let phrases = signal::matched_phrases(&prompt, DEFAULT_CORRECTION_LEXICON);
         tx.execute(
             "UPDATE events SET summary = ?1 WHERE id = ?2",
@@ -260,6 +266,22 @@ fn redact_prompts(conn: &Connection) -> Result<()> {
     }
     tx.commit()?;
     Ok(())
+}
+
+/// After `redact_prompts`, the old prompt text still sits in SQLite's freed
+/// pages and in the WAL. VACUUM rewrites the file without them, and the
+/// TRUNCATE checkpoint empties the WAL.
+fn purge_freed_pages(conn: &Connection) -> Result<()> {
+    conn.execute_batch("VACUUM")
+        .context("cannot VACUUM the events database after redacting prompts")?;
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .context("cannot checkpoint the events database WAL")
+    .and_then(|busy| match busy {
+        0 => Ok(()),
+        _ => bail!("cannot truncate the events database WAL: another connection holds it"),
+    })
 }
 
 fn payload_hash(event: &NewEvent) -> String {
