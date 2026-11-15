@@ -112,9 +112,12 @@ oncebitten hooks install --host claude --scope user   # capture and steer hooks;
 oncebitten hooks uninstall --host claude --scope user
 oncebitten evidence list          # mistake clusters seen in 2+ sessions, or stated once
 oncebitten evidence reject <id> --reason "one-off"
+oncebitten stats [--since <days>] [--json]   # read-only funnel: signals to clusters to drafts to decisions
 ```
 
 Rules: [docs/rules.md](docs/rules.md). Example rules: [examples/](examples/README.md). Gate, proofs and baseline: [docs/gate.md](docs/gate.md). Agent-facing summary: [llms.txt](llms.txt).
+
+Funnel counts per mistake class: [docs/stats.md](docs/stats.md).
 
 Hooks record prompts and tool outcomes locally: [docs/capture.md](docs/capture.md) lists what each host reports and how each was verified. [docs/evidence.md](docs/evidence.md) covers clustering and rejections.
 

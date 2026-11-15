@@ -287,6 +287,15 @@ impl Store {
         Self::setup(conn)
     }
 
+    /// Opens an existing store for reads. Runs no migration and no DDL; the
+    /// caller checks the schema version first with `probe`.
+    pub fn open_read_only(path: &Path) -> Result<Self> {
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| format!("cannot open {}", path.display()))?;
+        conn.busy_timeout(BUSY_TIMEOUT)?;
+        Ok(Store { conn })
+    }
+
     pub fn open_in_memory() -> Result<Self> {
         Self::setup(Connection::open_in_memory()?)
     }

@@ -68,6 +68,13 @@ export const PAGES = [
     description: 'Rules triage drafts, their proofs, and accepting or rejecting them.',
   },
   {
+    slug: 'stats',
+    source: 'docs/stats.md',
+    group: 'Guides',
+    title: 'Stats',
+    description: 'The capture-to-rule funnel per mistake class, read-only.',
+  },
+  {
     slug: 'steer',
     source: 'docs/steer.md',
     group: 'Guides',
