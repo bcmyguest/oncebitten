@@ -47,10 +47,31 @@ pub struct Captured {
 /// Builds the command for `host` at `agent` (a model name, or `default`).
 /// Hosts without a verified headless JSON call are rejected here.
 pub fn invocation(host: Host, agent: &str, prompt: &str, workdir: &Path) -> Result<Invocation> {
+    build(host, agent, prompt, workdir, true)
+}
+
+/// The same call with the hooks-off flags removed. The hooks-off proof runs it
+/// first to show that its sentinels fire when hooks are on.
+pub fn control_invocation(
+    host: Host,
+    agent: &str,
+    prompt: &str,
+    workdir: &Path,
+) -> Result<Invocation> {
+    build(host, agent, prompt, workdir, false)
+}
+
+fn build(
+    host: Host,
+    agent: &str,
+    prompt: &str,
+    workdir: &Path,
+    hooks_off: bool,
+) -> Result<Invocation> {
     let model = (agent != DEFAULT_AGENT).then_some(agent);
     match host {
-        Host::Claude => Ok(claude(model, prompt)),
-        Host::Codex => Ok(codex(model, prompt, workdir)),
+        Host::Claude => Ok(claude(model, prompt, hooks_off)),
+        Host::Codex => Ok(codex(model, prompt, workdir, hooks_off)),
         Host::Opencode => Ok(opencode(model, prompt)),
         Host::Pi => bail!(
             "unsupported host `{}`: no verified headless JSON call (see docs/research/spike-triage.md)",
@@ -59,21 +80,19 @@ pub fn invocation(host: Host, agent: &str, prompt: &str, workdir: &Path) -> Resu
     }
 }
 
-fn claude(model: Option<&str>, prompt: &str) -> Invocation {
-    let mut args = strings(&[
-        "-p",
-        prompt,
-        "--output-format",
-        "json",
-        "--setting-sources",
-        "project,local",
+fn claude(model: Option<&str>, prompt: &str, hooks_off: bool) -> Invocation {
+    let mut args = strings(&["-p", prompt, "--output-format", "json"]);
+    if hooks_off {
+        args.extend(strings(&["--setting-sources", "project,local"]));
+    }
+    args.extend(strings(&[
         "--disable-slash-commands",
         "--tools",
         "",
         "--json-schema",
         SCHEMA,
         "--no-session-persistence",
-    ]);
+    ]));
     push_model(&mut args, "--model", model);
     Invocation {
         program: "claude".into(),
@@ -86,19 +105,14 @@ fn claude(model: Option<&str>, prompt: &str) -> Invocation {
     }
 }
 
-fn codex(model: Option<&str>, prompt: &str, workdir: &Path) -> Invocation {
+fn codex(model: Option<&str>, prompt: &str, workdir: &Path, hooks_off: bool) -> Invocation {
     let schema_path = workdir.join(SCHEMA_FILE);
     let answer_path = workdir.join(ANSWER_FILE);
-    let mut args = strings(&[
-        "exec",
-        "--skip-git-repo-check",
-        "--json",
-        "--ephemeral",
-        "--disable",
-        "hooks",
-        "-s",
-        "read-only",
-    ]);
+    let mut args = strings(&["exec", "--skip-git-repo-check", "--json", "--ephemeral"]);
+    if hooks_off {
+        args.extend(strings(&["--disable", "hooks"]));
+    }
+    args.extend(strings(&["-s", "read-only"]));
     push_model(&mut args, "-m", model);
     args.push("--output-schema".into());
     args.push(path_arg(&schema_path));
