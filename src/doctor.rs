@@ -17,7 +17,7 @@ use crate::hooks::{self, Scope};
 use crate::host::{Host, ALL_HOSTS};
 use crate::lockfile;
 use crate::proof::{self, Validity};
-use crate::rule::{Mode, Status};
+use crate::rule::{Check, Mode, Status};
 use crate::rules::{self, Failure};
 use crate::store::{self, Probe};
 
@@ -25,8 +25,58 @@ use crate::store::{self, Probe};
 pub const MIN_PRE_COMMIT: (u64, u64, u64) = (3, 2, 0);
 const PRE_COMMIT: &str = "pre-commit";
 const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
-const GATE_HOOK_IDS: [&str; 2] = ["oncebitten-gate", "oncebitten-gate-system"];
+/// The first prek release with the `pre-push` hook type (prek CHANGELOG, 0.1.5).
+pub const MIN_PREK: (u64, u64, u64) = (0, 1, 5);
+const PREK: &str = "prek";
+const UVX: &str = "uvx";
+const PRE_COMMIT_FIX: &str = "install pre-commit 3.2.0 or later (pip install pre-commit; \
+     https://pre-commit.com/#install), or prek (uv tool install prek), \
+     or run it through uv with uvx prek install --hook-type pre-push \
+     (uv: https://docs.astral.sh/uv/getting-started/installation/)";
+const GATE_HOOK_IDS: [&str; 3] = [
+    "oncebitten-gate",
+    "oncebitten-gate-system",
+    "oncebitten-gate-python",
+];
 const OPENSHELL: &str = "openshell";
+const OPENSHELL_INSTALL: &str =
+    "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh \
+     (https://docs.nvidia.com/openshell/latest/about/installation)";
+const DOCKER: &str = "docker";
+/// Install commands for programs oncebitten or its rules run, from each
+/// tool's official install page.
+const INSTALLERS: &[(&str, &str)] = &[
+    (
+        "cargo",
+        "install Rust with curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh \
+         (https://rustup.rs)",
+    ),
+    (
+        "ruff",
+        "uv tool install ruff@latest (https://docs.astral.sh/ruff/installation/)",
+    ),
+    (
+        DOCKER,
+        "install Docker: https://docs.docker.com/get-started/get-docker/",
+    ),
+    (
+        "claude",
+        "curl -fsSL https://claude.ai/install.sh | bash (https://code.claude.com/docs/en/setup)",
+    ),
+    (
+        "codex",
+        "npm install -g @openai/codex (https://github.com/openai/codex)",
+    ),
+    (
+        "opencode",
+        "curl -fsSL https://opencode.ai/v2/install | bash (https://opencode.ai/docs/)",
+    ),
+    (
+        "pi",
+        "curl -fsSL https://pi.dev/install.sh | sh \
+         (https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)",
+    ),
+];
 const NO_GATEWAY: &str = "No gateway configured";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(50);
@@ -105,17 +155,17 @@ pub fn exit_code(lines: &[Line]) -> i32 {
     i32::from(lines.iter().any(|line| line.level == Level::Fail))
 }
 
-/// Runs every check. Reads files and runs `pre-commit --version` and
-/// `openshell status`; writes nothing.
+/// Runs every check. Reads files and runs `pre-commit --version`,
+/// `prek --version` and `openshell status`; writes and installs nothing.
 pub fn run(inputs: &Inputs, gateway: Option<&str>) -> Vec<Line> {
     let mut lines = Vec::new();
-    let config_loads = match config::load(inputs) {
+    let loaded = match config::load(inputs) {
         Ok(loaded) => {
             lines.push(ok("config", "loads"));
             for warning in &loaded.warnings {
                 lines.push(warn("config", warning, "see oncebitten config path"));
             }
-            true
+            Some(loaded)
         }
         Err(error) => {
             lines.push(fail(
@@ -123,9 +173,10 @@ pub fn run(inputs: &Inputs, gateway: Option<&str>) -> Vec<Line> {
                 format!("{error:#}"),
                 "correct the file named above; oncebitten config path lists them",
             ));
-            false
+            None
         }
     };
+    let config_loads = loaded.is_some();
     let repo = config::repo_root(&inputs.cwd);
     lines.push(pre_commit());
     match &repo {
@@ -147,31 +198,55 @@ pub fn run(inputs: &Inputs, gateway: Option<&str>) -> Vec<Line> {
     lines.extend(capture_hooks(inputs, project));
     lines.push(evidence_store(inputs));
     lines.push(openshell(gateway));
+    if let Some(loaded) = &loaded {
+        lines.extend(triage_hosts(loaded));
+    }
     lines
 }
 
+/// The hook runner: pre-commit, else prek, else uvx, which runs either.
 fn pre_commit() -> Line {
-    let fix = "install pre-commit 3.2.0 or later, e.g. pipx install pre-commit";
-    let output = match probe(PRE_COMMIT, &["--version"]) {
-        Ok(output) => output,
-        Err(error) => return fail(PRE_COMMIT, format!("{error:#}"), fix),
+    let pre_commit = match runner_version(PRE_COMMIT, MIN_PRE_COMMIT, "the pre-push stage name") {
+        Ok(version) => return ok(PRE_COMMIT, format!("version {version}")),
+        Err(problem) => problem,
     };
-    let Some(version) = parse_version(&output) else {
-        return fail(
-            PRE_COMMIT,
-            format!("cannot read a version in `{}`", output.trim()),
-            fix,
-        );
+    let prek = match runner_version(PREK, MIN_PREK, "the pre-push hook type") {
+        Ok(version) => return ok(PRE_COMMIT, format!("prek version {version}")),
+        Err(problem) => problem,
     };
-    let (major, minor, patch) = version;
-    if version < MIN_PRE_COMMIT {
-        return fail(
+    if find_on_path(UVX).is_some() {
+        return ok(
             PRE_COMMIT,
-            format!("version {major}.{minor}.{patch} lacks the pre-push stage name"),
-            fix,
+            "uvx on PATH; the hook runs as uvx prek or uvx pre-commit",
         );
     }
-    ok(PRE_COMMIT, format!("version {major}.{minor}.{patch}"))
+    fail(
+        PRE_COMMIT,
+        format!("{pre_commit}; {}; uvx not on PATH", named(PREK, &prek)),
+        PRE_COMMIT_FIX,
+    )
+}
+
+/// `problem` led by `program`: probe errors name it already, version errors do not.
+fn named(program: &str, problem: &str) -> String {
+    match problem.starts_with(program) {
+        true => problem.to_owned(),
+        false => format!("{program} {problem}"),
+    }
+}
+
+/// `program --version` as `X.Y.Z` when at least `min`, else what is wrong.
+fn runner_version(program: &str, min: (u64, u64, u64), lacks: &str) -> Result<String, String> {
+    let output = probe(program, &["--version"]).map_err(|error| format!("{error:#}"))?;
+    let Some(version) = parse_version(&output) else {
+        return Err(format!("cannot read a version in `{}`", output.trim()));
+    };
+    let (major, minor, patch) = version;
+    let shown = format!("{major}.{minor}.{patch}");
+    if version < min {
+        return Err(format!("version {shown} lacks {lacks}"));
+    }
+    Ok(shown)
 }
 
 /// The first `X.Y.Z` in `text`, such as `pre-commit 4.6.0`.
@@ -190,7 +265,8 @@ pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
 fn pre_commit_config(repo: &Path) -> Line {
     let check = "pre-push hook";
     let fix = "add the oncebitten-gate hook to .pre-commit-config.yaml (docs/gate.md), \
-               then run pre-commit install --hook-type pre-push";
+               then run pre-commit install --hook-type pre-push \
+               (with prek: prek install --hook-type pre-push)";
     let path = repo.join(PRE_COMMIT_CONFIG);
     let Ok(text) = std::fs::read_to_string(&path) else {
         return fail(check, format!("no {PRE_COMMIT_CONFIG}"), fix);
@@ -199,7 +275,10 @@ fn pre_commit_config(repo: &Path) -> Line {
         Some(id) => ok(check, format!("{id} in {PRE_COMMIT_CONFIG}")),
         None => fail(
             check,
-            format!("{PRE_COMMIT_CONFIG} lists neither oncebitten-gate nor oncebitten-gate-system"),
+            format!(
+                "{PRE_COMMIT_CONFIG} lists none of oncebitten-gate, oncebitten-gate-system \
+                 or oncebitten-gate-python"
+            ),
             fix,
         ),
     }
@@ -271,13 +350,24 @@ fn rules_and_proofs(inputs: &Inputs) -> Vec<Line> {
             active.len()
         ),
     )];
+    let mut programs: Vec<(&str, &str)> = Vec::new();
+    let mut replay_needed = false;
     for entry in active {
+        if let Check::Native { command } = &entry.rule.check {
+            if let Some(program) = command.first() {
+                if !programs.iter().any(|(seen, _)| seen == program) {
+                    programs.push((program, &entry.id));
+                }
+            }
+        }
         if !gate::needs_proof(&entry.rule.check) {
             continue;
         }
         let check = format!("proof {}", entry.id);
         let fix = format!("run oncebitten replay {} and commit proof.json", entry.id);
-        match proof::validity(&entry.rule) {
+        let validity = proof::validity(&entry.rule);
+        replay_needed |= validity != Validity::Valid;
+        match validity {
             Validity::Valid => lines.push(ok(check, "valid")),
             invalid if entry.rule.mode == Mode::Block => {
                 lines.push(fail(check, gate::describe(&entry.id, &invalid), fix))
@@ -285,7 +375,77 @@ fn rules_and_proofs(inputs: &Inputs) -> Vec<Line> {
             invalid => lines.push(warn(check, gate::describe(&entry.id, &invalid), fix)),
         }
     }
+    for (program, id) in programs {
+        // A path such as ./scripts/lint lives in the repository, not on PATH.
+        if program.contains(['/', '\\']) {
+            continue;
+        }
+        lines.push(tool(program, &format!("rule {id} runs it")));
+    }
+    if replay_needed {
+        lines.push(tool(DOCKER, "replay builds its sandbox image with it"));
+    }
     lines
+}
+
+/// `ok` when `program` is on PATH, else `warn` with its install command.
+/// Doctor only reports; it never installs.
+fn tool(program: &str, why: &str) -> Line {
+    if find_on_path(program).is_some() {
+        return ok(program, format!("on PATH; {why}"));
+    }
+    warn(
+        program,
+        format!("not on PATH; {why}"),
+        install_hint(program),
+    )
+}
+
+fn install_hint(program: &str) -> String {
+    INSTALLERS
+        .iter()
+        .find(|(name, _)| *name == program)
+        .map_or_else(
+            || format!("install {program} and put it on PATH"),
+            |(_, hint)| (*hint).to_owned(),
+        )
+}
+
+/// One line per triage host the configuration names; the built-in default
+/// target counts only when a layer sets it.
+fn triage_hosts(loaded: &config::Loaded) -> Vec<Line> {
+    let triage = &loaded.config.triage;
+    let explicit_default = loaded
+        .origins
+        .get("triage.default")
+        .is_some_and(|origin| *origin != config::Origin::Default);
+    let mut hosts = Vec::new();
+    if explicit_default {
+        hosts.push(triage.default.host);
+    }
+    for target in [&triage.claude, &triage.codex, &triage.pi, &triage.opencode]
+        .into_iter()
+        .flatten()
+    {
+        if !hosts.contains(&target.host) {
+            hosts.push(target.host);
+        }
+    }
+    hosts
+        .into_iter()
+        .map(|host| {
+            let program = host.as_str();
+            let check = format!("triage {program}");
+            if find_on_path(program).is_some() {
+                return ok(check, format!("{program} on PATH"));
+            }
+            warn(
+                check,
+                format!("{program} not on PATH; triage runs it"),
+                install_hint(program),
+            )
+        })
+        .collect()
 }
 
 fn exception_lines(repo: &Path) -> Vec<Line> {
@@ -401,10 +561,15 @@ fn evidence_store(inputs: &Inputs) -> Line {
 fn openshell(gateway: Option<&str>) -> Line {
     let check = "openshell";
     let install = if cfg!(windows) {
-        "OpenShell runs on Windows only inside WSL 2: install WSL 2, then OpenShell \
-         and oncebitten inside it (docs/rules.md#replay)"
+        format!(
+            "OpenShell runs on Windows only inside WSL 2: install WSL 2, then OpenShell \
+             ({OPENSHELL_INSTALL}) and oncebitten inside it (docs/rules.md#replay)"
+        )
     } else {
-        "install the OpenShell CLI (docs/rules.md#replay); replay --local works without it"
+        format!(
+            "install the OpenShell CLI: {OPENSHELL_INSTALL}; see docs/rules.md#replay; \
+             replay --local works without it"
+        )
     };
     if find_on_path(OPENSHELL).is_none() {
         return warn(check, "not on PATH; replay needs it", install);

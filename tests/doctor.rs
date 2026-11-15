@@ -33,6 +33,14 @@ fn gate_hook_id_ignores_other_hooks_and_comments() {
     assert_eq!(gate_hook_id(""), None);
 }
 
+#[test]
+fn gate_hook_id_finds_the_python_hook() {
+    assert_eq!(
+        gate_hook_id("      - id: oncebitten-gate-python\n"),
+        Some("oncebitten-gate-python")
+    );
+}
+
 #[cfg(unix)]
 mod cli {
     use std::fs;
@@ -407,5 +415,264 @@ mod cli {
 
         assert_eq!(code(&output), 1, "{}", both(&output));
         assert!(line(&stdout(&output), "evidence store").starts_with("fail"));
+    }
+
+    fn has_line(output: &str, check: &str) -> bool {
+        output
+            .lines()
+            .any(|line| line[6..].starts_with(&format!("{check}:")))
+    }
+
+    #[test]
+    fn prek_stands_in_for_a_missing_pre_commit() {
+        let repo = healthy();
+        fs::remove_file(bin(&repo).join("pre-commit")).unwrap();
+        fake(&repo, "prek", "echo 'prek 0.5.0'");
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        assert_eq!(
+            line(&stdout(&output), "pre-commit"),
+            "ok    pre-commit: prek version 0.5.0"
+        );
+    }
+
+    #[test]
+    fn prek_stands_in_for_an_old_pre_commit() {
+        let repo = healthy();
+        fake(&repo, "pre-commit", "echo 'pre-commit 3.1.0'");
+        fake(&repo, "prek", "echo 'prek 0.1.5'");
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        assert_eq!(
+            line(&stdout(&output), "pre-commit"),
+            "ok    pre-commit: prek version 0.1.5"
+        );
+    }
+
+    #[test]
+    fn a_prek_without_the_pre_push_hook_type_fails() {
+        let repo = healthy();
+        fs::remove_file(bin(&repo).join("pre-commit")).unwrap();
+        fake(&repo, "prek", "echo 'prek 0.1.4'");
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 1, "{}", both(&output));
+        let out = stdout(&output);
+        let pre_commit = line(&out, "pre-commit");
+        assert!(pre_commit.starts_with("fail"), "{out}");
+        assert!(pre_commit.contains("prek version 0.1.4"), "{out}");
+    }
+
+    #[test]
+    fn uvx_stands_in_for_pre_commit_and_prek() {
+        let repo = healthy();
+        fs::remove_file(bin(&repo).join("pre-commit")).unwrap();
+        fake(&repo, "uvx", "exit 1");
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        let out = stdout(&output);
+        let pre_commit = line(&out, "pre-commit");
+        assert!(pre_commit.starts_with("ok    pre-commit: uvx"), "{out}");
+        assert!(pre_commit.contains("uvx prek"), "{out}");
+        assert!(pre_commit.contains("uvx pre-commit"), "{out}");
+    }
+
+    #[test]
+    fn no_hook_runner_fails_naming_pre_commit_and_prek() {
+        let repo = healthy();
+        fs::remove_file(bin(&repo).join("pre-commit")).unwrap();
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 1, "{}", both(&output));
+        let out = stdout(&output);
+        let pre_commit = line(&out, "pre-commit");
+        assert!(pre_commit.starts_with("fail"), "{out}");
+        assert!(
+            pre_commit.contains("fix: install pre-commit 3.2.0 or later"),
+            "{out}"
+        );
+        assert!(pre_commit.contains("uv tool install prek"), "{out}");
+        assert!(
+            pre_commit.contains("uvx prek install --hook-type pre-push"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn the_gate_hook_fix_names_prek_and_every_hook_id() {
+        let repo = healthy();
+        repo.write(".pre-commit-config.yaml", "repos: []\n");
+
+        let output = doctor(&repo);
+
+        let out = stdout(&output);
+        let hook = line(&out, "pre-push hook");
+        assert!(hook.contains("oncebitten-gate-python"), "{out}");
+        assert!(hook.contains("prek install --hook-type pre-push"), "{out}");
+    }
+
+    #[test]
+    fn the_python_gate_hook_counts() {
+        let repo = healthy();
+        repo.write(
+            ".pre-commit-config.yaml",
+            &GATE_HOOK.replace("oncebitten-gate", "oncebitten-gate-python"),
+        );
+
+        let output = doctor(&repo);
+
+        assert_eq!(
+            line(&stdout(&output), "pre-push hook"),
+            "ok    pre-push hook: oncebitten-gate-python in .pre-commit-config.yaml"
+        );
+    }
+
+    #[test]
+    fn a_missing_openshell_names_its_installer() {
+        let repo = healthy();
+        fs::remove_file(bin(&repo).join("openshell")).unwrap();
+
+        let output = doctor(&repo);
+
+        let out = stdout(&output);
+        assert!(
+            line(&out, "openshell").contains(
+                "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_missing_native_rule_program_warns_with_its_installer() {
+        let repo = healthy();
+        repo.add_example("rust-no-unwrap", "active");
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        let out = stdout(&output);
+        let cargo = line(&out, "cargo");
+        assert!(
+            cargo.starts_with("warn  cargo: not on PATH; rule rust-no-unwrap runs it"),
+            "{out}"
+        );
+        assert!(cargo.contains("https://rustup.rs"), "{out}");
+    }
+
+    #[test]
+    fn a_native_rule_program_on_path_passes() {
+        let repo = healthy();
+        repo.add_example("rust-no-unwrap", "active");
+        fake(&repo, "cargo", "exit 0");
+
+        let output = doctor(&repo);
+
+        assert!(line(&stdout(&output), "cargo").starts_with("ok    cargo: on PATH"));
+    }
+
+    #[test]
+    fn an_unknown_native_rule_program_still_warns() {
+        let repo = healthy();
+        let file = repo
+            .add_example("rust-no-unwrap", "active")
+            .join("rule.toml");
+        let text = fs::read_to_string(&file).unwrap();
+        fs::write(
+            &file,
+            text.replace("[\"cargo\", \"clippy\"", "[\"mytool\", \"clippy\""),
+        )
+        .unwrap();
+
+        let output = doctor(&repo);
+
+        let out = stdout(&output);
+        let tool = line(&out, "mytool");
+        assert!(tool.starts_with("warn  mytool: not on PATH"), "{out}");
+        assert!(tool.contains("fix: install mytool"), "{out}");
+    }
+
+    #[test]
+    fn rules_without_native_programs_check_no_tools() {
+        let repo = healthy();
+        repo.add_example("rust-no-unwrap", "proposed");
+
+        let out = stdout(&doctor(&repo));
+
+        assert!(!has_line(&out, "cargo"), "{out}");
+        assert!(!has_line(&out, "docker"), "{out}");
+        assert!(!out.contains("triage"), "{out}");
+    }
+
+    #[test]
+    fn a_configured_triage_host_that_is_missing_warns() {
+        let repo = healthy();
+        repo.write(
+            ".oncebitten/config.toml",
+            "[triage]\ndefault = \"codex:default\"\nopencode = \"opencode:plan\"\n",
+        );
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        let out = stdout(&output);
+        let codex = line(&out, "triage codex");
+        assert!(
+            codex.starts_with("warn  triage codex: codex not on PATH"),
+            "{out}"
+        );
+        assert!(codex.contains("npm install -g @openai/codex"), "{out}");
+        assert!(
+            line(&out, "triage opencode")
+                .contains("curl -fsSL https://opencode.ai/v2/install | bash"),
+            "{out}"
+        );
+        assert!(!has_line(&out, "triage claude"), "{out}");
+    }
+
+    #[test]
+    fn a_configured_triage_host_on_path_passes() {
+        let repo = healthy();
+        repo.write(
+            ".oncebitten/config.toml",
+            "[triage]\ndefault = \"claude:haiku\"\n",
+        );
+        fake(&repo, "claude", "exit 0");
+
+        let out = stdout(&doctor(&repo));
+
+        assert!(
+            line(&out, "triage claude").starts_with("ok    triage claude: claude on PATH"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_proof_to_replay_without_docker_warns() {
+        let repo = healthy();
+        let file = repo.rule_dir("py-utcnow").join("rule.toml");
+        let text = fs::read_to_string(&file).unwrap();
+        fs::write(
+            &file,
+            text.replace("description = \"", "description = \"Edited. "),
+        )
+        .unwrap();
+
+        let out = stdout(&doctor(&repo));
+
+        let docker = line(&out, "docker");
+        assert!(docker.starts_with("warn  docker: not on PATH"), "{out}");
+        assert!(
+            docker.contains("https://docs.docker.com/get-started/get-docker/"),
+            "{out}"
+        );
     }
 }
