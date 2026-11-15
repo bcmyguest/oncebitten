@@ -6,6 +6,8 @@
 <img src="docs/media/oncebitten.gif" alt="Session A: the agent writes datetime.utcnow() and the user corrects it. Session B: the same mistake. oncebitten evidence list shows a cluster seen in 2 sessions. The user approves the proposed rule py-utcnow. oncebitten replay proves it in an OpenShell sandbox. git push is blocked: py-utcnow: src/app.py:2: use datetime.now(UTC)." width="720" />
 </p>
 
+Docs: https://bcmyguest.github.io/oncebitten/
+
 Status: pre-alpha. Capture, evidence clustering, `check`, `replay` and the gate work; triage and rule proposals are in progress ([PLAN.md](PLAN.md)).
 
 ## Install
