@@ -197,8 +197,15 @@ enum ProposalsAction {
     /// Reject a proposal; its cluster is never proposed again
     Reject {
         id: String,
-        #[arg(long)]
-        reason: String,
+        #[arg(
+            long,
+            required_unless_present = "duplicate_of",
+            conflicts_with = "duplicate_of"
+        )]
+        reason: Option<String>,
+        /// Reject as a duplicate of another proposal, recording the link
+        #[arg(long, conflicts_with = "reason")]
+        duplicate_of: Option<String>,
     },
     /// Commit a proposed rule to the current branch or to the writable rules source; exit 2 on a finding or a rejected proposal
     Deliver {
@@ -517,10 +524,17 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
         ProposalsAction::Show { id } => show_proposal(&store, &id),
         ProposalsAction::Accept { id } => run_accept(&store, &inputs, &id),
         ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
-        ProposalsAction::Reject { id, reason } => {
-            proposals::reject(&store, &id, &reason, now_millis()?)
-                .map(|()| println!("rejected {id}"))
-        }
+        ProposalsAction::Reject {
+            id,
+            reason,
+            duplicate_of,
+        } => match (duplicate_of, reason) {
+            (Some(other), _) => proposals::reject_duplicate(&store, &id, &other, now_millis()?)
+                .map(|()| println!("rejected {id} as a duplicate of {other}")),
+            (None, Some(reason)) => proposals::reject(&store, &id, &reason, now_millis()?)
+                .map(|()| println!("rejected {id}")),
+            (None, None) => anyhow::bail!("reject needs --reason or --duplicate-of"),
+        },
     };
     if let Err(error) = result {
         eprintln!("error: {error:#}");

@@ -378,6 +378,20 @@ pub fn accept(store: &Store, id: &str) -> Result<PathBuf> {
 /// triage does not propose it again, and a still-proposed rule is removed.
 /// The cluster's events are deleted; its decision record keeps the counts.
 pub fn reject(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
+    reject_with_reason(store, id, reason, ts)
+}
+
+/// Rejects `id` as a duplicate of `other`, which must be a queued or rejected
+/// proposal. The link is kept for the user; nothing merges automatically.
+pub fn reject_duplicate(store: &Store, id: &str, other: &str, ts: i64) -> Result<()> {
+    if store.proposal(other)?.is_none() {
+        bail!("no proposal `{other}`; see {LIST_HINT}");
+    }
+    store.set_duplicate_of(id, other)?;
+    reject_with_reason(store, id, &format!("duplicate of {other}"), ts)
+}
+
+fn reject_with_reason(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
     if reason.trim().is_empty() {
         bail!("a rejection needs a non-empty reason");
     }

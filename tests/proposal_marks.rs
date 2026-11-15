@@ -134,3 +134,25 @@ fn mark_lines_show_the_possible_and_confirmed_duplicate() {
     );
     assert!(proposals::mark_lines(&ProposalMarks::default()).is_empty());
 }
+
+#[test]
+fn rejecting_as_a_duplicate_links_and_rejects() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c0")).unwrap();
+    store.insert_proposal(&row("c1")).unwrap();
+    proposals::reject_duplicate(&store, "c1", "c0", 2).unwrap();
+    assert_eq!(
+        store
+            .proposal_marks("c1")
+            .unwrap()
+            .unwrap()
+            .duplicate_of
+            .as_deref(),
+        Some("c0")
+    );
+    assert_eq!(
+        store.proposal("c1").unwrap().unwrap().state,
+        State::Rejected
+    );
+    assert!(proposals::reject_duplicate(&store, "c1", "missing", 3).is_err());
+}
