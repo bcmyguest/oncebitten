@@ -50,7 +50,7 @@ impl Host {
         }
     }
 
-    fn parse(name: &str) -> Option<Host> {
+    pub fn parse(name: &str) -> Option<Host> {
         match name {
             "claude" => Some(Host::Claude),
             "codex" => Some(Host::Codex),
