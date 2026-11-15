@@ -1,0 +1,28 @@
+# Wheel metadata for PyPI. Build from this directory: `maturin build --release`.
+# `bindings = "bin"` ships every [[bin]] of the crate (oncebitten and
+# oncebitten-checker) in the wheel's scripts directory, so no Rust toolchain
+# is needed at install time. The wheel has no sdist: PyPI carries binaries only.
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "oncebitten"
+description = "Turns repeated agent mistakes into git-enforced rules"
+readme = "../../README.md"
+license = "Apache-2.0"
+requires-python = ">=3.8"
+dynamic = ["version"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Programming Language :: Rust",
+]
+
+[project.urls]
+Homepage = "https://bcmyguest.github.io/oncebitten/"
+Repository = "https://github.com/bcmyguest/oncebitten"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "../../Cargo.toml"
