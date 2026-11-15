@@ -5,6 +5,7 @@ pub mod check;
 pub mod config;
 pub mod delivery;
 pub mod doctor;
+pub mod duplicates;
 pub mod engine;
 pub mod evidence;
 pub mod exceptions;
