@@ -1,4 +1,4 @@
-# oncebitten
+# <img src="docs/media/icon.svg" alt="" width="36" align="absmiddle"> oncebitten
 
 **oncebitten turns repeated agent mistakes into rules that git enforces.** When the same mistake shows up in two sessions, or you state a rule once, it proposes a check. You approve it, and the check then runs at pre-push and in CI.
 
