@@ -1,7 +1,11 @@
-use anyhow::Result;
+use std::path::Path;
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use oncebitten::capture;
 use oncebitten::config::{self, Inputs};
+use oncebitten::hooks::{self, Scope};
+use oncebitten::host::Host;
 
 #[derive(Parser)]
 #[command(
@@ -27,6 +31,29 @@ enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Install or remove the capture hooks in an agent's settings
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksAction {
+    /// Add the capture hooks (idempotent)
+    Install {
+        #[arg(long)]
+        host: String,
+        #[arg(long, value_enum)]
+        scope: Scope,
+    },
+    /// Remove only oncebitten's capture hooks
+    Uninstall {
+        #[arg(long)]
+        host: String,
+        #[arg(long, value_enum)]
+        scope: Scope,
+    },
 }
 
 #[derive(Subcommand)]
@@ -51,7 +78,31 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Config { action } => run_config(action),
+        Command::Hooks { action } => run_hooks(action),
     }
+}
+
+fn run_hooks(action: HooksAction) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let (install, host, scope) = match action {
+        HooksAction::Install { host, scope } => (true, host, scope),
+        HooksAction::Uninstall { host, scope } => (false, host, scope),
+    };
+    let host = Host::parse(&host)?;
+    let home = inputs
+        .vars
+        .get("HOME")
+        .filter(|dir| Path::new(dir.as_str()).is_absolute())
+        .context("HOME is not an absolute path")?;
+    let path = hooks::settings_path(scope, Path::new(home), &inputs.cwd);
+    let changed = if install {
+        hooks::install(host, &path)?
+    } else {
+        hooks::uninstall(host, &path)?
+    };
+    let state = if changed { "changed" } else { "unchanged" };
+    println!("{state}  {}", path.display());
+    Ok(())
 }
 
 fn run_config(action: ConfigAction) -> Result<()> {
