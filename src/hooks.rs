@@ -405,7 +405,11 @@ pub fn is_installed(host: Host, path: &Path) -> Result<bool> {
         .filter_map(Value::as_array)
         .flatten();
     Ok(match host {
-        Host::Claude | Host::Codex => entries.any(is_ours_group),
+        Host::Claude | Host::Codex => entries.any(|group| {
+            group["hooks"]
+                .as_array()
+                .is_some_and(|hooks| hooks.iter().any(is_ours))
+        }),
         Host::Cursor => entries.any(is_ours),
         Host::Copilot => entries.any(is_ours_copilot),
         Host::OpenCode | Host::Pi => unreachable!("handled above"),
