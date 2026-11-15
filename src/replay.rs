@@ -8,6 +8,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub mod openshell;
+
 pub const RULE_FILE: &str = "check.yml";
 pub const FIXTURES_DIR: &str = "fixtures";
 pub const CORPUS_DIR: &str = "corpus";
