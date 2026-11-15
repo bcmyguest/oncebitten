@@ -4,17 +4,12 @@ Triage turns an evidence cluster into a queued result (see [triage.md](triage.md
 
 ## From cluster to proposal
 
-```mermaid
-flowchart LR
-    A[capture records event] -->|cluster reaches threshold| B[background triage]
-    C[oncebitten triage id] --> D
-    B --> D{verdict}
-    D -->|rule-shaped, valid draft| E[write .oncebitten/rules/id/ status = proposed]
-    D -->|no draft| F[queue a finding]
-    E --> G{replay in OpenShell}
-    G -->|proven| H[proof.json, proven proposal]
-    G -->|no sandbox, rejected, could not run| I[unproven proposal]
-```
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="media/proposals-flow-dark.svg" />
+<img src="media/proposals-flow.svg" alt="Flowchart: a cluster reaching its threshold, or oncebitten triage id, yields a verdict. A rule-shaped verdict with a valid draft is written to .oncebitten/rules/id/ as proposed and replayed in OpenShell: proven writes proof.json, while no sandbox, rejection, or a failed run leaves it unproven. A verdict without a draft queues a finding." width="624" />
+</picture>
+</p>
 
 - A verdict is rule-shaped when `repeatable` is true, `proposed_fix_kind` is not `none` and `generality` is not `one-off`. A draft beside any other verdict is dropped; the verdict queues as a finding.
 - An invalid draft rejects the whole answer as "could not run": nothing is printed or written.

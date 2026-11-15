@@ -1,0 +1,9 @@
+flowchart TD
+    A[capture records event] -->|cluster reaches threshold| B[background triage]
+    C[oncebitten triage id] --> D
+    B --> D{verdict}
+    D -->|rule-shaped, valid draft| E[write .oncebitten/rules/id/ status = proposed]
+    D -->|no draft| F[queue a finding]
+    E --> G{replay in OpenShell}
+    G -->|proven| H[proof.json, proven proposal]
+    G -->|no sandbox, rejected, could not run| I[unproven proposal]
