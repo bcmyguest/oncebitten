@@ -12,6 +12,7 @@ pub mod host;
 pub mod lifecycle;
 pub mod lockfile;
 pub mod proof;
+pub mod proposals;
 pub mod registry;
 pub mod replay;
 pub mod rule;

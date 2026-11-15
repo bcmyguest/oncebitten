@@ -131,6 +131,29 @@ pub fn cluster(rows: &[SignalRow], rejections: &[Rejection]) -> Vec<Cluster> {
     clusters
 }
 
+/// Clusters that event `event_id` brought to their threshold: candidates now,
+/// below the threshold without that event's session. A session counts once,
+/// so a second occurrence in a counted session reaches nothing.
+pub fn reached_threshold(clusters: &[Cluster], event_id: i64) -> Vec<&Cluster> {
+    clusters
+        .iter()
+        .filter(|cluster| cluster.is_candidate())
+        .filter(|cluster| {
+            let Some(trigger) = cluster.occurrences.iter().find(|o| o.event.id == event_id) else {
+                return false;
+            };
+            let key = (&trigger.event.host, &trigger.event.session_id);
+            let before = cluster
+                .occurrences
+                .iter()
+                .filter(|o| o.event.id != event_id)
+                .map(|o| (&o.event.host, &o.event.session_id))
+                .collect::<BTreeSet<_>>();
+            !before.contains(&key) && before.len() < cluster.source.min_sessions()
+        })
+        .collect()
+}
+
 pub fn load(store: &Store) -> Result<Vec<Cluster>> {
     Ok(cluster(&store.signals()?, &store.rejections()?))
 }
