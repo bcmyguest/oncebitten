@@ -379,6 +379,26 @@ mod cli {
     }
 
     #[test]
+    fn no_configured_gateway_warns_even_when_status_exits_zero() {
+        let repo = healthy();
+        fake(
+            &repo,
+            "openshell",
+            "echo 'Gateway Status'; echo; echo '  Status: No gateway configured.'",
+        );
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        let out = stdout(&output);
+        let openshell = line(&out, "openshell");
+        assert!(
+            openshell.starts_with("warn  openshell: no gateway configured"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn a_corrupt_evidence_store_fails() {
         let repo = healthy();
         repo.write("../data/oncebitten/events.db", "not a database");
