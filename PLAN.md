@@ -43,7 +43,7 @@ Pre-push is fast feedback only (bypassable with --no-verify). The guarantee is a
 5. Gate: `gate pre-push|pr`, `.pre-commit-hooks.yaml` entry, required CI check.
 6. Signal capture: hooks for Claude/Codex/Cursor/opencode/pi, no model calls.
 7. Evidence store + clustering: provenance, dedupe, independent occurrence counts, rejection memory.
-8. Triage via host contract: hooks disabled in triage call, JSON output, timeout, bounded context. Run from an empty temp dir with `ONCEBITTEN_TRIAGE=1`, which every oncebitten hook checks and exits on. Prove hooks-off with sentinel hooks in every settings scope; refuse a host that fails the proof. Streaming hosts (opencode) need parse-then-kill.
+8. Triage via host contract: hooks disabled in triage call, JSON output, timeout, bounded context. Run from an empty temp dir with `ONCEBITTEN_TRIAGE=1`, which every oncebitten hook checks and exits on. Prove hooks-off with sentinel hooks in every settings scope; refuse a host that fails the proof. Streaming hosts (opencode) need parse-then-kill. Settled: opencode is accepted without this proof, so the refusal does not apply to it.
 9. Proposal lifecycle: same-PR commit or rules-repo PR; stale proofs re-replay.
 10. Steer mode and its proofs; routing for lessons git cannot see.
 11. Lifecycle: exceptions (reason + expiry), retirement, rollback, `oncebitten doctor`.

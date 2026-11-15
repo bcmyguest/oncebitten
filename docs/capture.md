@@ -14,8 +14,22 @@
 | `tool-failure` | A tool run reports failure (`PostToolUseFailure`). |
 | `repeat-failure` | A second failure with the same tool and normalized command in one session. Normalization collapses whitespace and replaces digits, paths and hex with `<n>`, `<path>` and `<hex>`. |
 | `test-fail-then-pass` | A test runner (`cargo test`, `pytest`, `npm test`, `vitest`, `jest`, `go test`) passes after the session's previous test run failed. |
-| `user-correction` | A prompt contains a phrase from the correction lexicon, case-insensitive (`src/signal.rs`, `CORRECTION_LEXICON`). |
+| `user-correction` | A prompt contains a phrase from the correction lexicon. Its detail lists the matched phrases, comma-separated and lowercased. |
 | `revert` | A Bash `git revert`, or `git checkout --` / `git restore` of a file the session edited. |
+
+### Correction lexicon
+
+- Default list: `DEFAULT_CORRECTION_LEXICON` in `src/signal.rs`. It holds corrections (`no,`, `that's wrong`), frustration (`again`, `you keep`) and stated rules (`from now on`, `make sure`).
+- `[capture] correction_phrases` replaces the default list. `[capture] extra_correction_phrases` adds to the list in effect. Both take a TOML array. Set either in the user or project config file (see `docs/configuration.md`).
+- Matching ignores case and treats `’` as `'`. A phrase matches only where it is not inside a longer word: `no,` does not match in `know,`.
+- A phrase matches once per prompt, however often it occurs. The list is searched in order, so the detail order follows the list.
+
+## Privacy
+
+- A prompt is stored as `sha256:<hex>` of its text, in `events.summary`. The text itself is not stored. The `user-correction` detail holds only the matched phrases.
+- Schema 2 (`PRAGMA user_version = 2`) migrates old databases. On first open, each stored prompt becomes its digest, and each `user-correction` detail is rebuilt from the default lexicon. A phrase that appears only in a custom list is not recovered from old rows.
+- The migration overwrites the old rows. SQLite can keep freed pages and the WAL file until they are checkpointed or the database is vacuumed.
+- Tool summaries (the Bash command or the file path, cut to 2000 characters) are not redacted. The agent writes them from its tool input. A command can still contain text the user typed, for example a pasted value in `echo`. Redacting them would drop the command that the `repeat-failure`, `test-fail-then-pass` and `revert` signals need.
 
 ## Hosts
 
@@ -27,10 +41,10 @@
 | codex | verified from real payloads (`codex exec`) | `codex/UserPromptSubmit.json`, `codex/PreToolUse.json`, `codex/PostToolUse.json` | prompts only: `PostToolUse` carries `tool_response` as text with no error flag or exit code |
 | cursor | `sessionStart` verified from a real `cursor-agent` run; prompt and tool events from docs only (the probe model never reached them) | `cursor/sessionStart.json` | prompts, tool ok, tool failure |
 | copilot | `sessionStart` and `userPromptSubmitted` verified from a real `copilot` run; tool events from docs only | `copilot/sessionStart.json`, `copilot/userPromptSubmitted.json` | prompts, tool ok, tool failure. Native payloads carry no event name, so `toolName`/`toolResult` fields tell the events apart. |
-| opencode | `session.hook("prompt")` verified from a real `opencode run`; tool hook payload not captured | `opencode/prompt.json` | prompts only |
-| pi | verified from docs only (https://pi.dev/docs/latest/extensions); pi is not installed here | none | prompts, tool ok, tool failure |
+| opencode | `session.hook("prompt")` verified from a real `opencode run`; tool hook payload not captured | `opencode/prompt.json` | prompts only. Accepted as a triage host without a hooks-off proof (user decision). Triage is not built. |
+| pi | `before_agent_start` (prompt) and `tool_result` (tool ok, tool failure) verified from a real `pi -p` run against a local mock provider (pi 0.73.1, `@mariozechner/pi-coding-agent`); the user-scope path is verified from pi's source only | `pi/before_agent_start.json`, `pi/tool_result.json` | prompts, tool ok, tool failure |
 
-Codex, cursor and copilot fixtures hold real payloads with personal paths and the account email replaced. Codex and cursor payloads add no repo field beyond `cwd` / `workspace_roots`.
+Codex, cursor, copilot and pi fixtures hold real payloads with personal paths and the account email replaced. Codex and cursor payloads add no repo field beyond `cwd` / `workspace_roots`. Pi's session id is a random UUID and is kept. The pi fixtures are the payloads `packaging/pi/oncebitten.js` forwarded during the real run; the raw pi events were not recorded.
 
 ## Install
 
@@ -46,7 +60,7 @@ oncebitten hooks uninstall --host <host> --scope <user|project>
 | cursor | `.cursor/hooks.json` | `beforeSubmitPrompt`, `postToolUse`, `postToolUseFailure`, flat `{command}` entries, `version` 1 |
 | copilot | user `.copilot/hooks/oncebitten.json`, project `.github/hooks/oncebitten.json` | file owned by oncebitten: `userPromptSubmitted`, `postToolUse` with `bash` and `powershell` commands |
 | opencode | user `.config/opencode/plugins/oncebitten.js`, project `.opencode/plugins/oncebitten.js` | JS plugin owned by oncebitten |
-| pi | user `.pi/agent/extensions/oncebitten.js`, project `.pi/extensions/oncebitten.js` | JS extension owned by oncebitten |
+| pi | user `.pi/agent/extensions/oncebitten.js`, project `.pi/extensions/oncebitten.js` | JS extension owned by oncebitten. Project scope is relative to the directory pi starts in, not the git root, and was verified by a real run. User scope is `~/.pi/agent` by pi's source; pi's `$PI_CODING_AGENT_DIR` moves that directory, and `hooks install` does not read it. |
 
 - `<home>` is `HOME`, or on Windows `USERPROFILE`, then `HOMEDRIVE`+`HOMEPATH`.
 - Commands call this executable by absolute, canonicalized path (`std::env::current_exe`), never through `PATH`. The path is single-quoted on Unix, double-quoted on Windows (cmd), `& '...'` in the copilot `powershell` field. No `${VAR:-default}` syntax. Running install again adds nothing; after the binary moves, it rewrites the path in place.

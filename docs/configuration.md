@@ -1,6 +1,6 @@
 # Configuration
 
-Every setting has a key in a TOML file and an environment variable. The **Env variable** column names the variable. Keys marked *stored only* are parsed and validated; no command reads them yet.
+Every setting has a key in a TOML file and an environment variable, except the two `capture` lists, which are TOML only. The **Env variable** column names the variable. Keys marked *stored only* are parsed and validated; no command reads them yet.
 
 ## Precedence
 
@@ -28,6 +28,8 @@ The home directory is `HOME`. On Windows, which sets no `HOME` by default, it fa
 | `triage.default` | `ONCEBITTEN_TRIAGE_DEFAULT` | `claude:haiku` | Host and agent for triage. Stored only. |
 | `triage.claude`, `triage.codex`, `triage.pi`, `triage.opencode` | `ONCEBITTEN_TRIAGE_CLAUDE`, `_CODEX`, `_PI`, `_OPENCODE` | unset | Triage target for that host. Stored only. The value must name the same host as the key. |
 | `triggers.session` | `ONCEBITTEN_TRIGGERS_SESSION` | `user-correction`, `test-fail-then-pass`, `repeat-failure`, `revert` | Session signals that start triage. Stored only. Other values are rejected. |
+| `capture.correction_phrases` | none (TOML only) | the built-in list in `src/signal.rs` | Replaces the correction lexicon that `user-correction` matches. Must list at least one phrase. Blank phrases fail the load. |
+| `capture.extra_correction_phrases` | none (TOML only) | `[]` | Adds phrases to the lexicon in effect. Same validation as above. |
 | `triggers.gate` | `ONCEBITTEN_TRIGGERS_GATE` | `pre-push`, `pr-create` | Git points that run the gate. Stored only. Other values are rejected. |
 | `sandbox.runtime` | `ONCEBITTEN_SANDBOX_RUNTIME` | `openshell` | Replay sandbox. The only accepted value is `openshell`. Stored only. |
 | `rules.use_examples` | none (file only) | empty list | Shipped example rules to load, by directory name, which equals the rule id (e.g. `rust-no-unwrap`). Each listed example is active. An unknown name is an error. Like other lists, a higher layer replaces the whole list. |
