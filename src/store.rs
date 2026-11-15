@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS rejections (
 );
 ";
 
+/// Provenance the host payload supplies beside the event itself.
+/// `tool_use_id` is the host's id for one tool call; redelivery repeats it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Capture {
+    pub git_head: Option<String>,
+    pub tool_use_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewEvent {
     pub ts: i64,
@@ -111,17 +119,16 @@ impl Store {
     }
 
     pub fn record(&self, event: &NewEvent, signals: &[Signal]) -> Result<Option<i64>> {
-        self.record_with_head(event, signals, None)
+        self.record_captured(event, signals, &Capture::default())
     }
 
-    /// Stores the event and its signals. `git_head` is the commit checked out
-    /// in the event's repo when the event was captured. A duplicate event
-    /// (same dedupe key, see `payload_hash`) stores nothing and returns `None`.
-    pub fn record_with_head(
+    /// Stores the event and its signals. A duplicate event (same dedupe key,
+    /// see `dedupe_key`) stores nothing and returns `None`.
+    pub fn record_captured(
         &self,
         event: &NewEvent,
         signals: &[Signal],
-        git_head: Option<&str>,
+        capture: &Capture,
     ) -> Result<Option<i64>> {
         let event = NewEvent {
             summary: stored_summary(event),
@@ -140,8 +147,8 @@ impl Store {
                 event.kind,
                 event.tool,
                 event.summary,
-                payload_hash(&event),
-                git_head
+                dedupe_key(&event, capture.tool_use_id.as_deref()),
+                capture.git_head
             ],
         )?;
         if inserted == 0 {
@@ -386,6 +393,30 @@ fn purge_freed_pages(conn: &Connection) -> Result<()> {
         0 => Ok(()),
         _ => bail!("cannot truncate the events database WAL: another connection holds it"),
     })
+}
+
+/// The dedupe key, stored in `events.payload_hash` under a UNIQUE constraint.
+///
+/// - A host tool-use id keys the event by (host, session, kind, tool use id).
+///   A redelivered hook carries the same id, whatever its capture time.
+/// - Otherwise the key hashes the whole event: ts, host, session, repo, kind,
+///   tool and summary. Two prompts or commands at different times differ by ts.
+///
+/// `git_head` is not part of either key.
+fn dedupe_key(event: &NewEvent, tool_use_id: Option<&str>) -> String {
+    match tool_use_id {
+        Some(id) => {
+            let canonical = serde_json::json!({
+                "host": event.host,
+                "session_id": event.session_id,
+                "kind": event.kind,
+                "tool_use_id": id,
+            })
+            .to_string();
+            format!("tool-use:{}", hex_sha256(canonical.as_bytes()))
+        }
+        None => payload_hash(event),
+    }
 }
 
 fn payload_hash(event: &NewEvent) -> String {

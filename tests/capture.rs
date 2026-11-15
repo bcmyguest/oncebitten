@@ -222,3 +222,13 @@ fn capture_outside_a_repo_stores_no_head() {
         .unwrap();
     assert_eq!(stored, None);
 }
+
+#[test]
+fn hook_redelivery_of_one_tool_use_is_stored_once() {
+    let data = TempDir::new().unwrap();
+    let db = data.path().join("events.db");
+    let payload = r#"{"session_id":"s1","cwd":"/nowhere","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"cargo test"},"tool_response":{"stdout":"ok"},"tool_use_id":"toolu_9"}"#;
+    run("claude", payload, &db, 1).unwrap();
+    run("claude", payload, &db, 2).unwrap();
+    assert_eq!(count(&db, "events"), 1);
+}

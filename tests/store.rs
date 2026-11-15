@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use oncebitten::config::Platform;
 use oncebitten::signal::Signal;
-use oncebitten::store::{events_db_path_for, NewEvent, Store, SUMMARY_LIMIT};
+use oncebitten::store::{events_db_path_for, Capture, NewEvent, Store, SUMMARY_LIMIT};
 use tempfile::TempDir;
 
 fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -386,7 +386,14 @@ fn recorded_event_stores_its_git_head() {
     let path = dir.path().join("events.db");
     let store = Store::open(&path).unwrap();
     store
-        .record_with_head(&event("s1", "x", 1), &[], Some("abc123"))
+        .record_captured(
+            &event("s1", "x", 1),
+            &[],
+            &Capture {
+                git_head: Some("abc123".into()),
+                ..Capture::default()
+            },
+        )
         .unwrap();
     let head: Option<String> = raw(&path)
         .query_row("SELECT git_head FROM events", [], |r| r.get(0))
@@ -440,7 +447,14 @@ fn schema_two_database_gains_git_head_column_on_open() {
     }
     let store = Store::open(&path).unwrap();
     store
-        .record_with_head(&event("s1", "x", 1), &[], Some("def456"))
+        .record_captured(
+            &event("s1", "x", 1),
+            &[],
+            &Capture {
+                git_head: Some("def456".into()),
+                ..Capture::default()
+            },
+        )
         .unwrap();
     assert!(column_names(&path, "events").contains(&"git_head".to_string()));
     let version: i64 = raw(&path)
@@ -455,4 +469,84 @@ fn reopening_does_not_fail_on_existing_git_head_column() {
     let path = dir.path().join("events.db");
     drop(Store::open(&path).unwrap());
     assert!(Store::open(&path).is_ok());
+}
+
+fn tool_use(session: &str, ts: i64, id: &str) -> (NewEvent, Capture) {
+    (
+        event(session, "x", ts),
+        Capture {
+            tool_use_id: Some(id.into()),
+            ..Capture::default()
+        },
+    )
+}
+
+#[test]
+fn redelivered_tool_use_is_stored_once_even_at_a_later_time() {
+    let store = Store::open_in_memory().unwrap();
+    let (first, capture) = tool_use("s1", 1, "toolu_1");
+    assert!(store
+        .record_captured(&first, &[], &capture)
+        .unwrap()
+        .is_some());
+    let (again, capture) = tool_use("s1", 5, "toolu_1");
+    assert!(store
+        .record_captured(&again, &[], &capture)
+        .unwrap()
+        .is_none());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 1);
+}
+
+#[test]
+fn distinct_tool_use_ids_are_both_kept() {
+    let store = Store::open_in_memory().unwrap();
+    let (first, capture) = tool_use("s1", 1, "toolu_1");
+    store.record_captured(&first, &[], &capture).unwrap();
+    let (second, capture) = tool_use("s1", 1, "toolu_2");
+    assert!(store
+        .record_captured(&second, &[], &capture)
+        .unwrap()
+        .is_some());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 2);
+}
+
+#[test]
+fn same_tool_use_id_in_another_session_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    let (first, capture) = tool_use("s1", 1, "toolu_1");
+    store.record_captured(&first, &[], &capture).unwrap();
+    let (other, capture) = tool_use("s2", 1, "toolu_1");
+    assert!(store
+        .record_captured(&other, &[], &capture)
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn git_head_is_not_part_of_the_dedupe_key() {
+    let store = Store::open_in_memory().unwrap();
+    let before = Capture {
+        git_head: Some("aaa".into()),
+        ..Capture::default()
+    };
+    let after = Capture {
+        git_head: Some("bbb".into()),
+        ..Capture::default()
+    };
+    store
+        .record_captured(&event("s1", "x", 1), &[], &before)
+        .unwrap();
+    assert!(store
+        .record_captured(&event("s1", "x", 1), &[], &after)
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn same_event_in_another_repo_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    store.record(&event("s1", "x", 1), &[]).unwrap();
+    let mut other = event("s1", "x", 1);
+    other.repo = Some("/other".into());
+    assert!(store.record(&other, &[]).unwrap().is_some());
 }

@@ -31,8 +31,16 @@ pub fn run_with<P: AsRef<str>>(
     let store = Store::open(db)?;
     let history = store.session_history(&event.host, &event.session_id, HISTORY_LIMIT)?;
     let signals = signal::derive_with(&event, &history, lexicon);
-    let head = event.repo.as_deref().and_then(git_head);
-    store.record_with_head(&event, &signals, head.as_deref())
+    let capture = store::Capture {
+        git_head: event.repo.as_deref().and_then(git_head),
+        tool_use_id: tool_use_id(payload),
+    };
+    store.record_captured(&event, &signals, &capture)
+}
+
+fn tool_use_id(payload: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    value["tool_use_id"].as_str().map(str::to_string)
 }
 
 /// The commit `HEAD` names in `repo`, from `git rev-parse`. `None` when git is
