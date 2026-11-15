@@ -23,7 +23,7 @@ pub fn run(check_file: &Path, files: &[PathBuf]) -> Outcome {
 pub fn run_in(check_file: &Path, repo: &Path, rel_paths: &[String]) -> Outcome {
     let paths: Vec<(PathBuf, String)> = rel_paths
         .iter()
-        .map(|rel| (repo.join(rel), rel.clone()))
+        .map(|rel| (repo.join(rel.split('/').collect::<PathBuf>()), rel.clone()))
         .collect();
     scan(check_file, &paths)
 }
