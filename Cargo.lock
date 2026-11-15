@@ -519,6 +519,7 @@ dependencies = [
  "ast-grep-core",
  "ast-grep-language",
  "clap",
+ "globset",
  "serde",
  "tempfile",
  "toml",

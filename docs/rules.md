@@ -38,7 +38,7 @@ Engines:
 
 - `ast-grep`: needs `check.yml`.
 - `native`: runs `command` in the repository root. Takes no check file. Exit 0 is clean. An exit code listed in `fired_exit_codes` is a fired finding, and its output (stderr, else stdout) is the message. Any other exit code, a missing binary, or termination by signal is could-not-run. With no `fired_exit_codes`, the rule never fires.
-- `diff`: takes no check file. Loading checks only the fields and fixtures (`fixtures/bad.diff`, `fixtures/fixed.diff`). Matching is not built yet.
+- `diff`: takes no check file. It takes a list of changed paths, relative to the repository root with `/` separators. It fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. The finding names the matching paths and the required globs. Globs use `globset` syntax with `literal_separator`: `*` stays within one directory, `**` crosses directories. An invalid glob is could-not-run.
 
 Unknown keys fail the load. Every error names the file.
 
