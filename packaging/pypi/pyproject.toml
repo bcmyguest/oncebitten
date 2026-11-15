@@ -1,6 +1,6 @@
 # Wheel metadata for PyPI. Build from this directory: `maturin build --release`.
-# `bindings = "bin"` ships every built [[bin]]; cargo-extra-args limits that to (oncebitten and
-# oncebitten-checker) in the wheel's scripts directory, so no Rust toolchain
+# `bindings = "bin"` ships every bin cargo builds; cargo-extra-args below limits
+# that to oncebitten and oncebitten-checker, which land in the wheel's scripts directory, so no Rust toolchain is
 # is needed at install time. The wheel has no sdist: PyPI carries binaries only.
 [build-system]
 requires = ["maturin>=1.7,<2"]
