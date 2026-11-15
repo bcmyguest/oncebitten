@@ -142,12 +142,16 @@ pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
 }
 
 /// Extracts the listed shipped examples to a directory that outlives `load`,
-/// so the rule files stay readable for `check` and `replay`.
+/// so the rule files stay readable for `check` and `replay`. The directory
+/// is keyed by the listed ids, so it holds only the examples this config
+/// lists, even when other projects share `root`.
 fn examples_dir(root: &std::path::Path, listed: &[String]) -> Result<Option<PathBuf>> {
     if listed.is_empty() {
         return Ok(None);
     }
-    let dir = root.join(SHIPPED_DIR);
+    let dir = root
+        .join(SHIPPED_DIR)
+        .join(crate::proof::text_sha256(&listed.join("\n")));
     for id in listed {
         let Some(example) = EXAMPLES
             .dirs()

@@ -306,3 +306,74 @@ fn severity_off_ast_grep_rule_does_not_fire() {
 
     assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
 }
+
+fn check_with_data(repo: &Repo, data: &std::path::Path, base: &str) -> Output {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    Command::new(env!("CARGO_BIN_EXE_oncebitten"))
+        .args(["check", "--base", base])
+        .current_dir(repo.project())
+        .env_clear()
+        .env("PATH", path)
+        .env("HOME", repo.root.path().join("home"))
+        .env("XDG_DATA_HOME", data)
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            repo.root.path().join("empty.gitconfig"),
+        )
+        .output()
+        .unwrap()
+}
+
+fn repo_with_examples(ids: &str) -> Repo {
+    let repo = Repo::new();
+    repo.write("src/ui/panel.rs", "fn a() {}\n");
+    repo.write(
+        ".oncebitten/config.toml",
+        &format!("[rules]\nuse_examples = {ids}\n"),
+    );
+    repo.commit_all("baseline");
+    repo
+}
+
+#[test]
+fn example_listed_by_another_project_is_not_active_here() {
+    let data = TempDir::new().unwrap();
+    let other = repo_with_examples("[\"ui-screenshot\"]");
+    other.write("src/ui/panel.rs", "fn a() { 1; }\n");
+    other.commit_all("change");
+    let fired = check_with_data(&other, data.path(), "HEAD~1");
+    assert_eq!(code(&fired), 1, "{}{}", stdout(&fired), stderr(&fired));
+
+    let repo = repo_with_examples("[\"arch-diagram\"]");
+    repo.write("src/ui/panel.rs", "fn a() { 1; }\n");
+    repo.commit_all("change");
+    let output = check_with_data(&repo, data.path(), "HEAD~1");
+
+    assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
+    assert!(
+        !stdout(&output).contains("ui-screenshot"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn example_removed_from_use_examples_is_not_active_on_the_next_run() {
+    let data = TempDir::new().unwrap();
+    let before = repo_with_examples("[\"ui-screenshot\", \"arch-diagram\"]");
+    before.write("src/ui/panel.rs", "fn a() { 1; }\n");
+    before.commit_all("change");
+    assert_eq!(code(&check_with_data(&before, data.path(), "HEAD~1")), 1);
+
+    let after = repo_with_examples("[\"arch-diagram\"]");
+    after.write("src/ui/panel.rs", "fn a() { 1; }\n");
+    after.commit_all("change");
+    let output = check_with_data(&after, data.path(), "HEAD~1");
+
+    assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
+    assert!(
+        !stdout(&output).contains("ui-screenshot"),
+        "{}",
+        stdout(&output)
+    );
+}
