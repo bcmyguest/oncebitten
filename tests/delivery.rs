@@ -579,3 +579,41 @@ fn the_pr_body_states_the_existing_hits() {
         .iter()
         .any(|arg| arg.contains("existing hits will be baselined")));
 }
+
+#[test]
+fn a_rules_repo_pr_body_limits_the_baseline_to_the_proposals_repo() {
+    let world = World::new(true);
+    let cluster = world.propose();
+    world
+        .store
+        .set_proposal_hits(
+            &cluster.id,
+            &HitsRow {
+                count: 2,
+                files: 1,
+                samples: vec!["src/lib.rs:3: x.unwrap()".to_owned()],
+            },
+        )
+        .unwrap();
+    let fake = FakeForge::new("gh");
+    fake.set("reply", "https://github.com/o/rules/pull/4\n");
+
+    world
+        .deliver(&cluster.id, Some(Target::RulesRepo), true, &never, &fake)
+        .unwrap();
+
+    let calls = fake.calls();
+    let body = calls[0]
+        .iter()
+        .find(|arg| arg.contains("existing hits will be baselined"))
+        .unwrap_or_else(|| panic!("{:?}", calls[0]));
+    let line = body
+        .lines()
+        .find(|line| line.contains("existing hits will be baselined"))
+        .unwrap();
+    assert!(
+        line.contains(&format!("proposals accept {}", cluster.id)),
+        "{line}"
+    );
+    assert!(line.contains("other repos"), "{line}");
+}

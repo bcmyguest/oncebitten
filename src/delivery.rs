@@ -92,14 +92,16 @@ pub fn deliver(
         rule::load_rule(&dir).with_context(|| format!("loading the rule at {}", dir.display()))?;
     let proof = settle_proof(store, id, &mut rule, prove)?;
     let config = config::load(inputs)?.config;
+    let chosen = choose(inputs, to, &repo, &config, forge_for)?;
     let message = Message {
         rule: rule.id.clone(),
         cluster: row.cluster.clone(),
         rationale: row.rationale.clone().unwrap_or_default(),
         proof: proof.clone(),
         hits: row.hits.clone(),
+        rules_repo: matches!(chosen, Chosen::RulesRepo),
     };
-    let committed = match choose(inputs, to, &repo, &config, forge_for)? {
+    let committed = match chosen {
         Chosen::Pr(pr_url) => {
             let branch = current_branch(inputs, &repo)?;
             let commit = commit_dir(inputs, &repo, &dir, &message)?;
@@ -188,6 +190,9 @@ struct Message {
     rationale: String,
     proof: Proof,
     hits: Option<HitsRow>,
+    /// The rule goes to the shared rules repo, whose other consumers get no
+    /// baseline from `accept`.
+    rules_repo: bool,
 }
 
 impl Message {
@@ -203,7 +208,14 @@ impl Message {
         body.push_str(&format!("Proof: {}\n", self.proof.text()));
         if let Some(hits) = &self.hits {
             body.push_str(&format!("Hits: {}\n", hits::summary_text(hits)));
-            body.push_str("existing hits will be baselined\n");
+            if self.rules_repo {
+                body.push_str(&format!(
+                    "existing hits will be baselined only in the proposal's repo, by `oncebitten proposals accept {}`; other repos using this rule get no baseline\n",
+                    self.cluster
+                ));
+            } else {
+                body.push_str("existing hits will be baselined\n");
+            }
         }
         body
     }
