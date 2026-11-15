@@ -39,7 +39,7 @@ Directories whose names start with `.` are skipped, so a source clone's `.git` i
 
 Engines:
 
-- `ast-grep`: needs `check.yml`.
+- `ast-grep`: needs `check.yml`. `files:` and `ignores:` globs match the repo-relative `/`-separated path in `check`, `gate` and `oncebitten-checker`. In replay the checker receives the fixture path, so a scoped rule's globs must match its fixtures (for example `**/*.py`). `severity: off` drops the rule in every path.
 - `native`: runs `command` in the repository root. Takes no check file. Exit 0 is clean. An exit code listed in `fired_exit_codes` is a fired finding, and its output (stderr, else stdout) is the message. Any other exit code, a missing binary, or termination by signal is could-not-run. With no `fired_exit_codes`, the rule never fires.
   With `fired_output_contains`, a listed exit code fires only when a line of stdout or stderr contains the text. Without such a line, the run is could-not-run. A matched line that is a JSON object with `message.rendered` (cargo `--message-format=json`) is reported as that rendered text; other matched lines are reported as they are. Rules without the key keep the exit-code-only behaviour.
 - `diff`: takes no check file. Its fixtures list changed paths, one per line, relative to the repository root with `/` separators. `check` passes the paths from `git diff --name-only <base>` plus untracked files. It fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. The finding names the matching paths and the required globs. Globs use `globset` syntax with `literal_separator`: `*` stays within one directory, `**` crosses directories. An invalid glob is could-not-run.

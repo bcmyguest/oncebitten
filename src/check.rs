@@ -74,13 +74,13 @@ fn run_rule(resolved: &Resolved, repo: &Path, changed: &[String]) -> Outcome {
     let rule = &resolved.rule;
     match &rule.check {
         Check::AstGrep { file } => {
-            let files: Vec<PathBuf> = changed
+            let files: Vec<String> = changed
                 .iter()
-                // git reports `/`-separated paths; Windows prints them as given.
-                .map(|path| repo.join(path.split('/').collect::<PathBuf>()))
-                .filter(|path| path.is_file())
+                // git reports `/`-separated paths; join natively for Windows.
+                .filter(|path| repo.join(path.split('/').collect::<PathBuf>()).is_file())
+                .cloned()
                 .collect();
-            astgrep::run(file, &files)
+            astgrep::run_in(file, repo, &files)
         }
         Check::Native { command } => native::run_matching(
             command,

@@ -246,3 +246,63 @@ fn unlisted_example_does_not_run_in_check() {
     assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
     assert!(stdout(&output).is_empty());
 }
+
+fn add_ast_grep_rule(repo: &Repo, check_yml: &str) {
+    let dir = ".oncebitten/rules/py-no-print";
+    repo.write(
+        &format!("{dir}/rule.toml"),
+        "id = \"py-no-print\"\ndescription = \"No print.\"\nmode = \"block\"\n\
+         status = \"active\"\nengine = \"ast-grep\"\nlanguage = \"python\"\n",
+    );
+    repo.write(&format!("{dir}/check.yml"), check_yml);
+    repo.write(&format!("{dir}/fixtures/bad.py"), "print(1)\n");
+    repo.write(&format!("{dir}/fixtures/fixed.py"), "x = 1\n");
+}
+
+#[test]
+fn glob_scoped_ast_grep_rule_fires_only_inside_its_files_glob() {
+    let repo = Repo::new();
+    repo.write("src/app.py", "x = 1\n");
+    repo.write("lib/app.py", "x = 1\n");
+    add_ast_grep_rule(
+        &repo,
+        "id: py-no-print\nlanguage: python\nmessage: no print\nseverity: error\n\
+         files:\n  - \"src/**/*.py\"\nrule:\n  pattern: print($$$A)\n",
+    );
+    repo.commit_all("base");
+    repo.write("src/app.py", "print(\"hi\")\n");
+    repo.write("lib/app.py", "print(\"hi\")\n");
+    repo.commit_all("change");
+
+    let output = repo.check(&["--base", "HEAD~1"]);
+
+    assert_eq!(code(&output), 1, "{}{}", stdout(&output), stderr(&output));
+    assert!(
+        stdout(&output).contains("src/app.py"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(
+        !stdout(&output).contains("lib/app.py"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn severity_off_ast_grep_rule_does_not_fire() {
+    let repo = Repo::new();
+    repo.write("src/app.py", "x = 1\n");
+    add_ast_grep_rule(
+        &repo,
+        "id: py-no-print\nlanguage: python\nmessage: no print\nseverity: off\n\
+         rule:\n  pattern: print($$$A)\n",
+    );
+    repo.commit_all("base");
+    repo.write("src/app.py", "print(\"hi\")\n");
+    repo.commit_all("change");
+
+    let output = repo.check(&["--base", "HEAD~1"]);
+
+    assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
+}

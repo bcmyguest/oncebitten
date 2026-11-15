@@ -89,3 +89,44 @@ fn wrong_usage_is_an_error_with_exit_0() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(one_json_line(&output)["status"], "error");
 }
+
+fn write_rule(dir: &Path, check_yml: &str) -> std::path::PathBuf {
+    let path = dir.join("check.yml");
+    std::fs::write(&path, check_yml).unwrap();
+    path
+}
+
+#[test]
+fn severity_off_rule_is_clean_in_the_checker() {
+    let dir = tempfile::tempdir().unwrap();
+    let rule = write_rule(
+        dir.path(),
+        "id: py-no-print\nlanguage: python\nmessage: no print\nseverity: off\n\
+         rule:\n  pattern: print($$$A)\n",
+    );
+    let bad = dir.path().join("bad.py");
+    std::fs::write(&bad, "print(1)\n").unwrap();
+    let target = bad.display().to_string();
+
+    let output = run_checker(&[&rule.display().to_string(), &target]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(one_json_line(&output)["status"], "clean");
+}
+
+#[test]
+fn glob_scoped_rule_is_matched_against_the_target_path_in_the_checker() {
+    let dir = tempfile::tempdir().unwrap();
+    let rule = write_rule(
+        dir.path(),
+        "id: py-no-print\nlanguage: python\nmessage: no print\nseverity: error\n\
+         files:\n  - \"src/**/*.py\"\nrule:\n  pattern: print($$$A)\n",
+    );
+    let bad = dir.path().join("bad.py");
+    std::fs::write(&bad, "print(1)\n").unwrap();
+    let target = bad.display().to_string();
+
+    let output = run_checker(&[&rule.display().to_string(), &target]);
+
+    assert_eq!(one_json_line(&output)["status"], "clean");
+}
