@@ -16,4 +16,6 @@ pub struct Finding {
     pub path: Option<PathBuf>,
     pub line: Option<usize>,
     pub message: String,
+    /// The matched source text, when the engine knows it (ast-grep only).
+    pub text: Option<String>,
 }

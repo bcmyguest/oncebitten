@@ -47,6 +47,7 @@ fn finding(message: String) -> Finding {
         path: None,
         line: None,
         message,
+        text: None,
     }
 }
 

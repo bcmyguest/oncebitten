@@ -1,7 +1,9 @@
+pub mod baseline;
 pub mod capture;
 pub mod check;
 pub mod config;
 pub mod engine;
+pub mod gate;
 pub mod hooks;
 pub mod host;
 pub mod lockfile;

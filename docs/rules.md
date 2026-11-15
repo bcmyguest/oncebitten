@@ -102,6 +102,7 @@ Git runs through the `git` binary.
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
+| `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs, apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |
 | `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
 
 `check` prints a could-not-run reason to stderr as `<id>: could not run: <reason>`. It reads the repository the current directory is in.

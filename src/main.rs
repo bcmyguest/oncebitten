@@ -6,6 +6,7 @@ use oncebitten::capture;
 use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
 use oncebitten::engine::Outcome;
+use oncebitten::gate::{self, Stage};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
 use oncebitten::proof::{self, BackendKind};
@@ -53,6 +54,11 @@ enum Command {
         #[arg(long, default_value = "HEAD")]
         base: String,
     },
+    /// Block a push or pull request on new violations of active block rules
+    Gate {
+        #[command(subcommand)]
+        stage: GateStage,
+    },
     /// Replay an ast-grep rule against its fixtures and corpus; exit 0 proven, 1 rejected, 2 could not run
     Replay {
         /// Qualified rule id, as `rules list` prints it
@@ -66,6 +72,22 @@ enum Command {
         /// Run the checker on the host without a sandbox; reports only, writes no proof
         #[arg(long)]
         local: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GateStage {
+    /// The pre-push hook: checks what the push sends; a missing or stale proof is a warning
+    PrePush {
+        /// Check changes since the merge-base with this ref instead of the pushed range
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// CI: checks the pull request against the merge-base with its target; needs rules.lock and valid proofs
+    Pr {
+        /// The pull request's target branch, such as origin/main
+        #[arg(long)]
+        base: String,
     },
 }
 
@@ -130,6 +152,7 @@ fn main() -> Result<()> {
         Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
         Command::Check { base } => run_check(&base),
+        Command::Gate { stage } => run_gate(stage),
         Command::Replay {
             rule,
             checker,
@@ -182,6 +205,33 @@ fn run_check(base: &str) -> Result<()> {
         }
     };
     std::process::exit(code)
+}
+
+fn run_gate(stage: GateStage) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let (stage, base) = match &stage {
+        GateStage::PrePush { base } => (Stage::PrePush, base.as_deref()),
+        GateStage::Pr { base } => (Stage::Pr, Some(base.as_str())),
+    };
+    let report = match gate::run(&inputs, stage, base) {
+        Ok(report) => report,
+        Err(failure) => exit_could_not_run(failure),
+    };
+    for (id, validity) in &report.proofs {
+        let level = match stage {
+            Stage::Pr => "error",
+            Stage::PrePush => "warning",
+        };
+        eprintln!("{level}: {}", gate::describe(id, validity));
+    }
+    report_checks(&report.checked);
+    if report.known > 0 {
+        eprintln!(
+            "{} known violation(s) matched .oncebitten/baseline.json",
+            report.known
+        );
+    }
+    std::process::exit(report.exit_code(stage))
 }
 
 fn run_replay(

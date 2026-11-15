@@ -37,6 +37,7 @@ fn run_checked(check_file: &Path, files: &[PathBuf]) -> Result<Outcome, String> 
                     path: Some(file.clone()),
                     line: Some(found.start_pos().line() + 1),
                     message: rule.get_message(&found),
+                    text: Some(found.text().to_string()),
                 });
             }
         }

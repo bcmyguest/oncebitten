@@ -19,13 +19,34 @@ pub fn run(inputs: &Inputs, base: &str) -> Result<Vec<Checked>, Failure> {
     let repo = config::repo_root(&inputs.cwd)
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
     let changed = changed_paths(inputs, &repo, base).map_err(Failure::CouldNotRun)?;
-    Ok(rules
-        .iter()
+    Ok(run_rules(rules.iter(), &repo, &changed))
+}
+
+/// Runs the active rules among `rules` against the changed repo-relative paths.
+pub fn run_rules<'a>(
+    rules: impl IntoIterator<Item = &'a Resolved>,
+    repo: &Path,
+    changed: &[String],
+) -> Vec<Checked> {
+    rules
+        .into_iter()
         .filter(|resolved| resolved.rule.status == Status::Active)
         .map(|resolved| Checked {
             id: resolved.id.clone(),
-            outcome: run_rule(resolved, &repo, &changed),
+            outcome: run_rule(resolved, repo, changed),
         })
+        .collect()
+}
+
+/// Runs `git -c core.quotePath=false <args>` in `repo` and returns its
+/// non-empty output lines: one repo-relative `/`-separated path each.
+pub fn git_paths(inputs: &Inputs, repo: &Path, args: &[&str]) -> Result<Vec<String>> {
+    let mut full = vec!["-c", "core.quotePath=false"];
+    full.extend_from_slice(args);
+    Ok(git(&inputs.vars, repo, &full)?
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
         .collect())
 }
 
@@ -74,26 +95,11 @@ fn run_rule(resolved: &Resolved, repo: &Path, changed: &[String]) -> Outcome {
 }
 
 fn changed_paths(inputs: &Inputs, repo: &Path, base: &str) -> Result<Vec<String>> {
-    let tracked = git(
-        &inputs.vars,
+    let mut paths = git_paths(inputs, repo, &["diff", "--name-only", base])?;
+    paths.extend(git_paths(
+        inputs,
         repo,
-        &["-c", "core.quotePath=false", "diff", "--name-only", base],
-    )?;
-    let untracked = git(
-        &inputs.vars,
-        repo,
-        &[
-            "-c",
-            "core.quotePath=false",
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-        ],
-    )?;
-    Ok(tracked
-        .lines()
-        .chain(untracked.lines())
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect())
+        &["ls-files", "--others", "--exclude-standard"],
+    )?);
+    Ok(paths)
 }

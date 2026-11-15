@@ -31,6 +31,7 @@ pub fn run(when_changed: &[String], require_changed: &[String], changed: &[Strin
                 .join(", "),
             require_changed.join(", ")
         ),
+        text: None,
     }])
 }
 
