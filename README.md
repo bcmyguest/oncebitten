@@ -138,7 +138,7 @@ pre-commit install --hook-type pre-push
 oncebitten rules sync             # writes .oncebitten/rules.lock; commit it
 ```
 
-The gate needs [pre-commit](https://pre-commit.com) 3.2.0 or later. CI templates for GitHub Actions, GitLab CI and Azure Pipelines: [templates/](templates/). In CI, run `oncebitten rules sync --frozen` before the gate.
+The gate needs [pre-commit](https://pre-commit.com) 3.2.0 or later, [prek](https://github.com/j178/prek) 0.1.5 or later, or [uv](https://docs.astral.sh/uv/)'s `uvx` to run either. CI templates for GitHub Actions, GitLab CI and Azure Pipelines: [templates/](templates/). In CI, run `oncebitten rules sync --frozen` before the gate.
 
 ## Development
 
