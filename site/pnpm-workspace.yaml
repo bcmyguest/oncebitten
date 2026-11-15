@@ -1,0 +1,4 @@
+# Puppeteer (via @mermaid-js/mermaid-cli) downloads Chrome on install. Only
+# `pnpm diagrams` needs it, and that script fetches it itself, so CI skips it.
+allowBuilds:
+  puppeteer: false
