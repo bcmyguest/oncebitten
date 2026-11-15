@@ -1,0 +1,47 @@
+# Shipped intent examples. Scored by cosine similarity; neutral is the fallback.
+# Keep these disjoint from tests/fixtures/intent/labelled.tsv.
+
+"rule-request" = [
+  "Going forward, always run the linter before you push.",
+  "Add a rule: never edit files under vendor/.",
+  "Please default to dry-run mode for every destructive command from now on.",
+  "Use British spelling in all docs in this repo.",
+  "Whenever you create a config option, document its default value.",
+  "Do not put secrets in the test fixtures, ever.",
+  "I want you to always confirm before deleting a branch.",
+  "Keep logs at debug level in the hooks module, that is the convention here.",
+  "Please stop committing directly to the release branch.",
+  "Each new CLI subcommand needs a help string and an example.",
+  "Remember that we pin every GitHub Action to a commit SHA.",
+  "From here on, one function per test file is the house style.",
+]
+
+"correction" = [
+  "No, you changed the wrong line. Put back the original value.",
+  "That is not how the API works, read the docs again and redo it.",
+  "You introduced a bug in the parser, revert your last edit.",
+  "Nope, the path separator must use std::path, not a hardcoded slash.",
+  "You ignored my instruction and rewrote the whole module.",
+  "That approach is wrong, the migration should run at startup, not in the hook.",
+  "You renamed the public struct again, undo that.",
+  "The output format you produced is incorrect; the header is missing.",
+  "You skipped the test I asked for. Add it before anything else.",
+  "Wrong file. The config loader lives in src/config.rs.",
+  "That fix does not address the crash at all.",
+  "You keep reintroducing the same unwrap I removed yesterday.",
+]
+
+"frustration" = [
+  "This is absolutely ridiculous, every single build fails for you.",
+  "I am so annoyed, you just repeated the mistake we fixed yesterday.",
+  "Why are you making this so painful? Nothing works.",
+  "Ugh, this session has been a disaster from the start.",
+  "I'm losing my mind over these endless broken edits.",
+  "Honestly, this is the most frustrating thing I have dealt with today.",
+  "You keep wasting my time with the same nonsense.",
+  "I am fed up. Nothing you produce compiles.",
+  "Argh, this stupid hook fails again and again.",
+  "I'm really disappointed. I expected far better work from you.",
+  "Come on, this is getting old fast.",
+  "Why does this always break when I need it most?",
+]
