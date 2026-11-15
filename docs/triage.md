@@ -1,6 +1,6 @@
 # Triage
 
-`oncebitten triage <cluster-id> [--host <host>]` asks a headless agent host for a one-shot JSON verdict on one evidence cluster (see [evidence.md](evidence.md)). It prints the verdict to stdout as JSON. It writes nothing to the evidence store.
+`oncebitten triage <cluster-id> [--host <host>]` asks a headless agent host for a one-shot JSON verdict on one evidence cluster (see [evidence.md](evidence.md)). It prints the verdict to stdout as JSON, then queues it with any rule it drafted (see [proposals.md](proposals.md)). A queueing problem prints a warning to stderr and leaves the exit code at 0.
 
 ## Verdict
 
@@ -12,7 +12,7 @@
 | `proposed_fix_kind` | enum | `harness`, `agent-workflow`, `lint`, `test`, `test-practice`, `invariant`, `none` |
 | `generality` | enum | `general`, `project`, `one-off` |
 
-The host must return exactly these five keys. Extra keys, missing keys, and wrong types are rejected.
+The host must return these five keys plus an optional `draft`: a proposed rule, or `null`. Extra keys, missing keys, and wrong types are rejected. An invalid draft rejects the whole answer. Only a rule-shaped verdict keeps its draft; the draft fields are in [proposals.md](proposals.md#draft). The printed verdict omits the draft.
 
 ## Hosts
 
@@ -51,3 +51,7 @@ The user settings scope (`~/.claude`, `~/.codex`) is not sentinel-tested. Those 
 | 2 | could not run: unknown cluster, no target, unsupported host, refused host, proof failed, timeout, missing binary, or invalid output |
 
 No verdict is ever printed with exit 2.
+
+## Background mode
+
+`capture` starts `oncebitten triage <id> --queue` (a hidden flag) when a cluster reaches its threshold. It takes the cluster's triage lock, queues the answer, prints nothing and exits 2 on any failure. See [proposals.md](proposals.md#background-triage).
