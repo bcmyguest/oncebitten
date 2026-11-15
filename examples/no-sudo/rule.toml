@@ -1,0 +1,13 @@
+id = "no-sudo"
+description = "Agents never run sudo; the user runs privileged commands."
+mode = "steer"
+status = "proposed"
+engine = "steer"
+
+[steer]
+action = "deny"
+message = "Do not run sudo. Print the command and ask the user to run it."
+
+[steer.trigger]
+tool = "{bash,shell,run_shell_command}"
+command = '^\s*sudo\b'

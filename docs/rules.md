@@ -10,9 +10,9 @@ A rule is a directory. Rules come from three layers, and the project layer wins.
   check.yml          # ast-grep only
   fixtures/
     bad.<ext>        # exactly one
-    fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
+    fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff, steer rules bad.json and fixed.json
   corpus/            # replay only: files that must stay clean
-  proof.json         # written by a proven OpenShell replay; not part of the hash
+  proof.json         # written by a proven OpenShell or matcher replay; not part of the hash
 ```
 
 `id` must equal the directory name.
@@ -25,10 +25,10 @@ Directories whose names start with `.` are skipped, so a source clone's `.git` i
 |---|---|---|
 | `id` | yes | lowercase kebab-case, equal to the directory name |
 | `description` | yes | text |
-| `mode` | yes | `block`, `steer` |
+| `mode` | yes | `block`, `steer`. `block` rules run in `check` and `gate`; `steer` rules run only in agent hooks (see [steer.md](steer.md)). |
 | `status` | yes | `proposed`, `active`, `retired`; only `active` runs (see [lifecycle.md](lifecycle.md)) |
 | `retired_reason` | no | non-empty text; `rules retire` writes it |
-| `engine` | yes | `ast-grep`, `native`, `diff` |
+| `engine` | yes | `ast-grep`, `native`, `diff`, `steer` (only with `mode = "steer"`) |
 | `language` | no | text |
 | `overrides` | no | `<source>/<id>`; requires `reason` |
 | `reason` | with `overrides` | text |
@@ -37,12 +37,14 @@ Directories whose names start with `.` are skipped, so a source clone's `.git` i
 | `fired_output_contains` | `native` only, with `fired_exit_codes` | non-empty text; a substring the output must contain |
 | `when_changed` | `diff` only | non-empty array of glob strings |
 | `require_changed` | `diff` only | non-empty array of glob strings |
+| `[steer]` | `steer` only | `action`, `message` and a `[steer.trigger]` table; see [steer.md](steer.md) |
 
 Engines:
 
 - `ast-grep`: needs `check.yml`. `files:` and `ignores:` globs match the repo-relative `/`-separated path in `check`, `gate` and `oncebitten-checker`. In replay the checker receives the fixture path, so a scoped rule's globs must match its fixtures (for example `**/*.py`). `severity: off` drops the rule in every path.
 - `native`: runs `command` in the repository root. Takes no check file. Exit 0 is clean. An exit code listed in `fired_exit_codes` is a fired finding, and its output (stderr, else stdout) is the message. Any other exit code, a missing binary, or termination by signal is could-not-run. With no `fired_exit_codes`, the rule never fires.
   With `fired_output_contains`, a listed exit code fires only when a line of stdout or stderr contains the text. Without such a line, the run is could-not-run. A matched line that is a JSON object with `message.rendered` (cargo `--message-format=json`) is reported as that rendered text; other matched lines are reported as they are. Rules without the key keep the exit-code-only behaviour.
+- `steer`: takes no check file and needs `mode = "steer"`. Its fixtures are recorded hook events in JSON. `check` and `gate` skip it; the `oncebitten steer` agent hook runs it. See [steer.md](steer.md).
 - `diff`: takes no check file. Its fixtures list changed paths, one per line, relative to the repository root with `/` separators. `check` passes the paths from `git diff --name-only <base>` plus untracked files. It fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. The finding names the matching paths and the required globs. Globs use `globset` syntax with `literal_separator`: `*` stays within one directory, `**` crosses directories. An invalid glob is could-not-run.
 
 Unknown keys fail the load. Every error names the file.
@@ -107,10 +109,11 @@ Git runs through the `git` binary.
 | `oncebitten rules rollback <id>` | Return an active project rule to `proposed`, keep its files and proof, print the git commands that restore an earlier version (see [lifecycle.md](lifecycle.md#rollback)) | 0 rolled back; 2 unknown, source or example rule, or not active |
 | `oncebitten exception add\|list` | Add or list exceptions in `.oncebitten/exceptions.toml` (see [lifecycle.md](lifecycle.md#exceptions)) | 0; 2 invalid entry or file |
 | `oncebitten doctor [--gateway <endpoint>]` | Read-only checks of the installation and the repository (see [doctor.md](doctor.md)) | 0 no check failed; 1 a check failed |
-| `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep or diff rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
-| `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs, apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |
+| `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep or diff rule and write `proof.json` when an OpenShell replay proves it; replay a steer rule with the matcher and write `proof.json` when it proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
+| `oncebitten steer --host <host>` | Agent hook: match the payload on stdin against active steer rules and print the host's output (see [steer.md](steer.md)) | always 0 |
+| `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs (for active steer rules too), apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |
 | `oncebitten baseline update` | Replace `.oncebitten/baseline.json` with the current violations of active block rules in every tracked file | 0 written; 2 a rule could not run (nothing written) |
-| `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), drop findings a live exception covers, print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
+| `oncebitten check [--base <rev>]` | Run each `active` block rule against changes since `<rev>` (default `HEAD`), drop findings a live exception covers, print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
 
 `check` prints a could-not-run reason to stderr as `<id>: could not run: <reason>`. It reads the repository the current directory is in.
 
@@ -128,6 +131,7 @@ Without `--ci`, a source that is not cloned exits 2 and asks for `rules sync`.
 - `OpenShell` runs the replay in an OpenShell sandbox. It builds an image per replay from `nvcr.io/nvidia/base/ubuntu:24.04` with the checker, rule and files baked in, creates the sandbox with a read-only policy, runs the checker once per file, and deletes the sandbox. The gateway limits sandbox names to 19 characters.
 - Build the checker for the image as a static musl binary: `cargo build --release --target x86_64-unknown-linux-musl --bin oncebitten-checker` (needs a musl C toolchain; the replay tests used a `rust:1-alpine` container).
 - Diff rules run in the sandbox like ast-grep rules. The diff engine matches paths only and reads no repository file, so a local run gives the same verdict; the sandbox run is the one that writes a proof.
+- Steer rules replay with the matcher in the running `oncebitten` binary, not in a sandbox: `fixtures/bad.json` must trigger, `fixtures/fixed.json` and every `corpus/*.json` must not, and `corpus/` may be empty. The proof names `"backend": "matcher"` and the binary's hash. See [steer.md](steer.md).
 - Native-linter rules are exempt from replay proofs until replay can run their toolchain in the sandbox; the gate still runs them.
 
 ### `oncebitten replay`

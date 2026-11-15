@@ -62,7 +62,7 @@ pub fn entry(rule_id: &str, check: &Check, repo: &Path, finding: &Finding) -> Op
             path: None,
             sha256: None,
         }),
-        Check::Diff { .. } => None,
+        Check::Diff { .. } | Check::Steer(_) => None,
     }
 }
 

@@ -17,7 +17,9 @@ use oncebitten::lifecycle;
 use oncebitten::proof::{self, BackendKind};
 use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
+use oncebitten::rule::Check;
 use oncebitten::rules::{self, Failure};
+use oncebitten::steer;
 use oncebitten::store::{self, Store};
 use oncebitten::triage;
 
@@ -36,6 +38,13 @@ struct Cli {
 enum Command {
     /// Record an agent hook payload from stdin (always exits 0)
     Capture {
+        /// Agent host that sent the payload
+        #[arg(long)]
+        host: String,
+    },
+    /// Match an agent hook payload from stdin against the active steer rules and
+    /// print the host's guidance or deny decision (always exits 0)
+    Steer {
         /// Agent host that sent the payload
         #[arg(long)]
         host: String,
@@ -242,6 +251,12 @@ fn main() -> Result<()> {
         Command::Capture { host } => {
             if let Err(err) = capture::run_from_process(&host) {
                 eprintln!("oncebitten capture: {err:#}");
+            }
+            Ok(())
+        }
+        Command::Steer { host } => {
+            if let Err(err) = steer::run_from_process(&host) {
+                eprintln!("oncebitten steer: {err:#}");
             }
             Ok(())
         }
@@ -575,6 +590,14 @@ fn run_replay(
         eprintln!("error: no rule named `{id}`; see oncebitten rules list");
         std::process::exit(2)
     };
+    if matches!(resolved.rule.check, Check::Steer(_)) {
+        if local || gateway.is_some() {
+            eprintln!("{id}: steer rules replay with the matcher; ignoring --local and --gateway");
+        }
+        let exe = std::env::current_exe().context("locating the oncebitten binary")?;
+        let replayed = proof::replay_steer(&resolved.rule, &exe);
+        std::process::exit(report_replay(id, &replayed, "matcher"));
+    }
     let checker = match checker {
         Some(path) => path,
         None => default_checker()?,
@@ -585,14 +608,15 @@ fn run_replay(
         (Box::new(OpenShell::new(gateway)), BackendKind::OpenShell)
     };
     let replayed = proof::replay_rule(&resolved.rule, &checker, backend.as_ref(), kind);
-    let code = match &replayed.verdict {
+    std::process::exit(report_replay(id, &replayed, kind.as_str()))
+}
+
+fn report_replay(id: &str, replayed: &proof::Replayed, runner: &str) -> i32 {
+    match &replayed.verdict {
         Verdict::Proven => {
             match &replayed.written {
                 Some(path) => println!("{id}: proven; wrote {}", path.display()),
-                None => println!(
-                    "{id}: proven by the {} runner; no proof written",
-                    kind.as_str()
-                ),
+                None => println!("{id}: proven by the {runner} runner; no proof written"),
             }
             0
         }
@@ -604,8 +628,7 @@ fn run_replay(
             eprintln!("{id}: could not run: {reason}");
             2
         }
-    };
-    std::process::exit(code)
+    }
 }
 
 fn default_checker() -> Result<PathBuf> {
@@ -668,13 +691,29 @@ fn run_hooks(action: HooksAction) -> Result<()> {
     let home = config::home_dir(&inputs.vars, Platform::current())
         .context("no absolute home directory in HOME, USERPROFILE or HOMEDRIVE+HOMEPATH")?;
     let path = hooks::install_target(host, scope, &home, &inputs.cwd, &inputs.vars)?;
-    let changed = if install {
-        hooks::install_exe(host, &path, &hooks::current_exe()?, Platform::current())?
+    let steer_path = hooks::steer_target(host, scope, &home, &inputs.cwd, &inputs.vars)?;
+    let (changed, steer_changed) = if install {
+        let exe = hooks::current_exe()?;
+        (
+            hooks::install_exe(host, &path, &exe, Platform::current())?,
+            hooks::install_steer_exe(host, &steer_path, &exe, Platform::current())?,
+        )
     } else {
-        hooks::uninstall(host, &path)?
+        (
+            hooks::uninstall(host, &path)?,
+            hooks::uninstall_steer(host, &steer_path)?,
+        )
     };
-    let state = if changed { "changed" } else { "unchanged" };
-    println!("{state}  {}", path.display());
+    let state = |changed: bool| if changed { "changed" } else { "unchanged" };
+    if steer_path == path {
+        println!("{}  {}", state(changed || steer_changed), path.display());
+    } else {
+        println!("{}  {}", state(changed), path.display());
+        println!("{}  {}", state(steer_changed), steer_path.display());
+    }
+    if let (true, Some(limits)) = (install, hooks::steer_limits(host)) {
+        println!("note: {limits}");
+    }
     Ok(())
 }
 

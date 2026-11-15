@@ -6,6 +6,7 @@
 - [Gate](gate.md): pre-push and CI stages, proofs, baseline, exit codes.
 - [Rule lifecycle](lifecycle.md): exceptions, retire and rollback.
 - [Doctor](doctor.md): read-only checks of the installation and the repository.
+- [Steer rules](steer.md): guidance and denials for lessons git cannot see, per-host support.
 - [Signal capture](capture.md): signals, host support and hook install.
 - [Evidence](evidence.md): clusters, independent counts, provenance and rejections.
 - [Roadmap](roadmap.md): milestones, build steps and their status.

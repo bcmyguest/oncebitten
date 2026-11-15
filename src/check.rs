@@ -6,7 +6,7 @@ use crate::config::{self, Inputs};
 use crate::engine::{astgrep, diff, native, Finding, Outcome};
 use crate::exceptions;
 use crate::registry::Resolved;
-use crate::rule::{Check, Status};
+use crate::rule::{Check, Mode, Status};
 use crate::rules::{self, Failure};
 use crate::sources::git;
 
@@ -39,7 +39,8 @@ pub fn run(inputs: &Inputs, base: &str) -> Result<Ran, Failure> {
     Ok(Ran { checked, excepted })
 }
 
-/// Runs the active rules among `rules` against the changed repo-relative paths.
+/// Runs the active block rules among `rules` against the changed repo-relative
+/// paths. Steer rules are skipped: they act in the agent, not on git changes.
 pub fn run_rules<'a>(
     rules: impl IntoIterator<Item = &'a Resolved>,
     repo: &Path,
@@ -47,7 +48,9 @@ pub fn run_rules<'a>(
 ) -> Vec<Checked> {
     rules
         .into_iter()
-        .filter(|resolved| resolved.rule.status == Status::Active)
+        .filter(|resolved| {
+            resolved.rule.status == Status::Active && resolved.rule.mode == Mode::Block
+        })
         .map(|resolved| Checked {
             id: resolved.id.clone(),
             outcome: run_rule(resolved, repo, changed),
@@ -122,6 +125,9 @@ fn run_rule(resolved: &Resolved, repo: &Path, changed: &[String]) -> Outcome {
             when_changed,
             require_changed,
         } => diff::run(when_changed, require_changed, changed),
+        Check::Steer(_) => {
+            Outcome::CouldNotRun("steer rules have nothing to check in git".to_owned())
+        }
     }
 }
 
