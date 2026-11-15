@@ -181,7 +181,8 @@ fn install_writes_a_session_start_hook_that_names_its_marker() {
 
 #[test]
 fn control_runs_with_hooks_on_and_triage_with_hooks_off() {
-    let work = Path::new("/tmp");
+    let temp = std::env::temp_dir();
+    let work = temp.as_path();
     let triage = invocation(Host::Claude, "default", "p", work).unwrap();
     let control = control_invocation(Host::Claude, "default", "p", work).unwrap();
     assert!(triage.args.contains(&"--setting-sources".to_string()));
