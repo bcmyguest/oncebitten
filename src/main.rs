@@ -6,10 +6,12 @@ use oncebitten::baseline;
 use oncebitten::capture;
 use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
+use oncebitten::delivery;
 use oncebitten::doctor;
 use oncebitten::engine::Outcome;
 use oncebitten::evidence::{self, Cluster};
 use oncebitten::exceptions::{self, Exception};
+use oncebitten::forge;
 use oncebitten::gate::{self, Stage};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
@@ -187,6 +189,23 @@ enum ProposalsAction {
         #[arg(long)]
         reason: String,
     },
+    /// Commit a proposed rule to the current branch or to the writable rules source; exit 2 on a finding or a rejected proposal
+    Deliver {
+        id: String,
+        /// `pr` commits on the current branch; `rules-repo` commits to a branch of the writable source.
+        /// Default: `pr` when the forge reports an open PR for the branch, else `rules-repo`
+        #[arg(long, value_enum)]
+        to: Option<DeliverTarget>,
+        /// Push the commit; a rules-repo push also opens a PR
+        #[arg(long)]
+        push: bool,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum DeliverTarget {
+    Pr,
+    RulesRepo,
 }
 
 #[derive(Subcommand)]
@@ -437,6 +456,7 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
         ProposalsAction::Accept { id } => proposals::accept(&store, &id).map(|dir| {
             println!("accepted {id}: {} is active", dir.display());
         }),
+        ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
         ProposalsAction::Reject { id, reason } => {
             proposals::reject(&store, &id, &reason, now_millis()?)
                 .map(|()| println!("rejected {id}"))
@@ -445,6 +465,40 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
     if let Err(error) = result {
         eprintln!("error: {error:#}");
         std::process::exit(2)
+    }
+    Ok(())
+}
+
+fn run_deliver(
+    store: &Store,
+    inputs: &Inputs,
+    id: &str,
+    to: Option<DeliverTarget>,
+    push: bool,
+) -> Result<()> {
+    let checker = default_checker()?;
+    let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
+    let to = to.map(|target| match target {
+        DeliverTarget::Pr => delivery::Target::Pr,
+        DeliverTarget::RulesRepo => delivery::Target::RulesRepo,
+    });
+    let delivered = delivery::deliver(store, inputs, id, to, push, &prove, &forge::backend)?;
+    println!(
+        "delivered {id} to {}: commit {}",
+        delivered.target.as_str(),
+        delivered.commit
+    );
+    if let Some(branch) = &delivered.branch {
+        println!("branch: {branch}");
+    }
+    if let delivery::Proof::Unproven(reason) = &delivered.proof {
+        println!("unproven: {reason}");
+    }
+    if let Some(url) = &delivered.pr_url {
+        println!("pr: {url}");
+    }
+    if let Some(hint) = &delivered.push_hint {
+        println!("to publish: {hint}");
     }
     Ok(())
 }
@@ -473,6 +527,12 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
     println!("{}", proposal_line(&row));
     if let Some(dir) = &row.dir {
         println!("rule dir: {}", dir.display());
+    }
+    if let (Some(target), Some(commit)) = (&row.target, &row.commit) {
+        println!("delivered: {target} {commit}");
+    }
+    if let Some(url) = &row.pr_url {
+        println!("pr: {url}");
     }
     if let Some(rationale) = &row.rationale {
         println!("rationale: {rationale}");

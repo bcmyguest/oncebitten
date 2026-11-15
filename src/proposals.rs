@@ -154,6 +154,9 @@ pub fn record(
         verdict: serde_json::to_string(&answer.verdict)?,
         rationale: None,
         occurrences: cluster.occurrences.iter().map(|o| o.event.id).collect(),
+        target: None,
+        commit: None,
+        pr_url: None,
     };
     let Some(draft) = &answer.draft else {
         store.insert_proposal(&row)?;
@@ -269,7 +272,7 @@ pub fn repo_key(repo: &Path) -> String {
         .into_owned()
 }
 
-fn find(store: &Store, id: &str) -> Result<ProposalRow> {
+pub fn find(store: &Store, id: &str) -> Result<ProposalRow> {
     match store.proposal(id)? {
         Some(row) => Ok(row),
         None => bail!("no proposal `{id}`; see {LIST_HINT}"),
@@ -288,7 +291,7 @@ fn load_rules(inputs: &Inputs) -> Result<Vec<crate::registry::Resolved>> {
 }
 
 /// Whether the replay left a valid proof, and why not when it did not.
-fn proven(rule: &Rule, replayed: &Replayed) -> (bool, Option<String>) {
+pub fn proven(rule: &Rule, replayed: &Replayed) -> (bool, Option<String>) {
     match &replayed.verdict {
         Verdict::Proven if proof::validity(rule) == Validity::Valid => (true, None),
         Verdict::Proven => (

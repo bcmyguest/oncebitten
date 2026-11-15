@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS triage_locks (
     ts INTEGER NOT NULL
 );
 ";
+/// Columns `proposals deliver` fills. Databases created before delivery lack
+/// them; `add_delivery_columns` adds each missing one on open.
+const DELIVERY_COLUMNS: [&str; 3] = ["target", "commit_sha", "pr_url"];
 const PROPOSAL_COLUMNS: &str =
     "cluster, ts, repo, kind, state, rule, dir, proven, note, verdict, rationale, occurrences";
 
@@ -185,6 +188,19 @@ pub struct ProposalRow {
     pub verdict: String,
     pub rationale: Option<String>,
     pub occurrences: Vec<i64>,
+    /// Where `proposals deliver` last sent the rule: `pr` or `rules-repo`.
+    pub target: Option<String>,
+    /// The commit that delivery made.
+    pub commit: Option<String>,
+    pub pr_url: Option<String>,
+}
+
+/// What `proposals deliver` did, as the store keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryRow {
+    pub target: String,
+    pub commit: String,
+    pub pr_url: Option<String>,
 }
 
 pub struct Store {
@@ -210,6 +226,7 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         migrate(&conn)?;
         conn.execute_batch(QUEUE)?;
+        add_delivery_columns(&conn)?;
         Ok(Store { conn })
     }
 
@@ -373,6 +390,35 @@ impl Store {
         Ok(())
     }
 
+    /// Records the proof state a delivery replay left.
+    pub fn set_proposal_proof(
+        &self,
+        cluster: &str,
+        proven: bool,
+        note: Option<&str>,
+    ) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE proposals SET proven = ?2, note = ?3 WHERE cluster = ?1",
+            params![cluster, proven, note],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
+    /// Records where `proposals deliver` sent the rule.
+    pub fn set_proposal_delivery(&self, cluster: &str, delivery: &DeliveryRow) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE proposals SET target = ?2, commit_sha = ?3, pr_url = ?4 WHERE cluster = ?1",
+            params![cluster, delivery.target, delivery.commit, delivery.pr_url],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
     /// Takes the triage lock for `cluster`. A lock older than `stale_ms` is
     /// taken over: its holder crashed or outlived any triage timeout.
     pub fn try_lock_triage(&self, cluster: &str, now: i64, stale_ms: i64) -> Result<bool> {
@@ -401,7 +447,7 @@ impl Store {
         args: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<ProposalRow>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT {PROPOSAL_COLUMNS} FROM proposals {filter} ORDER BY ts, cluster"
+            "SELECT {PROPOSAL_COLUMNS}, target, commit_sha, pr_url FROM proposals {filter} ORDER BY ts, cluster"
         ))?;
         let rows = stmt.query_map(args, |row| {
             Ok((
@@ -417,12 +463,30 @@ impl Store {
                 row.get::<_, String>(9)?,
                 row.get::<_, Option<String>>(10)?,
                 row.get::<_, String>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, Option<String>>(14)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (cluster, ts, repo, kind, state, rule, dir, proven, note, verdict, rationale, occ) =
-                row?;
+            let (
+                cluster,
+                ts,
+                repo,
+                kind,
+                state,
+                rule,
+                dir,
+                proven,
+                note,
+                verdict,
+                rationale,
+                occ,
+                target,
+                commit,
+                pr_url,
+            ) = row?;
             out.push(ProposalRow {
                 kind: Kind::parse(&kind)
                     .with_context(|| format!("proposal `{cluster}` has unknown kind `{kind}`"))?,
@@ -439,6 +503,9 @@ impl Store {
                 note,
                 verdict,
                 rationale,
+                target,
+                commit,
+                pr_url,
             });
         }
         Ok(out)
@@ -536,6 +603,19 @@ fn add_git_head_column(conn: &Connection) -> Result<()> {
         .collect::<rusqlite::Result<_>>()?;
     if !columns.iter().any(|name| name == "git_head") {
         conn.execute_batch("ALTER TABLE events ADD COLUMN git_head TEXT")?;
+    }
+    Ok(())
+}
+
+fn add_delivery_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(proposals)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    for name in DELIVERY_COLUMNS {
+        if !columns.iter().any(|column| column == name) {
+            conn.execute_batch(&format!("ALTER TABLE proposals ADD COLUMN {name} TEXT"))?;
+        }
     }
     Ok(())
 }
