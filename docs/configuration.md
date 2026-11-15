@@ -1,6 +1,6 @@
 # Configuration
 
-Every setting has a key in a TOML file and an environment variable, except the two `capture` lists, which are TOML only. The **Env variable** column names the variable. Keys marked *stored only* are parsed and validated; no command reads them yet.
+Every setting has a key in a TOML file and an environment variable, except `forge` and the two `capture` lists, which are TOML only. The **Env variable** column names the variable. Keys marked *stored only* are parsed and validated; no command reads them yet.
 
 ## Precedence
 
@@ -25,6 +25,7 @@ The home directory is `HOME`. On Windows, which sets no `HOME` by default, it fa
 
 | Key | Env variable | Default | Effect |
 | --- | --- | --- | --- |
+| `forge` | none (TOML only) | unset | Forge CLI for pull requests: `github` (`gh`), `gitlab` (`glab`) or `azure` (`az repos`). Unset, oncebitten picks one from the `origin` remote host: `github.com` is GitHub; `gitlab.com` or a host containing `gitlab` is GitLab; `dev.azure.com` or `*.visualstudio.com` is Azure DevOps. An unknown host with no `forge` is an error that names this key. Other values are rejected. |
 | `triage.default` | `ONCEBITTEN_TRIAGE_DEFAULT` | `claude:haiku` | Host and agent for triage. |
 | `triage.claude`, `triage.codex`, `triage.pi`, `triage.opencode` | `ONCEBITTEN_TRIAGE_CLAUDE`, `_CODEX`, `_PI`, `_OPENCODE` | unset | Triage target for that host. The value must name the same host as the key. Background triage asks the capturing host through this target when set. |
 | `triage.background` | none (TOML only) | `true` | `capture` starts triage in the background when a cluster reaches its threshold. See [proposals.md](proposals.md#background-triage). |
@@ -41,6 +42,8 @@ A triage target has the form `<host>:<agent>`. The host is `claude`, `codex`, `p
 ## Example
 
 ```toml
+forge = "github"
+
 [triage]
 default = "pi:default"
 

@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod engine;
 pub mod evidence;
 pub mod exceptions;
+pub mod forge;
 pub mod gate;
 pub mod hooks;
 pub mod host;

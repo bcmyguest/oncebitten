@@ -30,6 +30,7 @@ const ENV_VARS: &[(&str, &str, bool)] = &[
     ("ONCEBITTEN_TRIGGERS_SESSION", "triggers.session", true),
     ("ONCEBITTEN_TRIGGERS_GATE", "triggers.gate", true),
     ("ONCEBITTEN_SANDBOX_RUNTIME", "sandbox.runtime", false),
+    ("ONCEBITTEN_FORGE", "forge", false),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +214,7 @@ impl Default for Capture {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
+    pub forge: Option<crate::forge::Kind>,
     pub triage: Triage,
     pub triggers: Triggers,
     pub sandbox: Sandbox,
