@@ -381,3 +381,74 @@ fn a_steer_fixture_must_be_a_recorded_tool_event() {
     let parsed: Draft = serde_json::from_value(draft).unwrap();
     assert!(parsed.validate().is_err());
 }
+
+fn written_steer(bad_command: &str) -> (TempDir, oncebitten::rule::Steer) {
+    let draft = steer_draft("steer", "steer", &steer_event("Bash", bad_command));
+    let parsed: Draft = serde_json::from_value(draft).unwrap();
+    let parent = TempDir::new().unwrap();
+    let dir = parsed.write(parent.path()).unwrap();
+    let rule = rule::load_rule(&dir).unwrap();
+    let Check::Steer(steer) = rule.check else {
+        panic!("expected a steer rule, got {:?}", rule.check);
+    };
+    (parent, steer)
+}
+
+fn fires(steer: &oncebitten::rule::Steer, command: &str) -> bool {
+    let event: oncebitten::steer::SteerEvent =
+        serde_json::from_str(&steer_event("Bash", command)).unwrap();
+    oncebitten::steer::Matcher::new(steer)
+        .unwrap()
+        .matches(&event)
+}
+
+#[test]
+fn a_steer_draft_trigger_matches_near_variants_of_the_recorded_command() {
+    let (_parent, steer) = written_steer("git push --force origin main");
+    for variant in [
+        "git push --force origin main",
+        "git push --force origin dev",
+        "git push origin main --force",
+        "  git -C repo push --force",
+    ] {
+        assert!(fires(&steer, variant), "`{variant}` should match");
+    }
+    for unrelated in [
+        "git push origin main",
+        "git push --force-with-lease origin main",
+        "git status",
+        "cargo test --force",
+        "echo git push --force",
+    ] {
+        assert!(!fires(&steer, unrelated), "`{unrelated}` should not match");
+    }
+}
+
+#[test]
+fn a_steer_draft_trigger_without_flags_keys_on_the_subcommand() {
+    let (_parent, steer) = written_steer("npm install left-pad");
+    assert!(fires(&steer, "npm install is-odd"));
+    assert!(!fires(&steer, "npm ci"));
+    assert!(!fires(&steer, "pnpm install left-pad"));
+}
+
+#[test]
+fn the_prompt_documents_the_steer_engine_and_its_fixture_events() {
+    let prompt = oncebitten::triage::prompt::INSTRUCTIONS;
+    assert!(prompt.contains("steer"), "{prompt}");
+    let bad = r#"{"event": "tool", "tool": "Bash", "command": "git push --force origin main"}"#;
+    let fixed = r#"{"event": "tool", "tool": "Bash", "command": "git push origin main"}"#;
+    assert!(prompt.contains(bad), "{prompt}");
+    assert!(prompt.contains(fixed), "{prompt}");
+    let draft = serde_json::json!({
+        "id": "no-force-push",
+        "description": "no force pushes",
+        "mode": "steer",
+        "engine": "steer",
+        "bad": {"name": "bad.json", "content": bad},
+        "fixed": {"name": "fixed.json", "content": fixed},
+        "rationale": "force pushes rewrite shared history"
+    });
+    let parsed: Draft = serde_json::from_value(draft).unwrap();
+    parsed.validate().unwrap();
+}

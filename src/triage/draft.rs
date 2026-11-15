@@ -109,8 +109,9 @@ struct TriggerToml {
     command: String,
 }
 
-/// The `[steer]` table for a steer draft: the recorded command's tool, matched
-/// as a whole-command regex. `None` for other engines.
+/// The `[steer]` table for a steer draft: the recorded command's tool, and a
+/// regex matching its program plus distinguishing arguments, so near-variants
+/// of the command fire too. `None` for other engines.
 fn steer_table(draft: &Draft) -> Option<SteerToml<'_>> {
     if draft.engine != Engine::Steer {
         return None;
@@ -129,8 +130,38 @@ fn steer_table(draft: &Draft) -> Option<SteerToml<'_>> {
         message: draft.rationale.trim(),
         trigger: TriggerToml {
             tool,
-            command: format!("^{}$", regex::escape(&command)),
+            command: command_trigger(&command),
         },
+    })
+}
+
+/// A regex for `command`'s program, its first subcommand (a word before any
+/// flag) and its first flag, in that order with anything between. Leading
+/// `NAME=value` assignments are skipped and the program may carry a path, so
+/// `git push --force origin main` becomes a trigger that also matches
+/// `git -C repo push origin dev --force` but not `git push origin main`.
+fn command_trigger(command: &str) -> String {
+    let mut words = command
+        .split_whitespace()
+        .skip_while(|word| is_assignment(word));
+    let Some(program) = words.next() else {
+        return format!("^{}$", regex::escape(command));
+    };
+    let program = program.rsplit('/').next().unwrap_or(program);
+    let rest: Vec<&str> = words.collect();
+    let flag = rest.iter().position(|word| word.starts_with('-'));
+    let subcommand = rest[..flag.unwrap_or(rest.len())].first();
+    let mut pattern = format!(r"^\s*(?:\S*/)?{}", regex::escape(program));
+    for word in subcommand.into_iter().chain(flag.map(|index| &rest[index])) {
+        pattern.push_str(&format!(r"(?:\s.*)?\s{}", regex::escape(word)));
+    }
+    pattern.push_str(r"(?:\s.*)?$");
+    pattern
+}
+
+fn is_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     })
 }
 
