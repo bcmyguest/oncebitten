@@ -62,6 +62,8 @@ fn git_head(repo: &str) -> Option<String> {
 
 pub fn run_from_process(host: &str) -> Result<()> {
     if std::env::var(TRIAGE_ENV).as_deref() == Ok("1") {
+        // Drain stdin so the host never sees a broken pipe from this hook.
+        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
         return Ok(());
     }
     let mut payload = String::new();
