@@ -399,3 +399,20 @@ fn file_name_with_a_tab_is_checked() {
     assert_eq!(code(&output), 1, "{}{}", stdout(&output), stderr(&output));
     assert!(stdout(&output).contains("tab"), "{}", stdout(&output));
 }
+
+#[test]
+fn rule_fixtures_do_not_trip_check() {
+    let repo = Repo::new();
+    repo.write("src/app.py", "x = 1\n");
+    repo.commit_all("base");
+    add_ast_grep_rule(
+        &repo,
+        "id: py-no-print\nlanguage: python\nmessage: no print\nseverity: error\n\
+         rule:\n  pattern: print($$$A)\n",
+    );
+    repo.commit_all("add a rule whose bad fixture violates it");
+
+    let output = repo.check(&["--base", "HEAD~1"]);
+
+    assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
+}
