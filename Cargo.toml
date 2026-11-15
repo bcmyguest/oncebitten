@@ -18,10 +18,16 @@ path = "src/bin/oncebitten-checker.rs"
 [[bin]]
 name = "fake-forge"
 path = "tests/support/fake_forge.rs"
+# Test-only: the wheel build turns default features off, so it never ships.
+required-features = ["test-support"]
 
 [lib]
 name = "oncebitten"
 path = "src/lib.rs"
+
+[features]
+default = ["test-support"]
+test-support = []
 
 [dependencies]
 anyhow = "1"

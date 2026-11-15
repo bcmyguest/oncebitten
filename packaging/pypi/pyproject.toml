@@ -1,5 +1,5 @@
 # Wheel metadata for PyPI. Build from this directory: `maturin build --release`.
-# `bindings = "bin"` ships every [[bin]] of the crate (oncebitten and
+# `bindings = "bin"` ships every built [[bin]]; cargo-extra-args limits that to (oncebitten and
 # oncebitten-checker) in the wheel's scripts directory, so no Rust toolchain
 # is needed at install time. The wheel has no sdist: PyPI carries binaries only.
 [build-system]
@@ -26,3 +26,7 @@ Repository = "https://github.com/bcmyguest/oncebitten"
 [tool.maturin]
 bindings = "bin"
 manifest-path = "../../Cargo.toml"
+# Drops the test-only fake-forge binary (see Cargo.toml).
+no-default-features = true
+# fake-forge is a test binary of the same crate: never ship it.
+cargo-extra-args = "--bin oncebitten --bin oncebitten-checker"
