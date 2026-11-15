@@ -75,6 +75,32 @@ fn capture_records_into_the_user_data_dir_and_prints_nothing() {
 }
 
 #[test]
+fn triage_switch_exits_zero_and_records_nothing_for_every_host() {
+    use oncebitten::host::ALL_HOSTS;
+    for host in ALL_HOSTS {
+        let name = host.name();
+        let home = TempDir::new().unwrap();
+        let payload = prompt_payload("s1", "No, stop");
+        let out = capture(home.path(), name, &payload, Some("1"));
+        assert!(out.status.success(), "{name}: {out:?}");
+        assert!(!events_db(home.path()).exists(), "{name} recorded an event");
+    }
+}
+
+#[test]
+fn the_same_payload_records_for_claude_without_the_switch() {
+    let home = TempDir::new().unwrap();
+    let out = capture(
+        home.path(),
+        "claude",
+        &prompt_payload("s1", "No, stop"),
+        None,
+    );
+    assert!(out.status.success());
+    assert!(events_db(home.path()).exists());
+}
+
+#[test]
 fn triage_switch_skips_capture_entirely() {
     let home = TempDir::new().unwrap();
     let out = capture(home.path(), "claude", &prompt_payload("s1", "x"), Some("1"));
