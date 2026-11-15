@@ -275,3 +275,153 @@ fn every_host_shell_tool_can_revert() {
     let event = tool(KIND_TOOL_OK, "Read", "git revert HEAD", 2);
     assert!(derive(&event, &[]).is_empty());
 }
+
+mod per_host {
+    use super::*;
+    use oncebitten::host::{normalize, Host};
+    use oncebitten::signal::derive_configured;
+
+    fn event(host: Host, payload: &str, ts: i64) -> NewEvent {
+        normalize(host, payload, ts).unwrap().unwrap()
+    }
+
+    fn cursor(tool: &str, input: &str, event_name: &str) -> String {
+        format!(
+            r#"{{"conversation_id":"c","hook_event_name":"{event_name}","tool_name":"{tool}","tool_input":{input},"cwd":"/nowhere"}}"#
+        )
+    }
+
+    fn pi(tool: &str, input: &str, is_error: bool) -> String {
+        format!(
+            r#"{{"hook_event_name":"tool_result","session_id":"p","cwd":"/nowhere","toolName":"{tool}","input":{input},"isError":{is_error}}}"#
+        )
+    }
+
+    fn copilot(tool: &str, args: &str, failed: bool) -> String {
+        let outcome = if failed {
+            r#""error":"boom""#
+        } else {
+            r#""toolResult":{"resultType":"success"}"#
+        };
+        format!(
+            r#"{{"sessionId":"s","timestamp":1,"cwd":"/nowhere","toolName":"{tool}","toolArgs":{args},{outcome}}}"#
+        )
+    }
+
+    fn assert_revert(edit: NewEvent, restore: NewEvent) {
+        let history = past(vec![edit]);
+        assert!(kinds(&derive(&restore, &history)).contains(&REVERT));
+    }
+
+    fn assert_fail_then_pass(fail: NewEvent, pass: NewEvent) {
+        let history = past(vec![fail]);
+        assert_eq!(kinds(&derive(&pass, &history)), vec![TEST_FAIL_THEN_PASS]);
+    }
+
+    #[test]
+    fn cursor_restore_of_an_edited_file_is_a_revert() {
+        let edit = event(
+            Host::Cursor,
+            &cursor("Write", r#"{"file_path":"src/a.rs"}"#, "postToolUse"),
+            1,
+        );
+        let restore = event(
+            Host::Cursor,
+            &cursor(
+                "Shell",
+                r#"{"command":"git restore src/a.rs"}"#,
+                "postToolUse",
+            ),
+            2,
+        );
+        assert_revert(edit, restore);
+    }
+
+    #[test]
+    fn pi_restore_of_an_edited_file_is_a_revert() {
+        let edit = event(Host::Pi, &pi("edit", r#"{"path":"src/a.rs"}"#, false), 1);
+        let restore = event(
+            Host::Pi,
+            &pi("bash", r#"{"command":"git checkout -- src/a.rs"}"#, false),
+            2,
+        );
+        assert_revert(edit, restore);
+    }
+
+    #[test]
+    fn copilot_restore_of_an_edited_file_is_a_revert() {
+        let edit = event(
+            Host::Copilot,
+            &copilot("edit", r#"{"path":"src/a.rs"}"#, false),
+            1,
+        );
+        let restore = event(
+            Host::Copilot,
+            &copilot("bash", r#"{"command":"git restore src/a.rs"}"#, false),
+            2,
+        );
+        assert_revert(edit, restore);
+    }
+
+    #[test]
+    fn cursor_test_fail_then_pass() {
+        let input = r#"{"command":"cargo test"}"#;
+        let fail = event(
+            Host::Cursor,
+            &cursor("Shell", input, "postToolUseFailure"),
+            1,
+        );
+        let pass = event(Host::Cursor, &cursor("Shell", input, "postToolUse"), 2);
+        assert_fail_then_pass(fail, pass);
+    }
+
+    #[test]
+    fn pi_test_fail_then_pass() {
+        let input = r#"{"command":"pytest"}"#;
+        let fail = event(Host::Pi, &pi("bash", input, true), 1);
+        let pass = event(Host::Pi, &pi("bash", input, false), 2);
+        assert_fail_then_pass(fail, pass);
+    }
+
+    #[test]
+    fn copilot_test_fail_then_pass() {
+        let args = r#"{"command":"npm test"}"#;
+        let fail = event(Host::Copilot, &copilot("bash", args, true), 1);
+        let pass = event(Host::Copilot, &copilot("bash", args, false), 2);
+        assert_fail_then_pass(fail, pass);
+    }
+
+    #[test]
+    fn edit_tool_names_match_in_any_case() {
+        for name in ["Edit", "edit", "WRITE", "multiedit"] {
+            let history = past(vec![tool(KIND_TOOL_OK, name, "src/a.rs", 1)]);
+            let restore = bash("git restore src/a.rs", true, 2);
+            assert_eq!(kinds(&derive(&restore, &history)), vec![REVERT], "{name}");
+        }
+    }
+
+    #[test]
+    fn windows_style_edit_path_matches_a_restore_of_its_suffix() {
+        let history = past(vec![tool(KIND_TOOL_OK, "Edit", r"C:\repo\src\a.rs", 1)]);
+        let restore = bash(r"git restore src\a.rs", true, 2);
+        assert_eq!(kinds(&derive(&restore, &history)), vec![REVERT]);
+    }
+
+    #[test]
+    fn configured_runners_extend_the_built_in_list() {
+        let history = past(vec![bash("make check", false, 1)]);
+        let pass = bash("make check", true, 2);
+        let lexicon = ["tabs"];
+        assert!(derive_configured(&pass, &history, &lexicon, &[] as &[&str]).is_empty());
+        let signals = derive_configured(&pass, &history, &lexicon, &["make check"]);
+        assert_eq!(kinds(&signals), vec![TEST_FAIL_THEN_PASS]);
+        let built_in = past(vec![bash("cargo test", false, 1)]);
+        let signals = derive_configured(
+            &bash("cargo test", true, 2),
+            &built_in,
+            &lexicon,
+            &["make check"],
+        );
+        assert_eq!(kinds(&signals), vec![TEST_FAIL_THEN_PASS]);
+    }
+}

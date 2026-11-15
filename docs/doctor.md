@@ -20,12 +20,13 @@ Every `warn` and `fail` line ends with a fix. Exit 0 when no check fails, 1 when
 |---|---|---|---|
 | `config` | the layered configuration loads | a configuration warning | the configuration does not load |
 | `pre-commit` | `pre-commit --version` reports 3.2.0 or later, else `prek --version` reports 0.1.5 or later, else `uvx` is on `PATH` | | none of the three holds |
-| `pre-push hook` | `.pre-commit-config.yaml` lists `oncebitten-gate`, `oncebitten-gate-system` or `oncebitten-gate-python` | | no file, or none of the hook ids |
+| `pre-push hook` | `.pre-commit-config.yaml` lists `oncebitten-gate`, `oncebitten-gate-system` or `oncebitten-gate-python`, or a hook whose `entry:` runs `oncebitten gate` (for example `cargo run -q --bin oncebitten -- gate pre-push`) | | no file, or neither a published id nor a gate entry |
 | `rules.lock` | every configured source has a lock entry with the same URL, and the lock names no other source | the file is missing | a source lacks an entry, an entry names an unknown source, or a URL differs |
 | `rules` | every rule loads and resolves | | a rule error or a source that is not cloned |
 | `proof <id>` | the proof of an active ast-grep, diff or steer rule is valid, by the same test as `gate pr` (including the local matcher replay and checker hash) | the proof of a non-`block` ast-grep or diff rule is missing, stale or not proven | the proof of a `block` or `steer` rule is missing, stale or not proven; `gate pr` exits 2 on the same rules |
 | `exceptions` | the file loads and no exception has expired | one line per expired exception | the file does not load |
 | `capture <host>` | the capture hook is in the user or project file, or the host is not installed | the host is installed without the hook | |
+| `signals <host>` | printed only for an installed host: the signals it produces, and those it cannot (codex and opencode record no tool outcomes, so they produce only `user-correction`). Derived from `Host::capabilities` | | |
 | `evidence store` | the store opens, is absent (the first capture creates it), or has an older schema the next capture upgrades | | the file is not a readable store, or a newer oncebitten wrote it |
 | `openshell` | `openshell status` exits 0 | the CLI is not on `PATH`, or the gateway does not answer | |
 | `<program>` | the first word of an active `native` rule's `command` is on `PATH` | it is not | |

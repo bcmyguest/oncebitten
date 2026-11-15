@@ -15,9 +15,22 @@
 | --- | --- |
 | `tool-failure` | A tool run reports failure (`PostToolUseFailure`). |
 | `repeat-failure` | A second failure with the same tool and normalized command in one session. Normalization collapses whitespace and replaces digits, paths and hex with `<n>`, `<path>` and `<hex>`. |
-| `test-fail-then-pass` | A test runner (`cargo test`, `pytest`, `npm test`, `vitest`, `jest`, `go test`) passes after the session's previous test run failed. |
+| `test-fail-then-pass` | A test runner (`cargo test`, `pytest`, `npm test`, `vitest`, `jest`, `go test`, or a `[capture] test_commands` entry) passes after the session's previous test run failed. |
 | `user-correction` | A prompt contains a phrase from the correction lexicon. Its detail lists the matched phrases, comma-separated and lowercased. |
 | `revert` | A shell-tool `git revert` (Bash, Shell, shell, bash), or `git checkout --` / `git restore` of a file the session edited. Edited and command paths match when one is a path-component suffix of the other. |
+
+### Hosts and signals
+
+Tool names match without regard to case, so `Bash`, `Shell`, `shell` and `bash` all run commands, and `Edit`, `Write`, `MultiEdit`, `edit` and `write` all edit files. `revert` and `test-fail-then-pass` fire the same way on claude, cursor, copilot and pi. codex and opencode report no tool outcomes (`Host::capabilities` in `src/host.rs`), so capture records only their prompts and they produce only `user-correction`. `oncebitten doctor` prints this per installed host, derived from the same capabilities.
+
+### Test commands
+
+`[capture] test_commands` adds command prefixes to the built-in runners. A command counts as a test run when it contains an entry, matched without regard to case and only at word boundaries, like the built-ins. Blank entries fail the load.
+
+```toml
+[capture]
+test_commands = ["make check", "just test"]
+```
 
 ### Correction lexicon
 
