@@ -1,0 +1,6 @@
+id = "py-utcnow"
+description = "Use datetime.now(UTC), not the naive datetime.utcnow()."
+mode = "block"
+status = "proposed"
+engine = "ast-grep"
+language = "python"

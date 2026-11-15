@@ -1,0 +1,7 @@
+id = "ui-screenshot"
+description = "UI changes need a screenshot."
+mode = "block"
+status = "proposed"
+engine = "diff"
+when_changed = ["src/ui/**"]
+require_changed = ["docs/screenshots/*.png"]

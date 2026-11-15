@@ -1,0 +1,6 @@
+id: py-no-print
+language: python
+severity: error
+message: use logging instead of print
+rule:
+  pattern: print($$$ARGS)

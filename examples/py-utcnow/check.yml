@@ -1,0 +1,8 @@
+id: py-utcnow
+language: python
+severity: error
+message: use datetime.now(UTC)
+rule:
+  any:
+    - pattern: datetime.utcnow()
+    - pattern: datetime.datetime.utcnow()

@@ -1,0 +1,12 @@
+id: js-moment
+language: javascript
+severity: error
+message: use date-fns
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^["'']moment["'']$'
+    - pattern: require("moment")
+    - pattern: require('moment')

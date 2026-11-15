@@ -1,0 +1,6 @@
+id = "ts-no-as-any"
+description = "Do not cast to any."
+mode = "block"
+status = "proposed"
+engine = "ast-grep"
+language = "typescript"

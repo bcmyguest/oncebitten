@@ -1,0 +1,6 @@
+id = "js-moment"
+description = "Use date-fns instead of moment."
+mode = "block"
+status = "proposed"
+engine = "ast-grep"
+language = "javascript"

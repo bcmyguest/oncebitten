@@ -1,0 +1,7 @@
+id = "arch-diagram"
+description = "Module boundary changes need an architecture diagram."
+mode = "block"
+status = "proposed"
+engine = "diff"
+when_changed = ["src/**/mod.rs", "src/lib.rs"]
+require_changed = ["docs/architecture/*.svg", "docs/architecture/*.png"]

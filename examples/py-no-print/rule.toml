@@ -1,0 +1,6 @@
+id = "py-no-print"
+description = "Log through logging, not print."
+mode = "block"
+status = "proposed"
+engine = "ast-grep"
+language = "python"

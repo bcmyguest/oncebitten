@@ -1,0 +1,8 @@
+id = "rust-no-unwrap"
+description = "Do not call unwrap; clippy::unwrap_used finds it."
+mode = "block"
+status = "proposed"
+engine = "native"
+language = "rust"
+command = ["cargo", "clippy", "--quiet", "--", "-D", "clippy::unwrap_used"]
+fired_exit_codes = [101]

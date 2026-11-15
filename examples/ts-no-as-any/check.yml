@@ -1,0 +1,6 @@
+id: ts-no-as-any
+language: typescript
+severity: error
+message: do not cast to any
+rule:
+  pattern: $E as any
