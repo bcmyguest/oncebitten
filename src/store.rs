@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use rusqlite::{params, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 
@@ -84,6 +86,13 @@ CREATE TABLE IF NOT EXISTS decisions (
     tool TEXT,
     pattern TEXT
 );
+CREATE TABLE IF NOT EXISTS triage_runs (
+    id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    cluster TEXT NOT NULL,
+    host TEXT,
+    outcome TEXT NOT NULL
+);
 ";
 /// Columns `proposals deliver` fills. Databases created before delivery lack
 /// them; `add_delivery_columns` adds each missing one on open.
@@ -146,6 +155,23 @@ pub struct Rejection {
     pub cluster: String,
     pub ts: i64,
     pub reason: String,
+}
+
+/// What a `triage_runs` row records. `Started` spends one run of the daily
+/// budget; `SkippedBudget` marks a capture that spawned nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriageOutcome {
+    Started,
+    SkippedBudget,
+}
+
+impl TriageOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TriageOutcome::Started => "started",
+            TriageOutcome::SkippedBudget => "skipped: budget",
+        }
+    }
 }
 
 /// What a queue row holds: a drafted rule, or a triage finding without one.
@@ -634,6 +660,29 @@ impl Store {
         Ok(())
     }
 
+    pub fn record_triage(
+        &self,
+        cluster: &str,
+        host: Option<&str>,
+        ts: i64,
+        outcome: TriageOutcome,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO triage_runs (ts, cluster, host, outcome) VALUES (?1, ?2, ?3, ?4)",
+            params![ts, cluster, host, outcome.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Triage runs started at or after `since` (ms). Skipped rows do not count.
+    pub fn triage_runs_since(&self, since: i64) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM triage_runs WHERE outcome = ?1 AND ts >= ?2",
+            params![TriageOutcome::Started.as_str(), since],
+            |row| row.get(0),
+        )?)
+    }
+
     fn query_decisions(
         &self,
         filter: &str,
@@ -775,6 +824,24 @@ pub fn probe(path: &Path) -> Result<Probe> {
         older if older < SCHEMA_VERSION => Probe::Older(older),
         newer => Probe::Newer(newer),
     })
+}
+
+/// The start of the calendar day holding `now_ms`, in `zone`, as unix ms.
+pub fn day_start_ms(now_ms: i64, zone: &TimeZone) -> Result<i64> {
+    let now = Timestamp::from_millisecond(now_ms).context("timestamp out of range")?;
+    let date = now.to_zoned(zone.clone()).date();
+    let midnight = date.at(0, 0, 0, 0).to_zoned(zone.clone())?;
+    Ok(midnight.timestamp().as_millisecond())
+}
+
+/// Whether `spent` triage runs leave room under the daily `max`.
+pub fn within_budget(spent: i64, max: u32) -> bool {
+    spent < i64::from(max)
+}
+
+/// `day_start_ms` in the system's local zone.
+pub fn local_day_start_ms(now_ms: i64) -> Result<i64> {
+    day_start_ms(now_ms, &TimeZone::system())
 }
 
 pub fn events_db_path_for(vars: &BTreeMap<String, String>, platform: Platform) -> Result<PathBuf> {

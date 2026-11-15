@@ -584,3 +584,42 @@ fn same_event_in_another_repo_is_kept() {
     other.repo = Some("/other".into());
     assert!(store.record(&other, &[]).unwrap().is_some());
 }
+
+#[test]
+fn triage_runs_count_only_started_rows_since_the_day_start() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage("c1", Some("claude"), 100, TriageOutcome::Started)
+        .unwrap();
+    store
+        .record_triage("c2", Some("claude"), 200, TriageOutcome::SkippedBudget)
+        .unwrap();
+    store
+        .record_triage("c3", None, 300, TriageOutcome::Started)
+        .unwrap();
+    assert_eq!(store.triage_runs_since(0).unwrap(), 2);
+    assert_eq!(store.triage_runs_since(250).unwrap(), 1);
+}
+
+#[test]
+fn day_start_is_local_midnight_in_the_given_zone() {
+    use jiff::tz::TimeZone;
+    use oncebitten::store::day_start_ms;
+    let zone = TimeZone::fixed(jiff::tz::offset(-5));
+    let now: jiff::Timestamp = "2026-11-15T01:30:00-05:00".parse().unwrap();
+    let start: jiff::Timestamp = "2026-11-15T00:00:00-05:00".parse().unwrap();
+    assert_eq!(
+        day_start_ms(now.as_millisecond(), &zone).unwrap(),
+        start.as_millisecond()
+    );
+}
+
+#[test]
+fn within_budget_allows_runs_below_the_daily_max() {
+    use oncebitten::store::within_budget;
+    assert!(within_budget(0, 1));
+    assert!(within_budget(9, 10));
+    assert!(!within_budget(10, 10));
+    assert!(!within_budget(11, 10));
+}
