@@ -161,3 +161,74 @@ fn stored_prompt_is_a_digest_and_the_signal_names_only_the_phrase() {
     assert!(!summary.contains("private"));
     assert_eq!(detail, "no,");
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?} failed");
+}
+
+#[test]
+fn capture_records_the_repo_head_for_an_event_in_a_git_repo() {
+    let repo = TempDir::new().unwrap();
+    git(repo.path(), &["init", "-q"]);
+    git(
+        repo.path(),
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    );
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    let expected = String::from_utf8(head.stdout).unwrap().trim().to_string();
+    let data = TempDir::new().unwrap();
+    let db = data.path().join("events.db");
+    let cwd = repo.path().display().to_string().replace('\\', "\\\\");
+    let payload = format!(
+        r#"{{"session_id":"s1","cwd":"{cwd}","hook_event_name":"UserPromptSubmit","prompt":"hello"}}"#
+    );
+    run("claude", &payload, &db, 1).unwrap();
+    let stored: Option<String> = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row("SELECT git_head FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(stored, Some(expected));
+}
+
+#[test]
+fn capture_outside_a_repo_stores_no_head() {
+    let data = TempDir::new().unwrap();
+    let db = data.path().join("events.db");
+    run("claude", &prompt_payload("s1", "hello"), &db, 1).unwrap();
+    let stored: Option<String> = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row("SELECT git_head FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(stored, None);
+}
+
+#[test]
+fn hook_redelivery_of_one_tool_use_is_stored_once() {
+    let data = TempDir::new().unwrap();
+    let db = data.path().join("events.db");
+    let payload = r#"{"session_id":"s1","cwd":"/nowhere","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"cargo test"},"tool_response":{"stdout":"ok"},"tool_use_id":"toolu_9"}"#;
+    run("claude", payload, &db, 1).unwrap();
+    run("claude", payload, &db, 2).unwrap();
+    assert_eq!(count(&db, "events"), 1);
+}

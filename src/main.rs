@@ -233,14 +233,15 @@ fn run_evidence(action: EvidenceAction) -> Result<()> {
             for occurrence in &cluster.occurrences {
                 let event = &occurrence.event;
                 println!(
-                    "{}  {}  {}  {}  event {}  {}  {}",
+                    "{}  {}  {}  {}  event {}  {}  {}  head {}",
                     event.ts,
                     event.host,
                     event.session_id,
                     event.repo.as_deref().unwrap_or("-"),
                     event.id,
                     occurrence.signals.join(","),
-                    event.summary
+                    event.summary,
+                    event.git_head.as_deref().unwrap_or("-")
                 );
             }
         }
