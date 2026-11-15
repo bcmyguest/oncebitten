@@ -230,7 +230,9 @@ mod absolute_exe {
         let command = hooks::capture_command(&exe, Host::Claude, Shell::Posix);
         assert!(hooks::install_with(Host::Claude, &path, &command).unwrap());
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains(&exe.display().to_string()));
+        // settings.json is JSON, so Windows backslashes appear escaped.
+        let escaped = serde_json::to_string(&exe.display().to_string()).unwrap();
+        assert!(written.contains(escaped.trim_matches('"')));
         assert!(!hooks::install_with(Host::Claude, &path, &command).unwrap());
         assert!(hooks::uninstall(Host::Claude, &path).unwrap());
         std::fs::remove_dir_all(&dir).unwrap();

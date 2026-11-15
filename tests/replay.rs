@@ -53,14 +53,19 @@ impl Backend for Canned {
     }
 }
 
+// Build JSON with serde_json: Windows paths contain backslashes.
 fn fired_json(target: &str) -> String {
-    format!(
-        "{{\"status\":\"fired\",\"file\":\"{target}\",\"matches\":[{{\"rule\":\"py-utcnow\",\"line\":2,\"text\":\"x\"}}]}}\n"
-    )
+    let value = serde_json::json!({
+        "status": "fired",
+        "file": target,
+        "matches": [{"rule": "py-utcnow", "line": 2, "text": "x"}],
+    });
+    format!("{value}\n")
 }
 
 fn clean_json(target: &str) -> String {
-    format!("{{\"status\":\"clean\",\"file\":\"{target}\",\"matches\":[]}}\n")
+    let value = serde_json::json!({"status": "clean", "file": target, "matches": []});
+    format!("{value}\n")
 }
 
 fn run(target: &str, exit_code: Option<i32>, stdout: String) -> RawRun {
@@ -195,8 +200,8 @@ fn checker_error_status_is_could_not_run() {
     let dir = rule_dir(&[("ok.py", "x\n")]);
     let spec = ReplaySpec::from_rule_dir(dir.path(), &checker()).unwrap();
     let bad = spec.bad.display().to_string();
-    let error =
-        format!("{{\"status\":\"error\",\"file\":\"{bad}\",\"reason\":\"rule file broken\"}}\n");
+    let error = serde_json::json!({"status": "error", "file": bad, "reason": "rule file broken"});
+    let error = format!("{error}\n");
     let runs = vec![
         run(&bad, Some(0), error),
         run(&spec.fixed.display().to_string(), Some(0), clean_json("x")),

@@ -7,8 +7,10 @@ use tempfile::TempDir;
 const TS: i64 = 1_000;
 
 fn claude_prompt(cwd: &str) -> String {
+    // JSON-escape cwd: Windows paths contain backslashes.
+    let cwd = serde_json::to_string(cwd).unwrap();
     format!(
-        r#"{{"session_id":"sess-1","transcript_path":"/x.jsonl","cwd":"{cwd}","hook_event_name":"UserPromptSubmit","prompt":"No, use tabs"}}"#
+        r#"{{"session_id":"sess-1","transcript_path":"/x.jsonl","cwd":{cwd},"hook_event_name":"UserPromptSubmit","prompt":"No, use tabs"}}"#
     )
 }
 

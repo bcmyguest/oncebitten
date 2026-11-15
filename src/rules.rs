@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
 use include_dir::{include_dir, Dir};
-use tempfile::TempDir;
 
 use crate::config::{self, Inputs, Platform};
 use crate::lockfile::{self, LockedSource, Lockfile};
@@ -12,6 +11,8 @@ use crate::sources::{git, is_cloned, sources_root, sync_source};
 
 const PROJECT_DIR: &str = ".oncebitten";
 const PROJECT_RULES: &str = "rules";
+/// Under the sources root; a leading dot keeps it apart from source names.
+const SHIPPED_DIR: &str = ".shipped-examples";
 static EXAMPLES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/examples");
 
 #[derive(Debug)]
@@ -76,11 +77,12 @@ pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
         sources.push((source.name.clone(), dir));
     }
     let project = repo.join(PROJECT_DIR).join(PROJECT_RULES);
-    let examples = examples_dir(&loaded.config.rules.use_examples).map_err(Failure::CouldNotRun)?;
+    let examples =
+        examples_dir(&root, &loaded.config.rules.use_examples).map_err(Failure::CouldNotRun)?;
     let layers = Layers {
         project: project.is_dir().then_some(project),
         sources,
-        examples: Some(examples.path().to_path_buf()),
+        examples,
     };
     let mut rules = resolve(&layers).map_err(Failure::Invalid)?;
     for resolved in &mut rules {
@@ -91,8 +93,13 @@ pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
     Ok(rules)
 }
 
-fn examples_dir(listed: &[String]) -> Result<TempDir> {
-    let dir = TempDir::new().context("creating a directory for the shipped examples")?;
+/// Extracts the listed shipped examples to a directory that outlives `load`,
+/// so the rule files stay readable for `check` and `replay`.
+fn examples_dir(root: &std::path::Path, listed: &[String]) -> Result<Option<PathBuf>> {
+    if listed.is_empty() {
+        return Ok(None);
+    }
+    let dir = root.join(SHIPPED_DIR);
     for id in listed {
         let Some(example) = EXAMPLES
             .dirs()
@@ -100,13 +107,13 @@ fn examples_dir(listed: &[String]) -> Result<TempDir> {
         else {
             bail!("`{id}` names no shipped example");
         };
-        std::fs::create_dir_all(dir.path().join(id))
+        std::fs::create_dir_all(dir.join(id))
             .with_context(|| format!("creating the directory for `{id}`"))?;
         example
-            .extract(dir.path())
+            .extract(&dir)
             .with_context(|| format!("extracting the shipped example `{id}`"))?;
     }
-    Ok(dir)
+    Ok(Some(dir))
 }
 
 fn check_locked(

@@ -166,7 +166,12 @@ fn validate_names_the_broken_file_and_exits_1() {
 
     assert_eq!(code(&output), 1);
     assert!(
-        stderr(&output).contains("local-rule/rule.toml"),
+        stderr(&output).contains(
+            &std::path::Path::new("local-rule")
+                .join("rule.toml")
+                .display()
+                .to_string()
+        ),
         "{}",
         stderr(&output)
     );
