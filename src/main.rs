@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs};
+use oncebitten::engine::Outcome;
 use oncebitten::rules::{self, Failure};
 
 #[derive(Parser)]
@@ -25,6 +27,12 @@ enum Command {
     Rules {
         #[command(subcommand)]
         action: RulesAction,
+    },
+    /// Run each active rule against changes since a revision; exit 0 clean, 1 fired, 2 could not run
+    Check {
+        /// Revision the working tree is compared with
+        #[arg(long, default_value = "HEAD")]
+        base: String,
     },
 }
 
@@ -63,6 +71,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Config { action } => run_config(action),
         Command::Rules { action } => run_rules(action),
+        Command::Check { base } => run_check(&base),
     }
 }
 
@@ -91,6 +100,39 @@ fn run_rules(action: RulesAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_check(base: &str) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let code = match check::run(&inputs, base) {
+        Ok(checked) => report_checks(&checked),
+        Err(Failure::Invalid(errors)) => {
+            for error in errors {
+                eprintln!("error: {error:#}");
+            }
+            2
+        }
+        Err(Failure::CouldNotRun(error)) => {
+            eprintln!("error: {error:#}");
+            2
+        }
+    };
+    std::process::exit(code)
+}
+
+fn report_checks(checked: &[Checked]) -> i32 {
+    for item in checked {
+        match &item.outcome {
+            Outcome::Clean => {}
+            Outcome::Fired(findings) => {
+                for finding in findings {
+                    println!("{}", check::format_finding(&item.id, finding));
+                }
+            }
+            Outcome::CouldNotRun(reason) => eprintln!("{}: could not run: {reason}", item.id),
+        }
+    }
+    check::exit_code(checked)
 }
 
 fn exit_with(failure: Failure) -> ! {

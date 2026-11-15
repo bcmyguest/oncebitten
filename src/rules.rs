@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
+use include_dir::{include_dir, Dir};
+use tempfile::TempDir;
 
 use crate::config::{self, Inputs, Platform};
 use crate::lockfile::{self, LockedSource, Lockfile};
@@ -9,6 +11,12 @@ use crate::sources::{git, is_cloned, sources_root, sync_source};
 
 const PROJECT_DIR: &str = ".oncebitten";
 const PROJECT_RULES: &str = "rules";
+static EXAMPLES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/examples");
+
+pub struct Loaded {
+    pub rules: Vec<Resolved>,
+    _examples: Option<TempDir>,
+}
 
 #[derive(Debug)]
 pub enum Failure {
@@ -39,6 +47,14 @@ pub fn sync(inputs: &Inputs) -> Result<()> {
 }
 
 pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
+    load_layers(inputs, ci, false).map(|loaded| loaded.rules)
+}
+
+pub fn load_for_check(inputs: &Inputs) -> Result<Loaded, Failure> {
+    load_layers(inputs, false, true)
+}
+
+fn load_layers(inputs: &Inputs, ci: bool, with_examples: bool) -> Result<Loaded, Failure> {
     let loaded = config::load(inputs).map_err(Failure::CouldNotRun)?;
     let repo = repo_root(inputs).map_err(Failure::CouldNotRun)?;
     let root = sources_root(&inputs.vars, Platform::current()).map_err(Failure::CouldNotRun)?;
@@ -66,12 +82,29 @@ pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
         sources.push((source.name.clone(), dir));
     }
     let project = repo.join(PROJECT_DIR).join(PROJECT_RULES);
+    let examples = if with_examples {
+        Some(examples_dir().map_err(Failure::CouldNotRun)?)
+    } else {
+        None
+    };
     let layers = Layers {
         project: project.is_dir().then_some(project),
         sources,
-        examples: None,
+        examples: examples.as_ref().map(|dir| dir.path().to_path_buf()),
     };
-    resolve(&layers).map_err(Failure::Invalid)
+    let rules = resolve(&layers).map_err(Failure::Invalid)?;
+    Ok(Loaded {
+        rules,
+        _examples: examples,
+    })
+}
+
+fn examples_dir() -> Result<TempDir> {
+    let dir = TempDir::new().context("creating a directory for the shipped examples")?;
+    EXAMPLES
+        .extract(dir.path())
+        .context("extracting the shipped examples")?;
+    Ok(dir)
 }
 
 fn check_locked(
