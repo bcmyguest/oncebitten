@@ -23,6 +23,7 @@ use oncebitten::replay::{Backend, LocalRunner, Verdict};
 use oncebitten::rule::Check;
 use oncebitten::rule::Rule;
 use oncebitten::rules::{self, Failure};
+use oncebitten::stats;
 use oncebitten::steer;
 use oncebitten::store::{self, Decision, Store};
 use oncebitten::triage;
@@ -95,6 +96,15 @@ enum Command {
         /// Revision the working tree is compared with
         #[arg(long, default_value = "HEAD")]
         base: String,
+    },
+    /// Print the capture-to-rule funnel per mistake class; read-only
+    Stats {
+        /// Count only records from the last N days
+        #[arg(long)]
+        since: Option<u32>,
+        /// Print the report as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Block a push or pull request on new violations of active block rules
     Gate {
@@ -317,6 +327,7 @@ fn main() -> Result<()> {
         Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
         Command::Check { base } => run_check(&base),
+        Command::Stats { since, json } => run_stats(since, json),
         Command::Gate { stage } => run_gate(stage),
         Command::Exception { action } => run_exception(action),
         Command::Doctor { gateway } => {
@@ -699,6 +710,27 @@ fn run_rules(action: RulesAction) -> Result<()> {
             }
             Err(failure) => exit_with(failure),
         },
+    }
+    Ok(())
+}
+
+/// Reads the funnel without creating the store: a missing store prints
+/// `NO_DATA` (or an empty JSON report) and exits 0.
+fn run_stats(since: Option<u32>, json: bool) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let path = store::events_db_path_for(&inputs.vars, Platform::current())?;
+    let report = match store::probe(&path)? {
+        store::Probe::Missing if !json => {
+            println!("{}", stats::NO_DATA);
+            return Ok(());
+        }
+        store::Probe::Missing => stats::empty(since),
+        _ => stats::report(&open_store(&inputs)?, since, now_millis()?)?,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", stats::text(&report));
     }
     Ok(())
 }
