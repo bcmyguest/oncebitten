@@ -63,6 +63,11 @@ mod unix {
     use super::*;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+
+    /// Writing a script while another test forks fails with ETXTBSY, so the
+    /// tests that spawn scripts run one at a time.
+    static SCRIPTS: Mutex<()> = Mutex::new(());
 
     /// Writes a `#!/bin/sh` script into its own directory and returns its path.
     fn script(body: &str) -> (TempDir, PathBuf) {
@@ -87,6 +92,7 @@ mod unix {
 
     #[test]
     fn the_child_runs_in_the_workdir_with_the_triage_switch_set() {
+        let _guard = SCRIPTS.lock().unwrap_or_else(|e| e.into_inner());
         let (_keep, path) = script(r#"printf '%s|%s' "$PWD" "$ONCEBITTEN_TRIAGE""#);
         let work = TempDir::new().unwrap();
         let out = run::ProcessRunner
@@ -103,6 +109,7 @@ mod unix {
 
     #[test]
     fn a_hung_host_is_killed_at_the_timeout() {
+        let _guard = SCRIPTS.lock().unwrap_or_else(|e| e.into_inner());
         let (_keep, path) = script("sleep 30");
         let work = TempDir::new().unwrap();
         let started = Instant::now();
@@ -115,6 +122,7 @@ mod unix {
 
     #[test]
     fn a_streaming_host_is_killed_once_its_verdict_is_complete() {
+        let _guard = SCRIPTS.lock().unwrap_or_else(|e| e.into_inner());
         let verdict = r#"{"type":"text","part":{"type":"text","text":"```json\n{\"repeatable\":true,\"user_correction\":false,\"root_cause\":\"x\",\"proposed_fix_kind\":\"lint\",\"generality\":\"general\"}\n```"}}"#;
         let (_keep, path) = script(&format!("printf '%s\\n' '{verdict}'\nsleep 30"));
         let work = TempDir::new().unwrap();
