@@ -144,7 +144,7 @@ The gate needs [pre-commit](https://pre-commit.com) 3.2.0 or later, [prek](https
 
 Build and test with `cargo test`; CI also runs `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` on Linux, macOS and Windows. The build order and open steps live in [PLAN.md](PLAN.md).
 
-This repository gates itself with the shipped `rust-no-unwrap` example, enabled in [`.oncebitten/config.toml`](.oncebitten/config.toml). It has no baseline: `clippy::unwrap_used` finds no hit in the library or binary code, and the gate fails on each new `.unwrap()` in that code.
+This repository gates itself with the shipped `rust-no-unwrap` example, enabled in [`.oncebitten/config.toml`](.oncebitten/config.toml). It has no baseline: the gate fails on any non-test `.unwrap()` in the crate, and test code is exempt.
 
 ## License
 
