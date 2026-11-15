@@ -1,9 +1,15 @@
-//! Measures intent classes on `tests/fixtures/intent/labelled.tsv`.
+//! Measures intent classes on the labelled fixtures under `tests/fixtures/intent/`.
 //!
 //! Usage: `cargo run --release --example intent_eval -- <f32_model_dir> <int8_model_dir>`
 //!
-//! Each embedding model gets a threshold chosen on the `dev` split (max macro-F1) and
-//! reported on the `test` split. The regex lexicon has no threshold and reports both splits.
+//! Two classifiers per embedding model:
+//! - `nn`: nearest shipped example, neutral below a threshold.
+//! - `knn`: k nearest neighbours over shipped examples plus the `dev` rows (neutral included),
+//!   dev scored leave-one-out.
+//!
+//! Every threshold and `k` is chosen on `dev` and reported on `test`. Two thresholds per run:
+//! max dev macro-F1, and the lowest whose dev neutral false-positive rate is at most
+//! `HOOK_MAX_NEUTRAL_FPR`. The regex lexicon has no threshold and reports both splits.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,7 +23,15 @@ use oncebitten::intent::{
 use oncebitten::signal::{matched_phrases, DEFAULT_CORRECTION_LEXICON};
 
 const CLASSES: [&str; 4] = [RULE_REQUEST, CORRECTION, FRUSTRATION, NEUTRAL];
-const FIXTURE: &str = "tests/fixtures/intent/labelled.tsv";
+const FIXTURES: [&str; 2] = [
+    "tests/fixtures/intent/labelled.tsv",
+    "tests/fixtures/intent/labelled-extra.tsv",
+];
+const HOOK_MAX_NEUTRAL_FPR: f32 = 0.05;
+const KNN_K: [usize; 5] = [1, 3, 5, 7, 9];
+
+/// Predicted class and confidence for one fixture row.
+type Scored = (&'static str, f32);
 
 struct Row {
     split: String,
@@ -105,11 +119,23 @@ fn accuracy(gold: &[&str], pred: &[&str]) -> f32 {
     hits as f32 / gold.len().max(1) as f32
 }
 
+/// Share of gold-neutral rows given a non-neutral class.
+fn neutral_fpr(gold: &[&str], pred: &[&str]) -> f32 {
+    let neutral: Vec<_> = gold
+        .iter()
+        .zip(pred)
+        .filter(|(g, _)| **g == NEUTRAL)
+        .collect();
+    let flagged = neutral.iter().filter(|(_, p)| **p != NEUTRAL).count();
+    flagged as f32 / neutral.len().max(1) as f32
+}
+
 fn print_report(name: &str, split: &str, gold: &[&'static str], pred: &[&'static str]) {
     println!(
-        "{name} {split}: accuracy {:.3} macro-F1 {:.3}",
+        "{name} {split}: accuracy {:.3} macro-F1 {:.3} neutral-FPR {:.3}",
         accuracy(gold, pred),
-        macro_f1(gold, pred)
+        macro_f1(gold, pred),
+        neutral_fpr(gold, pred)
     );
     let table = tally(gold, pred);
     for class in CLASSES {
@@ -126,16 +152,40 @@ fn predict(scored: &[(&'static str, f32)], threshold: f32) -> Vec<&'static str> 
         .collect()
 }
 
-fn best_threshold(scored: &[(&'static str, f32)], gold: &[&'static str]) -> f32 {
+fn thresholds() -> impl Iterator<Item = f32> {
+    (0..=100).map(|step| step as f32 / 100.0)
+}
+
+/// Threshold with the highest macro-F1 and that F1.
+fn best_threshold(scored: &[(&'static str, f32)], gold: &[&'static str]) -> (f32, f32) {
     let mut best = (f32::MIN, 0.0_f32);
-    for step in 0..=90 {
-        let threshold = step as f32 / 100.0;
+    for threshold in thresholds() {
         let f1 = macro_f1(gold, &predict(scored, threshold));
         if f1 > best.0 {
             best = (f1, threshold);
         }
     }
-    best.1
+    (best.1, best.0)
+}
+
+/// Lowest threshold whose neutral false-positive rate is at most `HOOK_MAX_NEUTRAL_FPR`.
+fn hook_threshold(scored: &[(&'static str, f32)], gold: &[&'static str]) -> f32 {
+    thresholds()
+        .find(|t| neutral_fpr(gold, &predict(scored, *t)) <= HOOK_MAX_NEUTRAL_FPR)
+        .unwrap_or(1.0)
+}
+
+/// Reports `scored` at the max-F1 and the hook threshold, both chosen on dev.
+fn report_thresholds(name: &str, rows: &[Row], scored: &[(&'static str, f32)]) {
+    let (dev_scored, dev_gold) = select(rows, scored, "dev");
+    let (test_scored, test_gold) = select(rows, scored, "test");
+    let (f1_threshold, _) = best_threshold(&dev_scored, &dev_gold);
+    let hook = hook_threshold(&dev_scored, &dev_gold);
+    for (label, threshold) in [("max-F1", f1_threshold), ("hook", hook)] {
+        let run = format!("{name} {label} t={threshold:.2}");
+        print_report(&run, "dev", &dev_gold, &predict(&dev_scored, threshold));
+        print_report(&run, "test", &test_gold, &predict(&test_scored, threshold));
+    }
 }
 
 /// Best-matching example class and cosine score for every row.
@@ -169,16 +219,69 @@ fn select<T: Copy>(rows: &[Row], items: &[T], split: &str) -> (Vec<T>, Vec<&'sta
     (picked, gold)
 }
 
-fn evaluate(name: &str, model: &StaticModel, rows: &[Row]) -> Result<(Vec<Vec<f32>>, f32)> {
+/// kNN class and confidence for every row. Prototypes are the shipped examples plus the dev
+/// rows; a dev row never votes for itself. Votes sum cosine scores per class; confidence is
+/// the winning class's best neighbour score.
+fn knn_scores(
+    bank: &Bank,
+    rows: &[Row],
+    queries: &[Vec<f32>],
+    k: usize,
+) -> Vec<(&'static str, f32)> {
+    let mut prototypes: Vec<(Option<usize>, &'static str, &[f32])> = bank
+        .examples()
+        .iter()
+        .map(|e| (None, e.class, e.vector.as_slice()))
+        .collect();
+    for (index, (row, query)) in rows.iter().zip(queries).enumerate() {
+        if row.split == "dev" {
+            prototypes.push((Some(index), row.label, query.as_slice()));
+        }
+    }
+    queries
+        .iter()
+        .enumerate()
+        .map(|(index, query)| {
+            let mut near: Vec<(&'static str, f32)> = prototypes
+                .iter()
+                .filter(|(row, _, _)| *row != Some(index))
+                .map(|(_, class, vector)| (*class, cosine(query, vector)))
+                .collect();
+            near.sort_by(|a, b| b.1.total_cmp(&a.1));
+            near.truncate(k);
+            let mut votes: BTreeMap<&'static str, (f32, f32)> = BTreeMap::new();
+            for (class, score) in near {
+                let entry = votes.entry(class).or_insert((0.0, f32::MIN));
+                entry.0 += score;
+                entry.1 = entry.1.max(score);
+            }
+            votes
+                .into_iter()
+                .max_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
+                .map_or((NEUTRAL, 0.0), |(class, (_, best))| (class, best))
+        })
+        .collect()
+}
+
+fn evaluate(name: &str, model: &StaticModel, rows: &[Row]) -> Result<Vec<Vec<f32>>> {
     let bank = Bank::from_toml(SHIPPED_EXAMPLES, model)?;
     let (queries, scored) = score_rows(model, &bank, rows);
-    let (dev_scored, dev_gold) = select(rows, &scored, "dev");
-    let threshold = best_threshold(&dev_scored, &dev_gold);
-    println!("{name} threshold {threshold:.2} (chosen on dev)");
-    print_report(name, "dev", &dev_gold, &predict(&dev_scored, threshold));
-    let (test_scored, test_gold) = select(rows, &scored, "test");
-    print_report(name, "test", &test_gold, &predict(&test_scored, threshold));
-    Ok((queries, threshold))
+    report_thresholds(&format!("{name} nn"), rows, &scored);
+
+    let mut best: Option<(f32, usize, Vec<Scored>)> = None;
+    for k in KNN_K {
+        let knn = knn_scores(&bank, rows, &queries, k);
+        let (dev_scored, dev_gold) = select(rows, &knn, "dev");
+        let (_, f1) = best_threshold(&dev_scored, &dev_gold);
+        println!("{name} knn k={k} dev max macro-F1 {f1:.3}");
+        if best.as_ref().is_none_or(|(top, _, _)| f1 > *top) {
+            best = Some((f1, k, knn));
+        }
+    }
+    if let Some((_, k, knn)) = best {
+        report_thresholds(&format!("{name} knn k={k}"), rows, &knn);
+    }
+    Ok(queries)
 }
 
 fn regex_predictions(rows: &[Row]) -> Vec<&'static str> {
@@ -214,7 +317,10 @@ fn main() -> Result<()> {
     let [_, f32_dir, int8_dir] = &args[..] else {
         bail!("usage: intent_eval <f32_model_dir> <int8_model_dir>");
     };
-    let rows = read_rows(Path::new(FIXTURE))?;
+    let mut rows = Vec::new();
+    for fixture in FIXTURES {
+        rows.extend(read_rows(Path::new(fixture))?);
+    }
     println!(
         "rows: {} dev, {} test",
         rows.iter().filter(|r| r.split == "dev").count(),
@@ -225,9 +331,9 @@ fn main() -> Result<()> {
     let int8_model = StaticModel::from_pretrained(int8_dir, None, None, None)?;
     let memory_int8 = StaticModel::from_pretrained(f32_dir, None, None, None)?.quantize_int8();
 
-    let (f32_queries, _) = evaluate("f32", &f32_model, &rows)?;
-    let (int8_queries, _) = evaluate("int8-file", &int8_model, &rows)?;
-    let (memory_queries, _) = evaluate("int8-memory", &memory_int8, &rows)?;
+    let f32_queries = evaluate("f32", &f32_model, &rows)?;
+    let int8_queries = evaluate("int8-file", &int8_model, &rows)?;
+    let memory_queries = evaluate("int8-memory", &memory_int8, &rows)?;
     println!(
         "mean cosine int8-file vs int8-memory query vectors: {:.4}",
         mean_cosine(&int8_queries, &memory_queries)
@@ -238,11 +344,9 @@ fn main() -> Result<()> {
     );
 
     let regex = regex_predictions(&rows);
-    let gold: Vec<&'static str> = rows.iter().map(|r| r.label).collect();
     for split in ["dev", "test"] {
         let (pred, g) = select(&rows, &regex, split);
         print_report("regex", split, &g, &pred);
     }
-    let _ = gold;
     Ok(())
 }
