@@ -93,6 +93,7 @@ pub fn deliver(
     let proof = settle_proof(store, id, &mut rule, prove)?;
     let config = config::load(inputs)?.config;
     let chosen = choose(inputs, to, &repo, &config, forge_for)?;
+    let marks = store.proposal_marks(&row.cluster)?.unwrap_or_default();
     let message = Message {
         rule: rule.id.clone(),
         cluster: row.cluster.clone(),
@@ -100,6 +101,7 @@ pub fn deliver(
         proof: proof.clone(),
         hits: row.hits.clone(),
         rules_repo: matches!(chosen, Chosen::RulesRepo),
+        marks: proposals::mark_lines(&marks),
     };
     let committed = match chosen {
         Chosen::Pr(pr_url) => {
@@ -193,6 +195,7 @@ struct Message {
     /// The rule goes to the shared rules repo, whose other consumers get no
     /// baseline from `accept`.
     rules_repo: bool,
+    marks: Vec<String>,
 }
 
 impl Message {
@@ -216,6 +219,9 @@ impl Message {
             } else {
                 body.push_str("existing hits will be baselined\n");
             }
+        }
+        for line in &self.marks {
+            body.push_str(&format!("{line}\n"));
         }
         body
     }

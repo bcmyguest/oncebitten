@@ -18,6 +18,7 @@ fn row(cluster: &str) -> ProposalRow {
         target: None,
         commit: None,
         pr_url: None,
+        hits: None,
     }
 }
 
@@ -114,4 +115,22 @@ fn an_unrelated_proposal_is_not_marked() {
     let mark = proposals::possible_duplicate(&store, "c1", None, Some("always pin the toolchain"))
         .unwrap();
     assert!(mark.is_none());
+}
+
+#[test]
+fn mark_lines_show_the_possible_and_confirmed_duplicate() {
+    use oncebitten::store::ProposalMarks;
+    let marks = ProposalMarks {
+        mistake_class: None,
+        possible_duplicate: Some("possible duplicate of c0 (same mistake_class)".into()),
+        duplicate_of: Some("c0".into()),
+    };
+    assert_eq!(
+        proposals::mark_lines(&marks),
+        vec![
+            "possible duplicate of c0 (same mistake_class)".to_string(),
+            "confirmed duplicate of c0".to_string(),
+        ]
+    );
+    assert!(proposals::mark_lines(&ProposalMarks::default()).is_empty());
 }

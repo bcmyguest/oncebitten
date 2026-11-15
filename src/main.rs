@@ -506,6 +506,11 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
         ProposalsAction::List => {
             for row in store.proposals()? {
                 println!("{}", proposal_line(&row));
+                for line in
+                    proposals::mark_lines(&store.proposal_marks(&row.cluster)?.unwrap_or_default())
+                {
+                    println!("  {line}");
+                }
             }
             Ok(())
         }
@@ -582,6 +587,9 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
         anyhow::bail!("no proposal `{id}`; see {}", proposals::LIST_HINT);
     };
     println!("{}", proposal_line(&row));
+    for line in proposals::mark_lines(&store.proposal_marks(&row.cluster)?.unwrap_or_default()) {
+        println!("{line}");
+    }
     if let Some(dir) = &row.dir {
         println!("rule dir: {}", dir.display());
     }

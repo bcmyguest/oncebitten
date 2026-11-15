@@ -11,7 +11,7 @@ use crate::replay::Verdict;
 use crate::rule::{self, Rule, Status};
 use crate::rules::{self, Failure};
 use crate::signal;
-pub use crate::store::{Kind, ProposalRow, State};
+pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
 use crate::store::{Outcome, Store};
 use crate::triage::draft::Draft;
 use crate::triage::verdict::Answer;
@@ -276,6 +276,18 @@ pub fn possible_duplicate(
         })
         .collect();
     Ok(first_match(&Candidate { id, class, text }, &others))
+}
+
+/// Lines that show a proposal's duplicate marks in `list`, `show` and PR bodies.
+pub fn mark_lines(marks: &ProposalMarks) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(possible) = &marks.possible_duplicate {
+        lines.push(possible.clone());
+    }
+    if let Some(of) = &marks.duplicate_of {
+        lines.push(format!("confirmed duplicate of {of}"));
+    }
+    lines
 }
 
 /// Proves and queues the rule directory `dir`. The caller removes `dir`
