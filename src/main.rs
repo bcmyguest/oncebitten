@@ -8,6 +8,7 @@ use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
 use oncebitten::engine::Outcome;
 use oncebitten::evidence::{self, Cluster};
+use oncebitten::exceptions::{self, Exception};
 use oncebitten::gate::{self, Stage};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
@@ -76,6 +77,11 @@ enum Command {
         #[command(subcommand)]
         stage: GateStage,
     },
+    /// Manage .oncebitten/exceptions.toml: findings a rule lets through on named paths until a date
+    Exception {
+        #[command(subcommand)]
+        action: ExceptionAction,
+    },
     /// Manage .oncebitten/baseline.json, the violations the gate lets through
     Baseline {
         #[command(subcommand)]
@@ -113,6 +119,26 @@ enum EvidenceAction {
         #[arg(long)]
         reason: String,
     },
+}
+
+#[derive(Subcommand)]
+enum ExceptionAction {
+    /// Let a rule's findings through on the given paths until a date
+    Add {
+        /// Qualified rule id, as `rules list` prints it
+        rule: String,
+        /// Globs of repo-relative paths; `**` covers every path and pathless findings
+        #[arg(long, required = true, num_args = 1..)]
+        paths: Vec<String>,
+        /// Why the rule does not apply here
+        #[arg(long)]
+        reason: String,
+        /// Last day (UTC) the exception applies, as YYYY-MM-DD
+        #[arg(long)]
+        expires: String,
+    },
+    /// Print every exception as rule, paths, expires, live or expired, and reason
+    List,
 }
 
 #[derive(Subcommand)]
@@ -205,6 +231,7 @@ fn main() -> Result<()> {
         Command::Rules { action } => run_rules(action),
         Command::Check { base } => run_check(&base),
         Command::Gate { stage } => run_gate(stage),
+        Command::Exception { action } => run_exception(action),
         Command::Baseline {
             action: BaselineAction::Update,
         } => run_baseline_update(),
@@ -354,7 +381,11 @@ fn run_rules(action: RulesAction) -> Result<()> {
 fn run_check(base: &str) -> Result<()> {
     let inputs = Inputs::from_process()?;
     let code = match check::run(&inputs, base) {
-        Ok(checked) => report_checks(&checked),
+        Ok(ran) => {
+            let code = report_checks(&ran.checked);
+            report_excepted(ran.excepted);
+            code
+        }
         Err(Failure::Invalid(errors)) => {
             for error in errors {
                 eprintln!("error: {error:#}");
@@ -393,7 +424,75 @@ fn run_gate(stage: GateStage) -> Result<()> {
             report.known
         );
     }
+    report_excepted(report.excepted);
+    for exception in &report.expired {
+        eprintln!(
+            "warning: expired exception: {}",
+            exceptions::describe(exception)
+        );
+    }
     std::process::exit(report.exit_code(stage))
+}
+
+fn report_excepted(excepted: usize) {
+    if excepted > 0 {
+        eprintln!("{excepted} violation(s) excepted by .oncebitten/exceptions.toml");
+    }
+}
+
+fn run_exception(action: ExceptionAction) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let Some(repo) = config::repo_root(&inputs.cwd) else {
+        exit_could_not_run(Failure::CouldNotRun(anyhow::anyhow!(
+            "not inside a git repository"
+        )))
+    };
+    match action {
+        ExceptionAction::Add {
+            rule,
+            paths,
+            reason,
+            expires,
+        } => {
+            let resolved = match rules::load(&inputs, false) {
+                Ok(resolved) => resolved,
+                Err(failure) => exit_could_not_run(failure),
+            };
+            if !resolved.iter().any(|entry| entry.id == rule) {
+                eprintln!("error: no rule named `{rule}`; see oncebitten rules list");
+                std::process::exit(2)
+            }
+            let exception = Exception::new(&rule, &paths, &reason, &expires)?;
+            let path = exceptions::add(&repo, &exception)?;
+            println!(
+                "added {} to {}",
+                exceptions::describe(&exception),
+                path.display()
+            );
+        }
+        ExceptionAction::List => {
+            let found = match exceptions::read(&repo) {
+                Ok(found) => found,
+                Err(error) => exit_could_not_run(Failure::CouldNotRun(error)),
+            };
+            let today = exceptions::today();
+            for exception in &found {
+                let state = if exception.is_live(today) {
+                    "live"
+                } else {
+                    "expired"
+                };
+                println!(
+                    "{}  {}  {}  {state}  {}",
+                    exception.rule,
+                    exception.paths.join(","),
+                    exception.expires,
+                    exception.reason
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn run_baseline_update() -> Result<()> {

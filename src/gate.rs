@@ -11,6 +11,7 @@ use crate::baseline::{self, Baseline};
 use crate::check::{self, Checked};
 use crate::config::{self, Inputs};
 use crate::engine::Outcome;
+use crate::exceptions::{self, Exception};
 use crate::proof::{self, Validity};
 use crate::registry::Resolved;
 use crate::rule::{Check, Mode, Status};
@@ -41,6 +42,10 @@ pub struct Report {
     pub checked: Vec<Checked>,
     /// Findings the baseline matched.
     pub known: usize,
+    /// Findings a live exception covered.
+    pub excepted: usize,
+    /// Exceptions past their `expires` date; they cover nothing.
+    pub expired: Vec<Exception>,
 }
 
 impl Report {
@@ -63,6 +68,8 @@ pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, 
     let range = range(inputs, &repo, stage, base).map_err(Failure::CouldNotRun)?;
     let changed = changed(inputs, &repo, &range).map_err(Failure::CouldNotRun)?;
     let baseline = baseline::read(&repo).map_err(Failure::CouldNotRun)?;
+    let exceptions = exceptions::read(&repo).map_err(Failure::CouldNotRun)?;
+    let today = exceptions::today();
     let gated = gated(&rules);
     let proofs = gated
         .iter()
@@ -74,22 +81,32 @@ pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, 
         .collect();
     let checked = check::run_rules(gated.iter().copied(), &repo, &changed);
     let (checked, known) = apply_baseline(checked, &gated, &repo, &baseline);
+    let (checked, excepted) = exceptions::apply(checked, &exceptions, today);
+    let expired = exceptions
+        .into_iter()
+        .filter(|exception| !exception.is_live(today))
+        .collect();
     Ok(Report {
         range,
         proofs,
         checked,
         known,
+        excepted,
+        expired,
     })
 }
 
 /// The violations the gated rules find in every tracked file now. Diff rules
-/// are skipped: their findings are never baselined. A rule that could not run
-/// fails the whole update, so a partial baseline is never written.
+/// are skipped: their findings are never baselined. Findings a live exception
+/// covers are left out, so they fail the gate once the exception expires. A
+/// rule that could not run fails the whole update, so a partial baseline is
+/// never written.
 pub fn current_baseline(inputs: &Inputs) -> Result<(PathBuf, Baseline), Failure> {
     let rules = rules::load(inputs, false)?;
     let repo = config::repo_root(&inputs.cwd)
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
     let tracked = changed(inputs, &repo, &Range::AllTracked).map_err(Failure::CouldNotRun)?;
+    let exceptions = exceptions::read(&repo).map_err(Failure::CouldNotRun)?;
     let gated: Vec<&Resolved> = gated(&rules)
         .into_iter()
         .filter(|resolved| !matches!(resolved.rule.check, Check::Diff { .. }))
@@ -99,7 +116,12 @@ pub fn current_baseline(inputs: &Inputs) -> Result<(PathBuf, Baseline), Failure>
         .map(|resolved| (resolved.id.as_str(), &resolved.rule.check))
         .collect();
     let mut baseline = Baseline::default();
-    for item in check::run_rules(gated.iter().copied(), &repo, &tracked) {
+    let (checked, _) = exceptions::apply(
+        check::run_rules(gated.iter().copied(), &repo, &tracked),
+        &exceptions,
+        exceptions::today(),
+    );
+    for item in checked {
         match item.outcome {
             Outcome::Clean => {}
             Outcome::Fired(findings) => {

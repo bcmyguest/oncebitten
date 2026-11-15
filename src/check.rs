@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 
 use crate::config::{self, Inputs};
 use crate::engine::{astgrep, diff, native, Finding, Outcome};
+use crate::exceptions;
 use crate::registry::Resolved;
 use crate::rule::{Check, Status};
 use crate::rules::{self, Failure};
@@ -18,12 +19,24 @@ pub struct Checked {
     pub outcome: Outcome,
 }
 
-pub fn run(inputs: &Inputs, base: &str) -> Result<Vec<Checked>, Failure> {
+/// Outcomes with excepted findings removed, and how many were excepted.
+pub struct Ran {
+    pub checked: Vec<Checked>,
+    pub excepted: usize,
+}
+
+pub fn run(inputs: &Inputs, base: &str) -> Result<Ran, Failure> {
     let rules = rules::load(inputs, false)?;
     let repo = config::repo_root(&inputs.cwd)
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
+    let exceptions = exceptions::read(&repo).map_err(Failure::CouldNotRun)?;
     let changed = changed_paths(inputs, &repo, base).map_err(Failure::CouldNotRun)?;
-    Ok(run_rules(rules.iter(), &repo, &changed))
+    let (checked, excepted) = exceptions::apply(
+        run_rules(rules.iter(), &repo, &changed),
+        &exceptions,
+        exceptions::today(),
+    );
+    Ok(Ran { checked, excepted })
 }
 
 /// Runs the active rules among `rules` against the changed repo-relative paths.

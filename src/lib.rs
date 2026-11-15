@@ -4,6 +4,7 @@ pub mod check;
 pub mod config;
 pub mod engine;
 pub mod evidence;
+pub mod exceptions;
 pub mod gate;
 pub mod hooks;
 pub mod host;
