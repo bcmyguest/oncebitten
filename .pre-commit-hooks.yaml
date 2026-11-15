@@ -10,3 +10,14 @@
   pass_filenames: false
   always_run: true
   minimum_pre_commit_version: "3.2.0"
+
+# Runs the `oncebitten` on PATH (install.sh or install.ps1): nothing to build.
+- id: oncebitten-gate-system
+  name: oncebitten gate
+  description: Block a push that adds a violation of an active oncebitten block rule.
+  entry: oncebitten gate pre-push
+  language: system
+  stages: [pre-push]
+  pass_filenames: false
+  always_run: true
+  minimum_pre_commit_version: "3.2.0"

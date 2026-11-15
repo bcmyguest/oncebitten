@@ -1,5 +1,6 @@
 # oncebitten documentation
 
+- [Install](install.md): Claude Code plugin, install scripts, CI, releases.
 - [Configuration](configuration.md): settings, precedence and the files they come from.
 - [Rules](rules.md): rule format, ids, overrides, lockfile and commands.
 - [Signal capture](capture.md): signals, host support and hook install.

@@ -6,13 +6,25 @@ Status: pre-alpha, step 7 of [PLAN.md](PLAN.md). Rules load from three layers, `
 
 The pre-push gate requires the [pre-commit](https://pre-commit.com) framework (3.2.0 or later): oncebitten ships a pre-commit hook, not a git hook of its own. CI runs `oncebitten gate pr` directly. See [docs/gate.md](docs/gate.md).
 
-## Install from source
+## Install
+
+Claude Code plugin (capture hooks, plus `oncebitten` on the agent's `PATH`):
+
+```
+/plugin marketplace add bcmyguest/oncebitten
+/plugin install oncebitten@oncebitten
+```
+
+The plugin downloads the release binary for its version on the first session start. Nothing to build.
+
+Command line, for the gate and `evidence`:
 
 ```sh
-git clone https://github.com/bcmyguest/oncebitten
-cd oncebitten
-cargo install --path .
+curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.sh | sh     # macOS, Linux
+irm https://raw.githubusercontent.com/bcmyguest/oncebitten/main/install.ps1 | iex          # Windows PowerShell
 ```
+
+Both verify the release's SHA-256 before installing. Other hosts, pinning and building from source: [docs/install.md](docs/install.md).
 
 ## Usage
 
@@ -44,7 +56,7 @@ repos:
   - repo: https://github.com/bcmyguest/oncebitten
     rev: <commit or tag>
     hooks:
-      - id: oncebitten-gate
+      - id: oncebitten-gate          # builds from source; or oncebitten-gate-system to use the installed binary
 ```
 
 ```sh

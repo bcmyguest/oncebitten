@@ -1,0 +1,14 @@
+{
+  "name": "oncebitten",
+  "description": "Turns repeated agent mistakes into git-enforced rules",
+  "owner": {
+    "name": "bcmyguest"
+  },
+  "plugins": [
+    {
+      "name": "oncebitten",
+      "source": "./packaging/claude",
+      "description": "Records prompts and tool outcomes so repeated agent mistakes can be turned into rules."
+    }
+  ]
+}

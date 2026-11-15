@@ -1,6 +1,6 @@
 [package]
 name = "oncebitten"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 description = "Turns repeated agent mistakes into git-enforced rules"
 license = "Apache-2.0"

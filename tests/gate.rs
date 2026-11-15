@@ -392,11 +392,13 @@ fn rule_fixtures_do_not_trip_the_gate() {
 fn hook_and_templates_call_real_gate_commands() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let hooks = fs::read_to_string(root.join(".pre-commit-hooks.yaml")).unwrap();
-    let entry = hooks
+    let entries: Vec<&str> = hooks
         .lines()
-        .find_map(|line| line.trim().strip_prefix("entry: "))
-        .unwrap();
-    let mut args: Vec<&str> = entry.split_whitespace().skip(1).collect();
+        .filter_map(|line| line.trim().strip_prefix("entry: "))
+        .collect();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|entry| *entry == entries[0]));
+    let mut args: Vec<&str> = entries[0].split_whitespace().skip(1).collect();
     assert_eq!(args, ["gate", "pre-push"]);
     assert!(hooks.contains("stages: [pre-push]"));
     args.push("--help");
@@ -409,6 +411,12 @@ fn hook_and_templates_call_real_gate_commands() {
         assert!(
             text.contains("oncebitten gate pr --base "),
             "{template} must run the pr gate"
+        );
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(
+            text.contains(&format!("/v{version}/install.sh"))
+                && text.contains(&format!("ONCEBITTEN_VERSION={version} ")),
+            "{template} must pin release {version}"
         );
     }
     let help = repo.run(&["gate", "pr", "--help"], &[]);

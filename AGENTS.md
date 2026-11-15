@@ -38,7 +38,8 @@ Run all four before a commit. CI runs the same commands.
 - `docs/configuration.md`: settings reference. Keep it in step with `src/config.rs`.
 - `docs/rules.md`: rule format, ids, overrides, lockfile and commands. Keep it in step with `src/rule.rs`, `src/registry.rs`, `src/rules.rs` and `src/proof.rs`.
 - `tests/store.rs`, `tests/signal.rs`, `tests/host.rs`, `tests/hosts.rs`, `tests/capture.rs`, `tests/hooks.rs`, `tests/hooks_hosts.rs`, `tests/packaging.rs`, `tests/home.rs`: capture pipeline tests.
-- `packaging/`: plugin manifests, hook files and the opencode and pi scripts. `tests/fixtures/`: real host payloads, scrubbed.
+- `packaging/`: plugin manifests, hook files and the opencode and pi scripts. `packaging/claude/bin/oncebitten` is the plugin's release launcher; `packaging/claude/scripts/install.sh` must stay a byte copy of `install.sh`.
+- `.claude-plugin/marketplace.json`: Claude Code marketplace for `packaging/claude`. `install.sh`, `install.ps1`: release installers. `.github/workflows/release.yml`: builds and publishes release binaries on a `v*` tag. `docs/install.md`: keep it in step with these. `tests/packaging.rs` covers versions, the marketplace and the installers. `tests/fixtures/`: real host payloads, scrubbed.
 - `docs/gate.md`: gate stages, ranges, proofs, baseline, exit codes. Keep it in step with `src/gate.rs` and `src/baseline.rs`.
 - `.pre-commit-hooks.yaml`: the `oncebitten-gate` pre-commit hook. `templates/`: CI gate jobs (GitHub Actions, GitLab CI, Azure Pipelines). `tests/gate.rs` checks both call real commands.
 - `docs/capture.md`: signals, host support, hook install. Keep it in step with `src/signal.rs`, `src/host.rs` and `src/hooks.rs`.

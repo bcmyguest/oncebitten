@@ -1,14 +1,15 @@
 # oncebitten gate for GitLab CI. Add this job to .gitlab-ci.yml.
 # Require it with "Pipelines must succeed" in the project's merge request settings.
 oncebitten-gate:
-  image: rust:1
+  image: buildpack-deps:stable-curl
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
     # The gate diffs against the merge-base with the target branch.
     GIT_DEPTH: "0"
   script:
-    # Pin a commit with --rev <sha> for reproducible gates.
-    - cargo install --locked --git https://github.com/bcmyguest/oncebitten oncebitten
+    # Pin the release for reproducible gates.
+    - curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.1.0/install.sh | ONCEBITTEN_VERSION=0.1.0 sh
+    - export PATH="$HOME/.local/bin:$PATH"
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - oncebitten gate pr --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
