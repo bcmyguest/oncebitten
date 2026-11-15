@@ -25,6 +25,15 @@ pub struct Invocation {
     /// The host may print its answer and keep running; the caller must parse
     /// the output and kill the process.
     pub streaming: bool,
+    pub reader: Reader,
+}
+
+/// How the answer is read from what the host printed or wrote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader {
+    ClaudeJson,
+    CodexFile,
+    OpenCodeJsonl,
 }
 
 /// What the runner captured from one call.
@@ -73,6 +82,7 @@ fn claude(model: Option<&str>, prompt: &str) -> Invocation {
         answer_file: None,
         stdin_null: true,
         streaming: false,
+        reader: Reader::ClaudeJson,
     }
 }
 
@@ -102,6 +112,7 @@ fn codex(model: Option<&str>, prompt: &str, workdir: &Path) -> Invocation {
         answer_file: Some(answer_path),
         stdin_null: true,
         streaming: false,
+        reader: Reader::CodexFile,
     }
 }
 
@@ -116,23 +127,23 @@ fn opencode(model: Option<&str>, prompt: &str) -> Invocation {
         answer_file: None,
         stdin_null: true,
         streaming: true,
+        reader: Reader::OpenCodeJsonl,
     }
 }
 
 /// Reads the verdict from what the call printed or wrote. Anything else is an
 /// error, which the caller reports as "could not run".
 pub fn verdict_from(inv: &Invocation, captured: &Captured) -> Result<Verdict> {
-    match inv.program.as_str() {
-        "claude" => claude_verdict(&captured.stdout),
-        "codex" => {
+    match inv.reader {
+        Reader::ClaudeJson => claude_verdict(&captured.stdout),
+        Reader::CodexFile => {
             let answer = captured
                 .answer
                 .as_deref()
                 .context("codex wrote no answer file")?;
             verdict::parse(answer)
         }
-        "opencode" => opencode_verdict(&captured.stdout),
-        other => bail!("no answer reader for `{other}`"),
+        Reader::OpenCodeJsonl => opencode_verdict(&captured.stdout),
     }
 }
 
