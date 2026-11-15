@@ -301,3 +301,35 @@ fn unknown_listed_example_is_an_error() {
         stderr(&output)
     );
 }
+
+#[test]
+fn retire_a_source_rule_points_at_the_rules_repo() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+
+    let output = s.fx.oncebitten(
+        &s.project,
+        &["rules", "retire", "team/no-unwrap", "--reason", "r"],
+    );
+
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    let err = stderr(&output);
+    assert!(err.contains("retire it in that rules repo"), "{err}");
+    assert!(err.contains("overrides = \"team/no-unwrap\""), "{err}");
+}
+
+#[test]
+fn rollback_a_source_rule_points_at_the_rules_repo() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+
+    let output =
+        s.fx.oncebitten(&s.project, &["rules", "rollback", "team/no-unwrap"]);
+
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("roll it back in that rules repo"),
+        "{}",
+        stderr(&output)
+    );
+}

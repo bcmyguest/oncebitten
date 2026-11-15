@@ -64,6 +64,7 @@ struct RawRule {
     language: Option<String>,
     overrides: Option<String>,
     reason: Option<String>,
+    retired_reason: Option<String>,
     command: Option<Vec<String>>,
     fired_exit_codes: Option<Vec<i32>>,
     fired_output_contains: Option<String>,
@@ -195,6 +196,13 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
     }
     if raw.description.trim().is_empty() {
         return Err(invalid(file, "description is empty"));
+    }
+    if raw
+        .retired_reason
+        .as_ref()
+        .is_some_and(|reason| reason.trim().is_empty())
+    {
+        return Err(invalid(file, "retired_reason is empty"));
     }
     let overrides = match (raw.overrides, raw.reason) {
         (None, None) => None,

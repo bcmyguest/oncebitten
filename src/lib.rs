@@ -8,6 +8,7 @@ pub mod exceptions;
 pub mod gate;
 pub mod hooks;
 pub mod host;
+pub mod lifecycle;
 pub mod lockfile;
 pub mod proof;
 pub mod registry;

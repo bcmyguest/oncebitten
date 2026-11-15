@@ -12,6 +12,7 @@ use oncebitten::exceptions::{self, Exception};
 use oncebitten::gate::{self, Stage};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
+use oncebitten::lifecycle;
 use oncebitten::proof::{self, BackendKind};
 use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
@@ -195,6 +196,19 @@ enum RulesAction {
         #[arg(long)]
         ci: bool,
     },
+    /// Retire a project rule: it never runs again and needs no proof
+    Retire {
+        /// Rule id, as `rules list` prints it
+        id: String,
+        /// Why the rule no longer applies; recorded as retired_reason
+        #[arg(long)]
+        reason: String,
+    },
+    /// Return an active project rule to proposed, keeping its files and proof
+    Rollback {
+        /// Rule id, as `rules list` prints it
+        id: String,
+    },
     /// Load and resolve every rule; exit 1 on rule errors, 2 if the check cannot run
     Validate {
         /// Check sources against rules.lock without fetching; exit 2 if they differ
@@ -374,6 +388,23 @@ fn run_rules(action: RulesAction) -> Result<()> {
                 exit_with(failure);
             }
         }
+        RulesAction::Retire { id, reason } => match lifecycle::retire(&inputs, &id, &reason) {
+            Ok(file) => println!("retired {id} in {}", file.display()),
+            Err(failure) => exit_with(failure),
+        },
+        RulesAction::Rollback { id } => match lifecycle::rollback(&inputs, &id) {
+            Ok(rolled) => {
+                println!(
+                    "{id} is proposed again in {}; it no longer blocks",
+                    rolled.file.display()
+                );
+                println!("to restore an earlier version of the rule, pick a commit and run:");
+                for command in &rolled.restore {
+                    println!("  {command}");
+                }
+            }
+            Err(failure) => exit_with(failure),
+        },
     }
     Ok(())
 }
