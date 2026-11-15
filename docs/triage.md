@@ -73,5 +73,8 @@ Each triage run is two host calls for claude and codex, so `triage.max_per_day` 
 | --- | --- | --- |
 | `started` | `capture` when it spawns `triage --queue`; manual `triage <id>` | yes |
 | `skipped: budget` | `capture` when the day's runs reach the cap; spawns nothing | no |
+| `spawn-failed` | `capture` when the `triage --queue` child cannot start | no |
 
 The day is the local calendar day. `capture` counts `started` rows since local midnight, then spawns or skips each due cluster. The `--queue` child writes no row, so one background run counts once. Manual `triage <id>` runs past the cap and prints `warning: triage budget spent: N of M runs today` to stderr; it still counts as a run.
+
+A cluster skipped for budget gets one `skipped: budget` row. The next `capture` in the same repo, once the day's runs fall under the cap, starts it: oldest skip first, and only while its latest row is still the skip. A cluster with a proposal or rejection is never picked up again. `triggers.session` filters background starts in both paths (see [configuration.md](configuration.md)).
