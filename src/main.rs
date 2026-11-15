@@ -716,6 +716,9 @@ fn run_gate(stage: GateStage) -> Result<()> {
         };
         eprintln!("{level}: {}", gate::describe(id, validity));
     }
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
     report_checks(&report.checked);
     if report.known > 0 {
         eprintln!(

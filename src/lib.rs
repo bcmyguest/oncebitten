@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod baseline;
 pub mod capture;
 pub mod check;

@@ -8,15 +8,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
+use crate::attachments;
 use crate::baseline::{self, Baseline};
 use crate::check::{self, Checked};
 use crate::config::{self, Inputs};
 use crate::engine::Outcome;
 use crate::exceptions::{self, Exception};
+use crate::forge::{self, Forge};
 use crate::proof::{self, Validity};
 use crate::registry::Resolved;
 use crate::rule::{Check, Mode, Status};
 use crate::rules::{self, Failure};
+use crate::sources;
 
 /// Set by the pre-commit framework in the pre-push stage.
 pub const FROM_REF: &str = "PRE_COMMIT_FROM_REF";
@@ -47,7 +50,12 @@ pub struct Report {
     pub excepted: usize,
     /// Exceptions past their `expires` date; they cover nothing.
     pub expired: Vec<Exception>,
+    /// Problems that did not stop the gate, such as an unreadable pull request.
+    pub warnings: Vec<String>,
 }
+
+/// Builds the forge backend for a kind, running its CLI from a directory.
+pub type ForgeFor<'a> = &'a dyn Fn(forge::Kind, &Path) -> Box<dyn Forge>;
 
 impl Report {
     /// 2 if a rule could not run, or for `pr` a proof is missing or stale;
@@ -63,6 +71,17 @@ impl Report {
 }
 
 pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, Failure> {
+    run_with_forge(inputs, stage, base, &forge::backend)
+}
+
+/// `run`, with the forge `gate pr` reads attachment evidence from. `pre-push`
+/// never calls it.
+pub fn run_with_forge(
+    inputs: &Inputs,
+    stage: Stage,
+    base: Option<&str>,
+    forge_for: ForgeFor,
+) -> Result<Report, Failure> {
     let rules = rules::load(inputs, stage == Stage::Pr)?;
     let repo = config::repo_root(&inputs.cwd)
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
@@ -80,7 +99,18 @@ pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, 
             other => Some((resolved.id.clone(), other)),
         })
         .collect();
-    let checked = check::run_rules(gated.iter().copied(), &repo, &changed);
+    let mut warnings = Vec::new();
+    let mut checked = check::run_rules(gated.iter().copied(), &repo, &changed);
+    if stage == Stage::Pr {
+        accept_attachments(
+            inputs,
+            &repo,
+            &gated,
+            &mut checked,
+            forge_for,
+            &mut warnings,
+        );
+    }
     let (checked, known) = apply_baseline(checked, &gated, &repo, &baseline);
     let (checked, excepted) = exceptions::apply(checked, &exceptions, today);
     let expired = exceptions
@@ -94,7 +124,73 @@ pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, 
         known,
         excepted,
         expired,
+        warnings,
     })
+}
+
+/// A diff rule that fired because `require_changed` found no changed path is
+/// satisfied when the pull request's description or comments link an
+/// attachment of a type `require_changed` names. Any failure to read the
+/// pull request leaves the rule fired and adds one warning.
+fn accept_attachments(
+    inputs: &Inputs,
+    repo: &Path,
+    gated: &[&Resolved],
+    checked: &mut [Checked],
+    forge_for: ForgeFor,
+    warnings: &mut Vec<String>,
+) {
+    let mut text: Option<Option<String>> = None;
+    for item in checked.iter_mut() {
+        if !matches!(item.outcome, Outcome::Fired(_)) {
+            continue;
+        }
+        let Some(Check::Diff {
+            require_changed, ..
+        }) = gated
+            .iter()
+            .find(|resolved| resolved.id == item.id)
+            .map(|resolved| &resolved.rule.check)
+        else {
+            continue;
+        };
+        let text = text.get_or_insert_with(|| match pr_text(inputs, repo, forge_for) {
+            Ok(text) => Some(text),
+            Err(error) => {
+                warnings.push(format!(
+                    "could not read the pull request for attachment evidence: {error:#}; diff rules fire on the diff alone"
+                ));
+                None
+            }
+        });
+        if text
+            .as_deref()
+            .is_some_and(|text| attachments::satisfies(text, require_changed))
+        {
+            item.outcome = Outcome::Clean;
+        }
+    }
+}
+
+/// The description and comments of the open pull request for the current branch.
+fn pr_text(inputs: &Inputs, repo: &Path, forge_for: ForgeFor) -> Result<String> {
+    let branch = sources::git(&inputs.vars, repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if branch == "HEAD" {
+        return Err(anyhow!(
+            "HEAD is detached, so the branch has no pull request"
+        ));
+    }
+    let config = config::load(inputs)?.config;
+    let kind = forge::select(config.forge, forge::origin_url(repo)?.as_deref())?;
+    let backend = forge_for(kind, repo);
+    let pr = backend
+        .find_open(&branch)?
+        .ok_or_else(|| anyhow!("no open pull request for branch `{branch}`"))?;
+    let text = backend.read(pr.number)?;
+    Ok(std::iter::once(text.description)
+        .chain(text.comments)
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 /// The violations the gated rules find in every tracked file now. Diff rules
