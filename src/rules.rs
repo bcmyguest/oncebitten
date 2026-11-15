@@ -7,7 +7,7 @@ use crate::config::{self, Inputs, Platform};
 use crate::lockfile::{self, LockedSource, Lockfile};
 use crate::registry::{resolve, Layer, Layers, Resolved};
 use crate::rule::Status;
-use crate::sources::{git, is_cloned, sources_root, sync_source};
+use crate::sources::{checkout_locked, git, is_cloned, sources_root, sync_source};
 
 const PROJECT_DIR: &str = ".oncebitten";
 const PROJECT_RULES: &str = "rules";
@@ -41,6 +41,54 @@ pub fn sync(inputs: &Inputs) -> Result<()> {
         });
     }
     lockfile::write(&repo, &lock)
+}
+
+/// Checks out each source at its `rules.lock` commit. Never fetches, never writes the lock.
+pub fn sync_frozen(inputs: &Inputs) -> Result<(), Failure> {
+    let loaded = config::load(inputs).map_err(Failure::CouldNotRun)?;
+    let repo = repo_root(inputs).map_err(Failure::CouldNotRun)?;
+    let root = sources_root(&inputs.vars, Platform::current()).map_err(Failure::CouldNotRun)?;
+    let lock = lockfile::read(&repo).map_err(|error| {
+        Failure::CouldNotRun(error.context("--frozen needs rules.lock; run oncebitten rules sync"))
+    })?;
+    let sources = &loaded.config.rules.sources;
+    for entry in &lock.source {
+        if !sources.iter().any(|source| source.name == entry.name) {
+            return Err(Failure::CouldNotRun(anyhow!(
+                "rules.lock pins source `{}`, which the config does not name",
+                entry.name
+            )));
+        }
+    }
+    let mut pinned = Vec::new();
+    for source in sources {
+        let Some(entry) = lock.source.iter().find(|entry| entry.name == source.name) else {
+            return Err(Failure::CouldNotRun(anyhow!(
+                "rules.lock has no entry for source `{}`",
+                source.name
+            )));
+        };
+        if entry.url != source.url {
+            return Err(Failure::CouldNotRun(anyhow!(
+                "rules.lock pins `{}` for source `{}`, but the config names `{}`",
+                entry.url,
+                source.name,
+                source.url
+            )));
+        }
+        pinned.push((source, &entry.commit));
+    }
+    for (source, commit) in pinned {
+        checkout_locked(&inputs.vars, &root, &source.name, &source.url, commit).map_err(
+            |error| {
+                Failure::CouldNotRun(error.context(format!(
+                    "source `{}` cannot be checked out at {commit}",
+                    source.name
+                )))
+            },
+        )?;
+    }
+    Ok(())
 }
 
 pub fn is_shipped_example(id: &str) -> bool {

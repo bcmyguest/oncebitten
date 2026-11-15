@@ -356,3 +356,158 @@ fn local_load_without_a_clone_could_not_run() {
         Err(Failure::CouldNotRun(_))
     ));
 }
+
+fn has_commit(fx: &Fixture, dir: &Path, sha: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
+        .env("GIT_CONFIG_GLOBAL", fx.path("empty.gitconfig"))
+        .status()
+        .unwrap()
+        .success()
+}
+
+#[test]
+fn frozen_sync_moves_a_clone_back_to_the_locked_commit() {
+    let fx = Fixture::new();
+    let (team, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let lock_before = fs::read_to_string(lock_path(&project)).unwrap();
+    let locked = fx.head(&team);
+    fx.commit_rule(&team, "later");
+    let clone = fx.clone_dir("team");
+    fx.git(&clone, &["fetch", "--quiet", "origin"]);
+    fx.git(&clone, &["checkout", "--quiet", "--detach", "origin/HEAD"]);
+
+    rules::sync_frozen(&inputs).unwrap();
+
+    assert_eq!(fx.head(&clone), locked);
+    assert_eq!(
+        fs::read_to_string(lock_path(&project)).unwrap(),
+        lock_before
+    );
+}
+
+#[test]
+fn frozen_sync_does_not_fetch_newer_commits() {
+    let fx = Fixture::new();
+    let (team, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let lock_before = fs::read_to_string(lock_path(&project)).unwrap();
+    fx.commit_rule(&team, "later");
+    let newer = fx.head(&team);
+
+    rules::sync_frozen(&inputs).unwrap();
+
+    assert!(!has_commit(&fx, &fx.clone_dir("team"), &newer));
+    assert_eq!(
+        fs::read_to_string(lock_path(&project)).unwrap(),
+        lock_before
+    );
+}
+
+#[test]
+fn frozen_sync_clones_a_missing_source_at_the_locked_commit() {
+    let fx = Fixture::new();
+    let (team, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let lock_before = fs::read_to_string(lock_path(&project)).unwrap();
+    let locked = fx.head(&team);
+    fs::remove_dir_all(fx.clone_dir("team")).unwrap();
+    fx.commit_rule(&team, "later");
+
+    rules::sync_frozen(&inputs).unwrap();
+
+    assert_eq!(fx.head(&fx.clone_dir("team")), locked);
+    assert_eq!(
+        fs::read_to_string(lock_path(&project)).unwrap(),
+        lock_before
+    );
+}
+
+#[test]
+fn frozen_sync_without_a_lockfile_could_not_run() {
+    let fx = Fixture::new();
+    let (_, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+
+    assert!(matches!(
+        rules::sync_frozen(&inputs),
+        Err(Failure::CouldNotRun(_))
+    ));
+    assert!(!lock_path(&project).exists());
+}
+
+#[test]
+fn frozen_sync_with_a_missing_lock_entry_could_not_run() {
+    let fx = Fixture::new();
+    let (_, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    fs::write(lock_path(&project), "").unwrap();
+
+    assert!(matches!(
+        rules::sync_frozen(&inputs),
+        Err(Failure::CouldNotRun(_))
+    ));
+}
+
+#[test]
+fn frozen_sync_with_an_entry_for_a_removed_source_could_not_run() {
+    let fx = Fixture::new();
+    let (team, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let mut lock = fs::read_to_string(lock_path(&project)).unwrap();
+    lock.push_str(&format!(
+        "\n[[source]]\nname = \"gone\"\nurl = \"{}\"\ncommit = \"{}\"\n",
+        fx.url(&team),
+        fx.head(&team)
+    ));
+    fs::write(lock_path(&project), &lock).unwrap();
+
+    assert!(matches!(
+        rules::sync_frozen(&inputs),
+        Err(Failure::CouldNotRun(_))
+    ));
+    assert_eq!(fs::read_to_string(lock_path(&project)).unwrap(), lock);
+}
+
+#[test]
+fn frozen_sync_with_an_unknown_locked_commit_could_not_run() {
+    let fx = Fixture::new();
+    let (team, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let lock = fs::read_to_string(lock_path(&project))
+        .unwrap()
+        .replace(&fx.head(&team), &"f".repeat(40));
+    fs::write(lock_path(&project), &lock).unwrap();
+
+    assert!(matches!(
+        rules::sync_frozen(&inputs),
+        Err(Failure::CouldNotRun(_))
+    ));
+    assert_eq!(fs::read_to_string(lock_path(&project)).unwrap(), lock);
+}
+
+#[test]
+fn frozen_sync_with_a_changed_url_could_not_run() {
+    let fx = Fixture::new();
+    let (_, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let other = fx.path("other-src");
+    fx.make_repo(&other);
+    fx.commit_rule(&other, "no-unwrap");
+    fx.write_config(&project, "team", &fx.url(&other), None);
+
+    assert!(matches!(
+        rules::sync_frozen(&inputs),
+        Err(Failure::CouldNotRun(_))
+    ));
+}

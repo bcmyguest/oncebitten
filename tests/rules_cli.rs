@@ -216,6 +216,37 @@ fn validate_ci_with_a_drifted_clone_exits_2_and_does_not_fetch() {
     );
 }
 
+#[test]
+fn sync_frozen_checks_out_the_locked_commit_and_exits_0() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+    let lock = fs::read_to_string(s.project.join(".oncebitten/rules.lock")).unwrap();
+    s.fx.commit_rule(&s.team, "later");
+
+    let output = s.fx.oncebitten(&s.project, &["rules", "sync", "--frozen"]);
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(
+        fs::read_to_string(s.project.join(".oncebitten/rules.lock")).unwrap(),
+        lock
+    );
+}
+
+#[test]
+fn sync_frozen_without_a_lockfile_exits_2() {
+    let s = setup();
+
+    let output = s.fx.oncebitten(&s.project, &["rules", "sync", "--frozen"]);
+
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("rules.lock"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!s.project.join(".oncebitten/rules.lock").exists());
+}
+
 fn use_examples(s: &Setup, ids: &str) {
     fs::write(
         s.project.join(".oncebitten/config.toml"),

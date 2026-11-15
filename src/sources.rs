@@ -70,12 +70,33 @@ pub fn sync_source(
         git(vars, &dir, &["remote", "set-url", "origin", url])?;
         git(vars, &dir, &["fetch", "--quiet", "--prune", "origin"])?;
     } else {
-        fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
-        git(vars, root, &["clone", "--quiet", url, name])?;
+        clone_source(vars, root, name, url)?;
     }
     let commit = resolve(vars, &dir, name, rev)?;
     git(vars, &dir, &["checkout", "--quiet", "--detach", &commit])?;
     Ok(commit)
+}
+
+/// Checks out `commit` without fetching. A missing clone is cloned first.
+pub fn checkout_locked(
+    vars: &BTreeMap<String, String>,
+    root: &Path,
+    name: &str,
+    url: &str,
+    commit: &str,
+) -> Result<()> {
+    let dir = root.join(name);
+    if !is_cloned(&dir) {
+        clone_source(vars, root, name, url)?;
+    }
+    git(vars, &dir, &["checkout", "--quiet", "--detach", commit])?;
+    Ok(())
+}
+
+fn clone_source(vars: &BTreeMap<String, String>, root: &Path, name: &str, url: &str) -> Result<()> {
+    fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
+    git(vars, root, &["clone", "--quiet", url, name])?;
+    Ok(())
 }
 
 fn resolve(

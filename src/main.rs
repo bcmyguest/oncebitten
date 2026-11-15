@@ -149,7 +149,11 @@ enum HooksAction {
 #[derive(Subcommand)]
 enum RulesAction {
     /// Clone or fetch each source and write .oncebitten/rules.lock
-    Sync,
+    Sync {
+        /// Check out the commits in rules.lock without fetching; never writes the lock; exit 2 if it cannot
+        #[arg(long)]
+        frozen: bool,
+    },
     /// Print each resolved rule as id, mode, status and origin
     List {
         /// Check sources against rules.lock without fetching; exit 2 if they differ
@@ -271,7 +275,12 @@ fn now_millis() -> Result<i64> {
 fn run_rules(action: RulesAction) -> Result<()> {
     let inputs = Inputs::from_process()?;
     match action {
-        RulesAction::Sync => rules::sync(&inputs)?,
+        RulesAction::Sync { frozen: true } => {
+            if let Err(failure) = rules::sync_frozen(&inputs) {
+                exit_with(failure);
+            }
+        }
+        RulesAction::Sync { frozen: false } => rules::sync(&inputs)?,
         RulesAction::List { ci } => match rules::load(&inputs, ci) {
             Ok(resolved) => {
                 for entry in &resolved {
