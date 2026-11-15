@@ -236,3 +236,105 @@ fn garbage_stdout_is_could_not_run() {
     let verdict = oncebitten::replay::replay(&spec, &Canned(Ok(runs)));
     assert!(matches!(verdict, Verdict::CouldNotRun(ref r) if r.contains("not JSON")));
 }
+
+const ARCH_BAD: &str = "src/lib.rs\n";
+const ARCH_FIXED: &str = "src/lib.rs\ndocs/architecture/modules.svg\n";
+
+/// A diff rule directory: the shipped arch-diagram rule with the given
+/// fixture and corpus path lists.
+fn diff_rule_dir(bad: &str, fixed: &str, corpus: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::copy(
+        example("arch-diagram").join("rule.toml"),
+        dir.path().join("rule.toml"),
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("fixtures")).unwrap();
+    fs::write(dir.path().join("fixtures/bad.diff"), bad).unwrap();
+    fs::write(dir.path().join("fixtures/fixed.diff"), fixed).unwrap();
+    fs::create_dir_all(dir.path().join("corpus")).unwrap();
+    for (name, body) in corpus {
+        fs::write(dir.path().join("corpus").join(name), body).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn diff_bad_fires_fixed_and_corpus_pass_is_proven() {
+    let dir = diff_rule_dir(ARCH_BAD, ARCH_FIXED, &[("unrelated.diff", "README.md\n")]);
+    let verdict = replay_dir(dir.path(), &checker(), &LocalRunner);
+    assert_eq!(verdict, Verdict::Proven);
+}
+
+#[test]
+fn diff_fixture_with_crlf_lines_is_proven() {
+    let dir = diff_rule_dir(
+        "src/lib.rs\r\n",
+        "src/lib.rs\r\ndocs/architecture/modules.svg\r\n",
+        &[("unrelated.diff", "README.md\r\n")],
+    );
+    let verdict = replay_dir(dir.path(), &checker(), &LocalRunner);
+    assert_eq!(verdict, Verdict::Proven);
+}
+
+#[test]
+fn diff_rule_that_never_fires_on_bad_is_rejected() {
+    let dir = diff_rule_dir(
+        "README.md\n",
+        ARCH_FIXED,
+        &[("unrelated.diff", "README.md\n")],
+    );
+    let verdict = replay_dir(dir.path(), &checker(), &LocalRunner);
+    let Verdict::Rejected(reason) = verdict else {
+        panic!("expected Rejected, got {verdict:?}");
+    };
+    assert!(reason.contains("bad.diff did not fire"), "{reason}");
+}
+
+#[test]
+fn diff_fixed_that_still_fires_is_rejected() {
+    let dir = diff_rule_dir(
+        ARCH_BAD,
+        "src/lib.rs\n",
+        &[("unrelated.diff", "README.md\n")],
+    );
+    let verdict = replay_dir(dir.path(), &checker(), &LocalRunner);
+    let Verdict::Rejected(reason) = verdict else {
+        panic!("expected Rejected, got {verdict:?}");
+    };
+    assert!(reason.contains("fixed.diff fired"), "{reason}");
+}
+
+#[test]
+fn diff_corpus_file_that_fires_is_rejected() {
+    let dir = diff_rule_dir(ARCH_BAD, ARCH_FIXED, &[("noisy.diff", "src/lib.rs\n")]);
+    let verdict = replay_dir(dir.path(), &checker(), &LocalRunner);
+    let Verdict::Rejected(reason) = verdict else {
+        panic!("expected Rejected, got {verdict:?}");
+    };
+    assert!(reason.contains("noisy.diff fired"), "{reason}");
+}
+
+#[test]
+fn diff_rule_with_an_invalid_glob_is_could_not_run() {
+    let dir = diff_rule_dir(ARCH_BAD, ARCH_FIXED, &[("unrelated.diff", "README.md\n")]);
+    let toml = fs::read_to_string(dir.path().join("rule.toml")).unwrap();
+    fs::write(
+        dir.path().join("rule.toml"),
+        toml.replace("src/**/mod.rs", "src/["),
+    )
+    .unwrap();
+    let verdict = replay_dir(dir.path(), &checker(), &LocalRunner);
+    let Verdict::CouldNotRun(reason) = verdict else {
+        panic!("expected CouldNotRun, got {verdict:?}");
+    };
+    assert!(reason.contains("glob"), "{reason}");
+}
+
+#[test]
+fn shipped_diff_examples_replay_proven() {
+    for id in ["arch-diagram", "ui-screenshot"] {
+        let verdict = replay_dir(&example(id), &checker(), &LocalRunner);
+        assert_eq!(verdict, Verdict::Proven, "{id}");
+    }
+}

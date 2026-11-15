@@ -372,3 +372,52 @@ fn changing_a_rule_field_other_than_status_makes_the_proof_stale() {
         proof::validity(&edited)
     );
 }
+
+fn arch_dir() -> (TempDir, PathBuf) {
+    let root = TempDir::new().unwrap();
+    let dir = root.path().join("arch-diagram");
+    copy_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/arch-diagram"),
+        &dir,
+    );
+    (root, dir)
+}
+
+#[test]
+fn diff_rule_proven_openshell_replay_writes_a_valid_proof() {
+    let (_root, dir) = arch_dir();
+    let rule = load_rule(&dir).unwrap();
+
+    let replayed = proof::replay_rule(&rule, &checker(), &LocalRunner, BackendKind::OpenShell);
+
+    assert_eq!(replayed.verdict, Verdict::Proven);
+    assert!(replayed.written.is_some());
+    assert_eq!(proof::validity(&rule), Validity::Valid);
+}
+
+#[test]
+#[ignore = "needs a live OpenShell gateway, Docker and a musl checker build"]
+fn cli_openshell_diff_replay_writes_a_valid_proof() {
+    let gateway =
+        std::env::var("ONCEBITTEN_OPENSHELL_GATEWAY").expect("set ONCEBITTEN_OPENSHELL_GATEWAY");
+    let checker = std::env::var("ONCEBITTEN_CHECKER").expect("set ONCEBITTEN_CHECKER");
+    let repo = Repo::new();
+    repo.add_example("arch-diagram", "active");
+    repo.commit_all("rules");
+
+    let output = repo.run(
+        &[
+            "replay",
+            "arch-diagram",
+            "--checker",
+            &checker,
+            "--gateway",
+            &gateway,
+        ],
+        &[],
+    );
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    let rule = load_rule(&repo.rule_dir("arch-diagram")).unwrap();
+    assert_eq!(proof::validity(&rule), Validity::Valid);
+}

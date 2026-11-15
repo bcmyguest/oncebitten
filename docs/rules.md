@@ -102,7 +102,7 @@ Git runs through the `git` binary.
 | `oncebitten rules sync --frozen` | Clone any missing source, check out each locked commit, fetching one only when the clone lacks it; never writes `rules.lock` | 0 on success; 2 when the lock is missing, a source has no entry, the lock names a source the config no longer has, or a locked commit is unreachable after fetching |
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
-| `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
+| `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep or diff rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
 | `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs, apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |
 | `oncebitten baseline update` | Replace `.oncebitten/baseline.json` with the current violations of active block rules in every tracked file | 0 written; 2 a rule could not run (nothing written) |
 | `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
@@ -115,14 +115,15 @@ Without `--ci`, a source that is not cloned exits 2 and asks for `rules sync`.
 
 ## Replay
 
-`oncebitten::replay` proves an ast-grep rule against its files. It takes a rule directory with `check.yml`, `fixtures/bad.*`, `fixtures/fixed.*` and a non-empty `corpus/`.
+`oncebitten::replay` proves an ast-grep or diff rule against its files. It takes a rule directory with `check.yml` (or `rule.toml` with `engine = "diff"`), `fixtures/bad.*`, `fixtures/fixed.*` and a non-empty `corpus/`. A diff fixture is a list of changed paths, one per line; the checker runs in `diff` mode and reads it.
 
 - The rule is proven when the checker reports `fired` for `bad.*` and `clean` for `fixed.*` and every `corpus/` file.
 - The checker is the `oncebitten-checker` binary. It prints one JSON line and exits 0. A result counts only when the JSON, the target path and exit 0 agree. Any other result is could-not-run. An exit code alone never means fired.
 - Missing rule file, fixture or corpus, a missing checker, a sandbox or gateway failure, and a checker error are could-not-run. A rule that misses `bad.*`, or fires on `fixed.*` or a corpus file, is rejected.
 - `OpenShell` runs the replay in an OpenShell sandbox. It builds an image per replay from `nvcr.io/nvidia/base/ubuntu:24.04` with the checker, rule and files baked in, creates the sandbox with a read-only policy, runs the checker once per file, and deletes the sandbox. The gateway limits sandbox names to 19 characters.
 - Build the checker for the image as a static musl binary: `cargo build --release --target x86_64-unknown-linux-musl --bin oncebitten-checker` (needs a musl C toolchain; the replay tests used a `rust:1-alpine` container).
-- Replay supports ast-grep rules only. A `native` or `diff` rule cannot be proven yet.
+- Diff rules run in the sandbox like ast-grep rules. The diff engine matches paths only and reads no repository file, so a local run gives the same verdict; the sandbox run is the one that writes a proof.
+- Native-linter rules are exempt from replay proofs until replay can run their toolchain in the sandbox; the gate still runs them.
 
 ### `oncebitten replay`
 

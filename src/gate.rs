@@ -131,9 +131,10 @@ pub fn gated(rules: &[Resolved]) -> Vec<&Resolved> {
         .collect()
 }
 
-/// Replay supports ast-grep rules only, so only they can carry a proof.
+/// Native-linter rules are exempt from replay proofs until replay can run their
+/// toolchain in the sandbox. The gate still runs them.
 pub fn needs_proof(check: &Check) -> bool {
-    matches!(check, Check::AstGrep { .. })
+    !matches!(check, Check::Native { .. })
 }
 
 pub fn describe(id: &str, validity: &Validity) -> String {
