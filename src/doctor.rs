@@ -27,6 +27,7 @@ const PRE_COMMIT: &str = "pre-commit";
 const PRE_COMMIT_CONFIG: &str = ".pre-commit-config.yaml";
 const GATE_HOOK_IDS: [&str; 2] = ["oncebitten-gate", "oncebitten-gate-system"];
 const OPENSHELL: &str = "openshell";
+const NO_GATEWAY: &str = "No gateway configured";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(50);
 
@@ -414,6 +415,12 @@ fn openshell(gateway: Option<&str>) -> Line {
     }
     args.push("status");
     match probe(OPENSHELL, &args) {
+        // `openshell status` exits 0 when no gateway is configured.
+        Ok(out) if out.contains(NO_GATEWAY) => warn(
+            check,
+            "no gateway configured; replay fails with No active gateway",
+            "register one with openshell gateway add <endpoint>, or pass --gateway <endpoint>",
+        ),
         Ok(_) => ok(check, "gateway reachable"),
         Err(error) => warn(
             check,
