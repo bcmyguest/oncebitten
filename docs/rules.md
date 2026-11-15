@@ -171,7 +171,7 @@ A proven sandbox replay writes `proof.json` into the rule directory, beside `rul
 
 - `rule` is the `id` in `rule.toml`, without a source prefix, so a proof stays valid when the directory moves between the project and a rules repo.
 - `dir_sha256` hashes every file in the rule directory except the top-level `proof.json`: files sorted by their `/`-separated relative path, each contributing its path, a NUL byte, its length as a little-endian 64-bit integer and its bytes, with CRLF read as LF. A Windows checkout with CRLF line endings therefore hashes like a Unix one. A symlink in the directory makes the hash fail.
-- `checker_version` is the version of the `oncebitten` that ran the replay; the checker builds from the same crate. `checker_sha256` names the exact checker binary. Validity does not compare either with the current checker, because CI need not have the musl checker.
+- `checker_version` is the version of the `oncebitten` that ran the replay; the checker builds from the same crate. `checker_sha256` names the exact checker binary. `gate pr` and `doctor` compare `checker_sha256` of an ast-grep or diff proof with the `oncebitten-checker` beside the running binary, and skip the comparison when that file is absent, because CI need not have the musl checker. A steer proof is never compared with a binary; the gate replays the fixtures instead. `checker_version` is never compared.
 - `timestamp` counts seconds since the Unix epoch.
 
 A proof is valid when it parses, `result` is `proven`, `backend` is `openshell`, `rule` equals the rule's id and `dir_sha256` equals the directory's hash now. Any edit to the rule, its check file, fixtures or corpus makes the proof stale; replay again.

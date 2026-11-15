@@ -16,7 +16,7 @@ use crate::gate;
 use crate::hooks::{self, Scope};
 use crate::host::{Host, ALL_HOSTS};
 use crate::lockfile;
-use crate::proof::{self, Validity};
+use crate::proof::Validity;
 use crate::rule::{Check, Status};
 use crate::rules::{self, Failure};
 use crate::store::{self, Probe};
@@ -365,7 +365,7 @@ fn rules_and_proofs(inputs: &Inputs) -> Vec<Line> {
         }
         let check = format!("proof {}", entry.id);
         let fix = format!("run oncebitten replay {} and commit proof.json", entry.id);
-        let validity = proof::validity(&entry.rule);
+        let validity = gate::proof_validity(&entry.rule);
         replay_needed |= validity != Validity::Valid;
         match validity {
             Validity::Valid => lines.push(ok(check, "valid")),

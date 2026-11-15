@@ -489,3 +489,22 @@ fn cli_replay_stale_exits_2_when_a_rule_could_not_run() {
         both(&output)
     );
 }
+
+#[test]
+fn validity_with_a_checker_compares_the_recorded_hash() {
+    let (_root, dir) = utcnow_dir();
+    let rule = load_rule(&dir).unwrap();
+    proof::replay_rule(&rule, &checker(), &LocalRunner, BackendKind::OpenShell);
+    let other = _root.path().join("other-checker");
+    fs::write(&other, "not the checker").unwrap();
+
+    assert_eq!(
+        proof::validity_with(&rule, Some(&checker())),
+        Validity::Valid
+    );
+    assert!(matches!(
+        proof::validity_with(&rule, Some(&other)),
+        Validity::Stale(ref reason) if reason.contains("checker")
+    ));
+    assert_eq!(proof::validity_with(&rule, None), Validity::Valid);
+}

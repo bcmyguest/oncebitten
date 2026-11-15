@@ -147,6 +147,28 @@ pub fn write(dir: &Path, proof: &Proof) -> Result<PathBuf> {
 
 /// Whether the rule directory carries a proof that still stands.
 pub fn validity(rule: &Rule) -> Validity {
+    validity_with(rule, None)
+}
+
+/// The checker binary this process can compare a proof against: the
+/// `oncebitten-checker` beside the running binary. `None` for a steer rule,
+/// whose proof the gate re-checks by replaying, and when that file is absent,
+/// as in CI without the musl checker.
+pub fn local_checker(rule: &Rule) -> Option<PathBuf> {
+    if matches!(rule.check, Check::Steer(_)) {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.with_file_name(format!(
+        "oncebitten-checker{}",
+        std::env::consts::EXE_SUFFIX
+    )))
+    .filter(|path| path.is_file())
+}
+
+/// Like [`validity`], and with a `checker` the proof must record that
+/// checker's hash.
+pub fn validity_with(rule: &Rule, checker: Option<&Path>) -> Validity {
     let dir = rule_dir(rule);
     let proof = match read(dir) {
         Ok(Some(proof)) => proof,
@@ -170,9 +192,20 @@ pub fn validity(rule: &Rule) -> Validity {
         return Validity::Stale(format!("proof names rule `{}`", proof.rule));
     }
     match dir_hash(dir) {
-        Ok(hash) if hash == proof.dir_sha256 => Validity::Valid,
-        Ok(_) => Validity::Stale("the rule directory changed since the replay".to_owned()),
-        Err(error) => Validity::NotProven(format!("hashing the rule directory: {error:#}")),
+        Ok(hash) if hash == proof.dir_sha256 => {}
+        Ok(_) => return Validity::Stale("the rule directory changed since the replay".to_owned()),
+        Err(error) => return Validity::NotProven(format!("hashing the rule directory: {error:#}")),
+    }
+    let Some(checker) = checker.filter(|_| !proof.checker_sha256.is_empty()) else {
+        return Validity::Valid;
+    };
+    match file_sha256(checker) {
+        Ok(hash) if hash == proof.checker_sha256 => Validity::Valid,
+        Ok(_) => Validity::Stale(format!(
+            "the replay used another checker than {}",
+            checker.display()
+        )),
+        Err(error) => Validity::NotProven(format!("hashing the checker: {error:#}")),
     }
 }
 

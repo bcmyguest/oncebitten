@@ -52,7 +52,7 @@ A steer rule's fixtures are recorded events in the normalized shape:
 {"event": "prompt", "prompt": "deploy to production"}
 ```
 
-`fixtures/bad.json` must trigger the rule; `fixtures/fixed.json` and every `corpus/*.json` must not. `oncebitten replay <id>` checks this with the matcher in the running binary. The matcher reads only the fixture files, so the replay needs no sandbox; `--local` and `--gateway` are ignored. A proven replay writes `proof.json` with `"backend": "matcher"` and `checker_sha256` naming the `oncebitten` binary. Commit it.
+`fixtures/bad.json` must trigger the rule; `fixtures/fixed.json` and every `corpus/*.json` must not. `oncebitten replay <id>` checks this with the matcher in the running binary. The matcher reads only the fixture files, so the replay needs no sandbox; `--local` and `--gateway` are ignored. A proven replay writes `proof.json` with `"backend": "matcher"` and `checker_sha256` naming the `oncebitten` binary. Commit it. `gate pr` and `doctor` replay the fixtures again with their own matcher and fail when it does not prove. The recorded hash is not compared, so a proof from another build of `oncebitten` stays accepted while the replay proves.
 
 ## The steer hook
 

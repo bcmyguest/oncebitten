@@ -77,6 +77,8 @@ The gate needs a valid `proof.json` (see [rules.md](rules.md#proofs)) for each g
 
 The proof's `dir_sha256` covers every file in the rule directory except `proof.json`, with `rule.toml` parsed, its `status` key removed and the rest re-serialised canonically. So `status = "proposed"` becomes `"active"` without invalidating the proof. Any other change to `rule.toml`, comments and layout aside, makes the proof stale.
 
+For a steer rule the gate also replays the fixtures with its own matcher and fails when the replay does not prove, whatever `proof.json` says. For other rules, where the proof records a `checker_sha256`, the gate compares it with the `oncebitten-checker` beside the running binary; a different hash makes the proof stale. When that file is absent, as in CI without the musl checker, the comparison is skipped. A steer proof is not tied to a binary: the local replay is the check.
+
 A missing, stale or not-proven proof prints `<level>: <id>: <reason>` to stderr. `pr` prints `error` and exits 2 after running the rules. `pre-push` prints `warning` and exits as if the proof were valid.
 
 A shipped example from `rules.use_examples` is active, but its directory sits in the data directory, so CI has no proof for it and `gate pr` exits 2. Copy the example into `.oncebitten/rules/`, replay it and commit the proof.
