@@ -54,6 +54,10 @@ A steer rule's fixtures are recorded events in the normalized shape:
 
 `fixtures/bad.json` must trigger the rule; `fixtures/fixed.json` and every `corpus/*.json` must not. `oncebitten replay <id>` checks this with the matcher in the running binary. The matcher reads only the fixture files, so the replay needs no sandbox; `--local` and `--gateway` are ignored. A proven replay writes `proof.json` with `"backend": "matcher"` and `checker_sha256` naming the `oncebitten` binary. Commit it. `gate pr` and `doctor` replay the fixtures again with their own matcher and fail when it does not prove. The recorded hash is not compared, so a proof from another build of `oncebitten` stays accepted while the replay proves.
 
+## Drafted by triage
+
+Triage drafts a steer rule when a cluster's evidence is a command. It writes `action = "inform"` and fixtures built from the recorded command (`bad`) and the same repo's other successful commands (corpus). `oncebitten proposals accept <id> --deny` changes the action to `deny` and re-proves the rule. See [proposals.md](proposals.md#steer-drafts).
+
 ## The steer hook
 
 ```sh

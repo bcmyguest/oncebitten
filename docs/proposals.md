@@ -26,7 +26,7 @@ The draft is the optional `draft` key of the triage answer, `null` when no rule 
 | `id` | lowercase kebab-case, at most 64 characters; the rule directory name |
 | `description`, `rationale` | 1 to 1000 characters |
 | `mode` | `block` or `steer` |
-| `engine` | `ast-grep`, `diff` or `native` |
+| `engine` | `ast-grep`, `diff`, `native` or `steer` |
 | `language` | optional |
 | `check` | ast-grep only: the `check.yml` text |
 | `command`, `fired_exit_codes`, `fired_output_contains` | native only |
@@ -36,12 +36,20 @@ The draft is the optional `draft` key of the triage answer, `null` when no rule 
 
 Validation is as strict as for a hand-written rule: the written `rule.toml` must load, `check.yml` must compile, globs must parse, and file names must be plain names that Windows can also write (no `<>:"|?*` or control characters, no trailing dot or space, no reserved device names such as `nul`, `con` or `com1`). A write that fails midway removes the rule directory. Keys for another engine are rejected.
 
+### Steer drafts
+
+A draft with `engine = "steer"` must have `mode = "steer"`. The reverse is not refused: a steer-mode draft with another engine still parses. Its fixtures come from the cluster's evidence, not the model:
+
+- `bad` is the cluster's latest recorded command, as a `{"event": "tool", "tool", "command"}` event.
+- The corpus is up to 5 other successful commands from the same repo in the store. With none, the model's corpus is kept.
+- Every steer draft writes `action = "inform"`. The draft has no `action` key, so a model request for `deny` fails to parse. Use `accept --deny` to upgrade.
+
 ## Commands
 
 ```
 oncebitten proposals list
 oncebitten proposals show <cluster-id>
-oncebitten proposals accept <cluster-id>
+oncebitten proposals accept <cluster-id> [--deny]
 oncebitten proposals reject <cluster-id> --reason <text>
 oncebitten proposals reject <cluster-id> --duplicate-of <other-cluster-id>
 ```
@@ -51,6 +59,7 @@ Proposals are keyed by their evidence cluster id.
 - `list` prints `cluster  state  kind  rule  proof  hits  repo` per queued result. State is `waiting`, `accepted` or `rejected`; kind is `proposal` or `finding`; proof is `proven`, `unproven` or `-`; hits is `N hits in M files` or `-`.
 - `show` adds the rule directory, the hits with up to three sample lines (`path:line: text`), rationale, proof note, verdict JSON and the occurrence event ids that produced it. After a decision it prints the kept counts instead, because the events are gone.
 - `accept` flips `status = "proposed"` to `status = "active"` only when the rule has a valid proof. Otherwise it exits 2 with the reason: no proof, a stale proof, or a finding. Commit the rule directory with its `proof.json`. On activation, `accept` also writes, in the proposal's own repo whatever the cwd, one `.oncebitten/baseline.json` entry per existing hit of that rule, and keeps the entries of other rules. Later commits that touch those lines pass the gate; a new hit fails it.
+- `accept --deny` sets a steer proposal's `[steer]` action to `deny`, re-proves it with the running binary, then activates it. It exits 2 for a non-steer proposal.
 - `reject` records the rejection in the evidence store (as `evidence reject` does) and removes the rule directory if it is still proposed. The cluster is never proposed again.
 - `reject --duplicate-of <other>` rejects the cluster as a duplicate of `<other>`, which must be a queued or rejected proposal other than the cluster itself. It rejects the cluster with the reason `duplicate of <other>`, then stores the link in the `duplicate_of` column; a failed reject stores no link. It never merges or drops another proposal.
 - `accept` and `reject` delete the cluster's captured events and keep one provenance record: outcome, rule, reason, occurrence and session counts, first and last seen, decision time. The `rejections` table, not the events, keeps a rejected cluster from returning.
