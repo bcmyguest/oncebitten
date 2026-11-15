@@ -38,7 +38,7 @@ fn project_scope_writes_the_bare_command_for_every_host() {
 
 #[test]
 fn user_scope_keeps_the_absolute_path_for_every_host() {
-    let exe = std::fs::canonicalize(env!("CARGO_BIN_EXE_oncebitten")).unwrap();
+    let exe = dunce::canonicalize(env!("CARGO_BIN_EXE_oncebitten")).unwrap();
     for host in HOSTS {
         let repo = Repo::new();
 
