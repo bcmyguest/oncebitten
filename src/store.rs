@@ -595,8 +595,8 @@ impl Store {
     pub fn insert_proposal(&self, row: &ProposalRow) -> Result<bool> {
         let inserted = self.conn.execute(
             &format!(
-                "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+                "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}, hits_count, hits_files, hits_samples) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
             ),
             params![
                 row.cluster,
@@ -613,6 +613,12 @@ impl Store {
                 row.verdict,
                 row.rationale,
                 serde_json::to_string(&row.occurrences)?,
+                row.hits.as_ref().map(|hits| hits.count),
+                row.hits.as_ref().map(|hits| hits.files),
+                row.hits
+                    .as_ref()
+                    .map(|hits| serde_json::to_string(&hits.samples))
+                    .transpose()?,
             ],
         )?;
         Ok(inserted == 1)
