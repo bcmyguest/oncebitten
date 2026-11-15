@@ -73,7 +73,7 @@ pub fn resolve_in(program: &str, dirs: &[PathBuf], pathext: &[String]) -> Option
 
 /// The program to spawn. On Windows, PATHEXT resolves shims such as `npx.cmd`,
 /// which `CreateProcess` does not find by bare name. Elsewhere the name passes through.
-fn spawn_path(program: &str) -> OsString {
+pub fn spawn_path(program: &str) -> OsString {
     if !cfg!(windows) {
         return OsString::from(program);
     }

@@ -16,6 +16,7 @@ use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
 use oncebitten::rules::{self, Failure};
 use oncebitten::store::{self, Store};
+use oncebitten::triage;
 
 #[derive(Parser)]
 #[command(
@@ -40,6 +41,14 @@ enum Command {
     Evidence {
         #[command(subcommand)]
         action: EvidenceAction,
+    },
+    /// Ask the configured host for a one-shot verdict on an evidence cluster; exit 0 verdict, 2 could not run
+    Triage {
+        /// Cluster id from `oncebitten evidence list`
+        id: String,
+        /// Host to ask (default: the configured triage default)
+        #[arg(long)]
+        host: Option<String>,
     },
     /// Inspect the layered configuration
     Config {
@@ -190,6 +199,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Evidence { action } => run_evidence(action),
+        Command::Triage { id, host } => run_triage(&id, host.as_deref()),
         Command::Config { action } => run_config(action),
         Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
@@ -205,6 +215,42 @@ fn main() -> Result<()> {
             local,
         } => run_replay(&rule, checker, gateway, local),
     }
+}
+
+fn run_triage(id: &str, host: Option<&str>) -> Result<()> {
+    match triage_verdict(id, host) {
+        Ok(verdict) => {
+            println!("{}", serde_json::to_string_pretty(&verdict)?);
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            std::process::exit(2)
+        }
+    }
+}
+
+fn triage_verdict(id: &str, host: Option<&str>) -> Result<triage::verdict::Verdict> {
+    let inputs = Inputs::from_process()?;
+    let loaded = config::load(&inputs)?;
+    let store = Store::open(&store::events_db_path_for(
+        &inputs.vars,
+        Platform::current(),
+    )?)?;
+    let clusters = evidence::load(&store)?;
+    let cluster = evidence::find(&clusters, id)?;
+    let host = host
+        .map(|name| config::Host::parse(name).with_context(|| format!("unknown host `{name}`")))
+        .transpose()?;
+    let (host, agent) = triage::flow::target(&loaded.config.triage, host)?;
+    let input = triage::flow::prompt_input(cluster);
+    triage::flow::run(
+        &triage::run::ProcessRunner,
+        host,
+        &agent,
+        &input,
+        triage::flow::DEFAULT_TIMEOUT,
+    )
 }
 
 fn run_evidence(action: EvidenceAction) -> Result<()> {

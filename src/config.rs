@@ -41,7 +41,7 @@ pub enum Host {
 }
 
 impl Host {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Host::Claude => "claude",
             Host::Codex => "codex",
@@ -50,7 +50,7 @@ impl Host {
         }
     }
 
-    fn parse(name: &str) -> Option<Host> {
+    pub fn parse(name: &str) -> Option<Host> {
         match name {
             "claude" => Some(Host::Claude),
             "codex" => Some(Host::Codex),
