@@ -164,3 +164,32 @@ fn schema_declares_mistake_class_nullable_and_not_required() {
     let required = schema["required"].as_array().unwrap();
     assert!(!required.iter().any(|key| key == "mistake_class"));
 }
+
+#[test]
+fn context_lists_rules_and_rejections_within_caps() {
+    use oncebitten::triage::prompt::{context_block, MAX_CONTEXT_BYTES, MAX_CONTEXT_ITEMS};
+    let rules: Vec<(String, String)> = (0..50)
+        .map(|i| (format!("rule-{i}"), "d".repeat(300)))
+        .collect();
+    let reasons: Vec<String> = (0..50).map(|i| format!("reason {i}")).collect();
+    let text = context_block(&rules, &reasons);
+    let items = text.lines().filter(|line| line.starts_with("- ")).count();
+    assert!(items > 0 && items <= MAX_CONTEXT_ITEMS, "{items} items");
+    assert!(text.len() <= MAX_CONTEXT_BYTES, "{} bytes", text.len());
+    assert!(text.contains("rule-0") && !text.contains("rule-49"));
+}
+
+#[test]
+fn prompt_carries_the_context_block() {
+    use oncebitten::triage::prompt::build_prompt_with;
+    let input = PromptInput {
+        class: "failure",
+        tool: None,
+        pattern: "cargo test".into(),
+        sessions: 1,
+        occurrences: vec![],
+    };
+    let prompt = build_prompt_with(&input, "existing rules:\n- no-unwrap: never use unwrap\n");
+    assert!(prompt.contains("existing rules:\n- no-unwrap"));
+    assert_eq!(build_prompt_with(&input, ""), build_prompt(&input));
+}
