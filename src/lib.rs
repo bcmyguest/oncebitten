@@ -16,3 +16,4 @@ pub mod rules;
 pub mod signal;
 pub mod sources;
 pub mod store;
+pub mod triage;
