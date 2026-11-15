@@ -77,19 +77,27 @@ pub fn spawn_path(program: &str) -> OsString {
     if !cfg!(windows) {
         return OsString::from(program);
     }
+    find_on_path(program).map_or_else(|| OsString::from(program), PathBuf::into_os_string)
+}
+
+/// Where `program` lives on `PATH`, trying each PATHEXT extension on Windows.
+pub fn find_on_path(program: &str) -> Option<PathBuf> {
     let dirs: Vec<PathBuf> = env::var_os("PATH")
         .map(|path| env::split_paths(&path).collect())
         .unwrap_or_default();
-    let pathext: Vec<String> = match env::var("PATHEXT") {
-        Ok(value) => value
-            .split(';')
-            .filter(|ext| !ext.is_empty())
-            .map(str::to_owned)
-            .collect(),
-        Err(_) => [".COM", ".EXE", ".BAT", ".CMD"].map(String::from).to_vec(),
+    let pathext: Vec<String> = if !cfg!(windows) {
+        vec![String::new()]
+    } else {
+        match env::var("PATHEXT") {
+            Ok(value) => value
+                .split(';')
+                .filter(|ext| !ext.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            Err(_) => [".COM", ".EXE", ".BAT", ".CMD"].map(String::from).to_vec(),
+        }
     };
     resolve_in(program, &dirs, &pathext)
-        .map_or_else(|| OsString::from(program), PathBuf::into_os_string)
 }
 
 fn finding(message: String) -> Finding {

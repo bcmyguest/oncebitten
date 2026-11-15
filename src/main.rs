@@ -6,6 +6,7 @@ use oncebitten::baseline;
 use oncebitten::capture;
 use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
+use oncebitten::doctor;
 use oncebitten::engine::Outcome;
 use oncebitten::evidence::{self, Cluster};
 use oncebitten::exceptions::{self, Exception};
@@ -77,6 +78,12 @@ enum Command {
     Gate {
         #[command(subcommand)]
         stage: GateStage,
+    },
+    /// Check the installation and this repository read-only; exit 1 when a check fails
+    Doctor {
+        /// OpenShell gateway endpoint (default: the openshell CLI's own)
+        #[arg(long)]
+        gateway: Option<String>,
     },
     /// Manage .oncebitten/exceptions.toml: findings a rule lets through on named paths until a date
     Exception {
@@ -246,6 +253,13 @@ fn main() -> Result<()> {
         Command::Check { base } => run_check(&base),
         Command::Gate { stage } => run_gate(stage),
         Command::Exception { action } => run_exception(action),
+        Command::Doctor { gateway } => {
+            let lines = doctor::run(&Inputs::from_process()?, gateway.as_deref());
+            for line in &lines {
+                println!("{line}");
+            }
+            std::process::exit(doctor::exit_code(&lines))
+        }
         Command::Baseline {
             action: BaselineAction::Update,
         } => run_baseline_update(),

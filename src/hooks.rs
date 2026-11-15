@@ -344,6 +344,31 @@ pub fn uninstall(host: Host, path: &Path) -> Result<bool> {
     }
 }
 
+/// Whether `path` holds oncebitten's capture hook for `host`. Reads only.
+pub fn is_installed(host: Host, path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    if matches!(host, Host::OpenCode | Host::Pi) {
+        let text =
+            fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
+        return Ok(text.contains(SCRIPT_MARKER));
+    }
+    let value = load(path)?;
+    let mut entries = value["hooks"]
+        .as_object()
+        .into_iter()
+        .flat_map(|map| map.values())
+        .filter_map(Value::as_array)
+        .flatten();
+    Ok(match host {
+        Host::Claude | Host::Codex => entries.any(is_ours_group),
+        Host::Cursor => entries.any(is_ours),
+        Host::Copilot => entries.any(is_ours_copilot),
+        Host::OpenCode | Host::Pi => unreachable!("handled above"),
+    })
+}
+
 fn uninstall_nested(path: &Path) -> Result<bool> {
     if !path.exists() {
         return Ok(false);

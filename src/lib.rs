@@ -2,6 +2,7 @@ pub mod baseline;
 pub mod capture;
 pub mod check;
 pub mod config;
+pub mod doctor;
 pub mod engine;
 pub mod evidence;
 pub mod exceptions;

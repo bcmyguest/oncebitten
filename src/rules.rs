@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Context, Result};
 use include_dir::{include_dir, Dir};
 
-use crate::config::{self, Inputs, Platform};
+use crate::config::{self, Inputs, Platform, Source};
 use crate::lockfile::{self, LockedSource, Lockfile};
 use crate::registry::{resolve, Layer, Layers, Resolved};
 use crate::rule::Status;
@@ -51,34 +51,8 @@ pub fn sync_frozen(inputs: &Inputs) -> Result<(), Failure> {
     let lock = lockfile::read(&repo).map_err(|error| {
         Failure::CouldNotRun(error.context("--frozen needs rules.lock; run oncebitten rules sync"))
     })?;
-    let sources = &loaded.config.rules.sources;
-    for entry in &lock.source {
-        if !sources.iter().any(|source| source.name == entry.name) {
-            return Err(Failure::CouldNotRun(anyhow!(
-                "rules.lock pins source `{}`, which the config does not name",
-                entry.name
-            )));
-        }
-    }
-    let mut pinned = Vec::new();
-    for source in sources {
-        let Some(entry) = lock.source.iter().find(|entry| entry.name == source.name) else {
-            return Err(Failure::CouldNotRun(anyhow!(
-                "rules.lock has no entry for source `{}`",
-                source.name
-            )));
-        };
-        if entry.url != source.url {
-            return Err(Failure::CouldNotRun(anyhow!(
-                "rules.lock pins `{}` for source `{}`, but the config names `{}`",
-                entry.url,
-                source.name,
-                source.url
-            )));
-        }
-        pinned.push((source, &entry.commit));
-    }
-    for (source, commit) in pinned {
+    let pinned = pair_locked(&loaded.config.rules.sources, &lock).map_err(Failure::CouldNotRun)?;
+    for (source, LockedSource { commit, .. }) in pinned {
         checkout_locked(&inputs.vars, &root, &source.name, &source.url, commit).map_err(
             |error| {
                 Failure::CouldNotRun(error.context(format!(
@@ -89,6 +63,38 @@ pub fn sync_frozen(inputs: &Inputs) -> Result<(), Failure> {
         )?;
     }
     Ok(())
+}
+
+/// Pairs each configured source with its `rules.lock` entry. Fails when one
+/// side names a source the other lacks, or when the URLs differ.
+pub fn pair_locked<'a>(
+    sources: &'a [Source],
+    lock: &'a Lockfile,
+) -> Result<Vec<(&'a Source, &'a LockedSource)>> {
+    for entry in &lock.source {
+        if !sources.iter().any(|source| source.name == entry.name) {
+            bail!(
+                "rules.lock pins source `{}`, which the config does not name",
+                entry.name
+            );
+        }
+    }
+    let mut pinned = Vec::new();
+    for source in sources {
+        let Some(entry) = lock.source.iter().find(|entry| entry.name == source.name) else {
+            bail!("rules.lock has no entry for source `{}`", source.name);
+        };
+        if entry.url != source.url {
+            bail!(
+                "rules.lock pins `{}` for source `{}`, but the config names `{}`",
+                entry.url,
+                source.name,
+                source.url
+            );
+        }
+        pinned.push((source, entry));
+    }
+    Ok(pinned)
 }
 
 pub fn is_shipped_example(id: &str) -> bool {

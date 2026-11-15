@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 
 use crate::config::{home_dir, windows_app_dir, Platform};
@@ -228,6 +228,36 @@ impl Store {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+}
+
+/// The store at `path` as doctor sees it, read without migrating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Probe {
+    Missing,
+    Current,
+    /// An older schema; the next capture migrates it.
+    Older(i64),
+    /// A schema this build does not know: a newer oncebitten wrote it.
+    Newer(i64),
+}
+
+/// Opens the store read-only and reads its schema version. Never creates or
+/// migrates it.
+pub fn probe(path: &Path) -> Result<Probe> {
+    if !path.exists() {
+        return Ok(Probe::Missing);
+    }
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    Ok(match version {
+        SCHEMA_VERSION => Probe::Current,
+        older if older < SCHEMA_VERSION => Probe::Older(older),
+        newer => Probe::Newer(newer),
+    })
 }
 
 pub fn events_db_path_for(vars: &BTreeMap<String, String>, platform: Platform) -> Result<PathBuf> {
