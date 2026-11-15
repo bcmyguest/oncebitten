@@ -623,3 +623,54 @@ fn within_budget_allows_runs_below_the_daily_max() {
     assert!(!within_budget(10, 10));
     assert!(!within_budget(11, 10));
 }
+
+#[test]
+fn budget_skipped_lists_clusters_whose_latest_run_was_skipped_oldest_first() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage("c1", Some("claude"), 200, TriageOutcome::SkippedBudget)
+        .unwrap();
+    store
+        .record_triage("c2", Some("claude"), 100, TriageOutcome::SkippedBudget)
+        .unwrap();
+    store
+        .record_triage("c2", Some("claude"), 300, TriageOutcome::Started)
+        .unwrap();
+    store
+        .record_triage("c3", Some("codex"), 50, TriageOutcome::SkippedBudget)
+        .unwrap();
+    let skipped = store.budget_skipped().unwrap();
+    let names: Vec<(&str, Option<&str>)> = skipped
+        .iter()
+        .map(|run| (run.cluster.as_str(), run.host.as_deref()))
+        .collect();
+    assert_eq!(names, [("c3", Some("codex")), ("c1", Some("claude"))]);
+}
+
+#[test]
+fn spawn_failed_runs_do_not_count_against_the_budget() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage("c1", Some("claude"), 100, TriageOutcome::SpawnFailed)
+        .unwrap();
+    assert_eq!(store.triage_runs_since(0).unwrap(), 0);
+}
+
+#[test]
+fn event_repo_returns_the_repo_an_event_was_captured_in() {
+    let store = Store::open_in_memory().unwrap();
+    let event = NewEvent {
+        ts: 1,
+        host: "codex".into(),
+        session_id: "s1".into(),
+        repo: Some("/work/app".into()),
+        kind: "user-correction".into(),
+        tool: None,
+        summary: "no".into(),
+    };
+    let id = store.record(&event, &[]).unwrap().unwrap();
+    assert_eq!(store.event_repo(id).unwrap().as_deref(), Some("/work/app"));
+    assert_eq!(store.event_repo(id + 1).unwrap(), None);
+}

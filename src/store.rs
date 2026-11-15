@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 
 use crate::config::{home_dir, windows_app_dir, Platform};
@@ -158,11 +158,13 @@ pub struct Rejection {
 }
 
 /// What a `triage_runs` row records. `Started` spends one run of the daily
-/// budget; `SkippedBudget` marks a capture that spawned nothing.
+/// budget; `SkippedBudget` marks a capture that spawned nothing; `SpawnFailed`
+/// marks a run that never started and so spends nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriageOutcome {
     Started,
     SkippedBudget,
+    SpawnFailed,
 }
 
 impl TriageOutcome {
@@ -170,8 +172,17 @@ impl TriageOutcome {
         match self {
             TriageOutcome::Started => "started",
             TriageOutcome::SkippedBudget => "skipped: budget",
+            TriageOutcome::SpawnFailed => "spawn failed",
         }
     }
+}
+
+/// A `triage_runs` row, as read back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriageRun {
+    pub cluster: String,
+    pub ts: i64,
+    pub host: Option<String>,
 }
 
 /// What a queue row holds: a drafted rule, or a triage finding without one.
@@ -681,6 +692,40 @@ impl Store {
             params![TriageOutcome::Started.as_str(), since],
             |row| row.get(0),
         )?)
+    }
+
+    /// The repo an event was captured in, or `None` for an unknown id or an
+    /// event captured outside a repo.
+    pub fn event_repo(&self, id: i64) -> Result<Option<String>> {
+        let repo = self
+            .conn
+            .query_row(
+                "SELECT repo FROM events WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        Ok(repo.flatten())
+    }
+
+    /// Clusters whose latest `triage_runs` row is `skipped: budget`, oldest
+    /// first. Rows are filtered on their latest outcome, so a later run of the
+    /// same cluster drops it from this list.
+    pub fn budget_skipped(&self) -> Result<Vec<TriageRun>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.cluster, t.ts, t.host FROM triage_runs t \
+             WHERE t.outcome = ?1 AND t.id = (\
+               SELECT MAX(id) FROM triage_runs WHERE cluster = t.cluster) \
+             ORDER BY t.ts, t.id",
+        )?;
+        let rows = stmt.query_map(params![TriageOutcome::SkippedBudget.as_str()], |row| {
+            Ok(TriageRun {
+                cluster: row.get(0)?,
+                ts: row.get(1)?,
+                host: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     fn query_decisions(

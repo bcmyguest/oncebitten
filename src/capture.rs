@@ -130,7 +130,13 @@ pub fn run_from_process(host: &str) -> Result<()> {
     let ttl_days = loaded.config.evidence.ttl_days;
     let recorded = run_expiring(host, &payload, &db, ts, &lexicon, &test_commands, ttl_days)?;
     if let (Some(event_id), true) = (recorded, loaded.config.triage.background) {
-        if let Err(error) = start_background_triage(&db, event_id, &loaded.config.triage, ts) {
+        if let Err(error) = start_background_triage(
+            &db,
+            event_id,
+            &loaded.config.triage,
+            &loaded.config.triggers,
+            ts,
+        ) {
             eprintln!("oncebitten capture: background triage not started: {error:#}");
         }
     }
@@ -145,28 +151,43 @@ fn start_background_triage(
     db: &Path,
     event_id: i64,
     triage: &config::Triage,
+    triggers: &config::Triggers,
     now: i64,
 ) -> Result<()> {
     let store = Store::open(db)?;
-    let due = crate::proposals::due(&store, event_id)?;
+    let mut due = crate::proposals::due_gated(&store, event_id, triggers)?;
+    if let Some(repo) = store.event_repo(event_id)?.as_deref().map(Path::new) {
+        if let Some(root) = config::repo_root(repo) {
+            let mut picked = crate::proposals::pickup(&store, &root, triggers)?;
+            picked.retain(|p| !due.iter().any(|d| d.cluster == p.cluster));
+            picked.append(&mut due);
+            due = picked;
+        }
+    }
     if due.is_empty() {
         return Ok(());
     }
     let day = store::local_day_start_ms(now)?;
     let exe = crate::hooks::current_exe()?;
+    let already_skipped: Vec<String> = store
+        .budget_skipped()?
+        .into_iter()
+        .map(|run| run.cluster)
+        .collect();
     for item in due {
         let host_name = Some(item.host.as_str());
         let spent = store.triage_runs_since(day)?;
         if !store::within_budget(spent, triage.max_per_day) {
-            store.record_triage(
-                &item.cluster,
-                host_name,
-                now,
-                store::TriageOutcome::SkippedBudget,
-            )?;
+            if !already_skipped.contains(&item.cluster) {
+                store.record_triage(
+                    &item.cluster,
+                    host_name,
+                    now,
+                    store::TriageOutcome::SkippedBudget,
+                )?;
+            }
             continue;
         }
-        store.record_triage(&item.cluster, host_name, now, store::TriageOutcome::Started)?;
         let mut command = Command::new(&exe);
         command.args(["triage", &item.cluster, "--queue"]);
         let host = config::Host::parse(&item.host)
@@ -180,9 +201,17 @@ fn start_background_triage(
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         detach(&mut command);
-        command
-            .spawn()
-            .with_context(|| format!("spawning triage for {}", item.cluster))?;
+        match command.spawn() {
+            Ok(_) => {
+                store.record_triage(&item.cluster, host_name, now, store::TriageOutcome::Started)?
+            }
+            Err(_) => store.record_triage(
+                &item.cluster,
+                host_name,
+                now,
+                store::TriageOutcome::SpawnFailed,
+            )?,
+        }
     }
     Ok(())
 }
