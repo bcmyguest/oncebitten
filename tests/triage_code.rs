@@ -291,3 +291,87 @@ fn triage_config_defaults_send_code_on_with_a_16_kib_cap() {
     assert!(!parsed.send_code);
     assert_eq!(parsed.max_code_bytes, 2048);
 }
+
+const VERDICT_DIFF_DRAFT: &str = r#"{"repeatable":true,"user_correction":false,"root_cause":"edits outside the test dir","proposed_fix_kind":"lint","generality":"project","draft":{"id":"paths","description":"Changes need a test.","mode":"block","engine":"diff","language":null,"check":null,"command":null,"fired_exit_codes":null,"fired_output_contains":null,"when_changed":["*.rs"],"require_changed":["*.rs"],"bad":{"name":"bad.txt","content":"lib.rs\n"},"fixed":{"name":"fixed.txt","content":"other.rs\n"},"corpus":null,"rationale":"paths name the change."}}"#;
+
+#[test]
+fn a_diff_draft_whose_bad_lists_changed_paths_is_kept() {
+    let (_root, _repo, store, cluster) = edited_session();
+    let runner = Recording::new(VERDICT_DIFF_DRAFT);
+    let answer = ask_cluster(
+        &runner,
+        Host::Opencode,
+        "plan",
+        &store,
+        &cluster,
+        &Triage::default(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert!(answer.draft.is_some());
+}
+
+/// A repo where `lib.rs` changed from `x`, `b`, `y` to `A`, `b`, `C`: one hunk
+/// whose post-image is `A`, `b`, `C` with `b` as context. Returns the temp root,
+/// the repo, the store with the edit recorded, and the head the session started from.
+fn context_session() -> (TempDir, PathBuf, Store, String) {
+    let (root, repo, _) = repo();
+    fs::write(repo.join("lib.rs"), "x\nb\ny\n").unwrap();
+    git(&repo, &["commit", "-q", "-am", "middle"]);
+    let head = git(&repo, &["rev-parse", "HEAD"]);
+    let store = Store::open_in_memory().unwrap();
+    record_edit(&store, &repo, "lib.rs", 1);
+    fs::write(repo.join("lib.rs"), "A\nb\nC\n").unwrap();
+    (root, repo, store, head)
+}
+
+#[test]
+fn a_fixture_quoting_context_between_added_lines_passes() {
+    let (_root, repo, store, head) = context_session();
+    let code = collect(&store, &[occurrence(&repo, Some(&head), 1)], 16 * 1024).unwrap();
+    assert!(code.quoted_by("A\nb\nC\n"), "{}", code.diff);
+}
+
+#[test]
+fn a_fixture_of_context_lines_alone_is_not_a_quote_of_the_change() {
+    let (_root, repo, store, head) = context_session();
+    let code = collect(&store, &[occurrence(&repo, Some(&head), 1)], 16 * 1024).unwrap();
+    assert!(!code.quoted_by("b\n"), "{}", code.diff);
+}
+
+#[cfg(windows)]
+fn msys_form(path: &str) -> String {
+    let text = path.replace('\\', "/");
+    let (drive, rest) = text.split_at(1);
+    format!(
+        "/{}{}",
+        drive.to_ascii_lowercase(),
+        rest.replacen(':', "", 1)
+    )
+}
+
+#[cfg(windows)]
+#[test]
+fn collect_matches_msys_and_mixed_case_edit_paths_on_windows() {
+    let (_root, repo, head) = repo();
+    let store = Store::open_in_memory().unwrap();
+    let event = NewEvent {
+        ts: 1,
+        host: "opencode".into(),
+        session_id: SESSION.into(),
+        repo: Some(repo.display().to_string()),
+        kind: "tool_ok".into(),
+        tool: Some("edit".into()),
+        summary: msys_form(&repo.join("lib.rs").display().to_string()),
+    };
+    store
+        .record_captured(&event, &[], &Capture::default())
+        .unwrap();
+    fs::write(repo.join("lib.rs"), format!("{EDITED_LINE}\n")).unwrap();
+    let code = collect(&store, &[occurrence(&repo, Some(&head), 1)], 16 * 1024).unwrap();
+    assert!(
+        code.diff.contains(&format!("+{EDITED_LINE}")),
+        "{}",
+        code.diff
+    );
+}

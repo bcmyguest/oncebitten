@@ -7,6 +7,7 @@ use crate::config::{Host, Triage};
 use crate::evidence::Cluster;
 use crate::store::Store;
 use crate::triage::code::{self, Code};
+use crate::triage::draft::Engine;
 use crate::triage::host::{answer_from, control_invocation, invocation};
 use crate::triage::prompt::{build_prompt_with_code, Occurrence, PromptInput};
 use crate::triage::proof::{prove, requires_proof, workdir_sentinels};
@@ -108,9 +109,9 @@ pub fn ask_cluster(
     };
     let answer = run_answer_with_code(runner, host, agent, &prompt_input(cluster), &code, timeout)?;
     if let Some(draft) = &answer.draft {
-        if !code.is_empty() && !code.quoted_by(&draft.bad.content) {
+        if !code.is_empty() && draft.engine != Engine::Diff && !code.quoted_by(&draft.bad.content) {
             bail!(
-                "could not run: the drafted bad fixture quotes no added line of the changed code sent to triage"
+                "could not run: the drafted bad fixture quotes no changed lines of the code sent to triage"
             );
         }
     }

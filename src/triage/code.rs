@@ -11,6 +11,8 @@ use crate::triage::prompt::bound;
 const GIT: &str = "git";
 const DIFF_MARKER: &str = "diff --git ";
 const HUNK_MARKER: &str = "@@";
+const ADDED: char = '+';
+const REMOVED: char = '-';
 
 /// The changed code a triage call sees: unified diff text from each occurrence's
 /// captured commit to the working tree, bounded by `triage.max_code_bytes`.
@@ -25,43 +27,73 @@ impl Code {
         self.diff.is_empty()
     }
 
-    /// Whether `bad` holds every added line of one hunk, in order and
-    /// consecutively. Line endings are normalised to LF and trailing spaces
-    /// are dropped on both sides.
+    /// Whether `bad` quotes the changed code: some run of consecutive lines of
+    /// one hunk's post-image (its context and added lines, in order) appears
+    /// consecutively in `bad` and includes at least one added line. Line endings
+    /// are normalised to LF and trailing spaces are dropped on both sides.
     pub fn quoted_by(&self, bad: &str) -> bool {
         let bad = normalize(bad);
-        self.added_blocks()
+        self.post_images()
             .iter()
-            .any(|block| contains_run(&bad, block))
+            .any(|hunk| quotes_a_change(hunk, &bad))
     }
 
-    /// The added lines of each diff hunk, without the leading `+`.
-    fn added_blocks(&self) -> Vec<Vec<String>> {
-        let mut blocks = Vec::new();
+    /// The post-image of each diff hunk: `(added, text)` per line, with
+    /// removed lines left out. Context lines carry no prefix character in the
+    /// text, so the first character is dropped only on `+` and ` ` lines.
+    fn post_images(&self) -> Vec<Vec<(bool, String)>> {
+        let mut hunks = Vec::new();
         let mut current = Vec::new();
         let mut in_header = false;
         for line in normalize(&self.diff) {
             if line.starts_with(DIFF_MARKER) {
                 if !current.is_empty() {
-                    blocks.push(std::mem::take(&mut current));
+                    hunks.push(std::mem::take(&mut current));
                 }
                 in_header = true;
             } else if line.starts_with(HUNK_MARKER) {
                 if !current.is_empty() {
-                    blocks.push(std::mem::take(&mut current));
+                    hunks.push(std::mem::take(&mut current));
                 }
                 in_header = false;
             } else if !in_header {
-                if let Some(added) = line.strip_prefix('+') {
-                    current.push(added.to_string());
+                match line.chars().next() {
+                    Some(ADDED) => current.push((true, line[1..].to_string())),
+                    Some(REMOVED) | Some('\\') => {}
+                    _ => current.push((false, line.get(1..).unwrap_or("").to_string())),
                 }
             }
         }
         if !current.is_empty() {
-            blocks.push(current);
+            hunks.push(current);
         }
-        blocks
+        hunks
     }
+}
+
+/// Whether a run of `hunk` that includes an added line also appears
+/// consecutively in `bad`.
+fn quotes_a_change(hunk: &[(bool, String)], bad: &[String]) -> bool {
+    for start in 0..hunk.len() {
+        for (at, line) in bad.iter().enumerate() {
+            if *line != hunk[start].1 {
+                continue;
+            }
+            let mut added = false;
+            let mut offset = 0;
+            while start + offset < hunk.len()
+                && at + offset < bad.len()
+                && hunk[start + offset].1 == bad[at + offset]
+            {
+                added |= hunk[start + offset].0;
+                if added {
+                    return true;
+                }
+                offset += 1;
+            }
+        }
+    }
+    false
 }
 
 /// The diff of every file the sessions behind `occurrences` edited, taken from
@@ -110,24 +142,18 @@ fn normalize(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn contains_run(haystack: &[String], needle: &[String]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
-}
-
 /// `raw` as a path relative to `repo`, with `/` separators. `None` when an
 /// absolute `raw` lies outside `repo` or names no file.
 fn repo_relative(repo: &Path, raw: &str) -> Option<String> {
-    let path = Path::new(raw);
-    let relative = if path.is_absolute() {
-        path.strip_prefix(repo).ok()?
+    let repo = native(&repo.display().to_string());
+    let raw = native(raw);
+    let relative = if Path::new(&raw).is_absolute() {
+        strip_repo(&raw, &repo)?
     } else {
-        path
+        raw.as_str()
     };
     let mut parts = Vec::new();
-    for component in relative.components() {
+    for component in Path::new(relative).components() {
         match component {
             Component::Normal(part) => parts.push(part.to_str()?.to_string()),
             Component::CurDir => {}
@@ -135,6 +161,40 @@ fn repo_relative(repo: &Path, raw: &str) -> Option<String> {
         }
     }
     (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// `path` with `\` as `/`, and on Windows an MSYS drive (`/c/...`) as `c:/...`.
+/// The drive swap keeps the byte length, so offsets into the result match the input.
+#[cfg(windows)]
+fn native(path: &str) -> String {
+    let text = path.replace('\\', "/");
+    let bytes = text.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b'/' {
+        format!("{}:{}", &text[1..2], &text[2..])
+    } else {
+        text
+    }
+}
+
+#[cfg(not(windows))]
+fn native(path: &str) -> String {
+    path.to_string()
+}
+
+/// The part of `raw` after `repo` and its `/`, or `None` when `raw` is not
+/// under `repo`. Windows compares case-insensitively.
+fn strip_repo<'a>(raw: &'a str, repo: &str) -> Option<&'a str> {
+    let repo = repo.trim_end_matches('/');
+    let head = raw.get(..repo.len())?;
+    let same = if cfg!(windows) {
+        head.eq_ignore_ascii_case(repo)
+    } else {
+        head == repo
+    };
+    if !same {
+        return None;
+    }
+    raw[repo.len()..].strip_prefix('/')
 }
 
 /// `git diff <head>` for `files` in `repo`. Literal pathspecs, and no external
