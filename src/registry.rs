@@ -39,14 +39,31 @@ pub struct Resolved {
 }
 
 pub fn resolve(layers: &Layers) -> Result<Vec<Resolved>, Vec<anyhow::Error>> {
+    resolve_with(layers, false).map(|(rules, _)| rules)
+}
+
+/// Resolves like `resolve`, but a rule directory that fails to load drops only
+/// that rule. Returns the valid rules and the load errors of the dropped ones.
+/// Clashes among the valid rules still fail.
+pub fn resolve_skipping_broken(
+    layers: &Layers,
+) -> Result<(Vec<Resolved>, Vec<anyhow::Error>), Vec<anyhow::Error>> {
+    resolve_with(layers, true)
+}
+
+fn resolve_with(
+    layers: &Layers,
+    skip_broken: bool,
+) -> Result<(Vec<Resolved>, Vec<anyhow::Error>), Vec<anyhow::Error>> {
     let mut errors = Vec::new();
+    let mut broken = Vec::new();
     let project = match &layers.project {
-        Some(dir) => take(load_dir(dir), &mut errors),
+        Some(dir) => take(load_dir(dir), &mut broken),
         None => Vec::new(),
     };
     let mut candidates = Vec::new();
     for (name, dir) in &layers.sources {
-        for rule in take(load_dir(dir), &mut errors) {
+        for rule in take(load_dir(dir), &mut broken) {
             candidates.push(Resolved {
                 id: format!("{name}/{}", rule.id),
                 layer: Layer::Source(name.clone()),
@@ -55,7 +72,7 @@ pub fn resolve(layers: &Layers) -> Result<Vec<Resolved>, Vec<anyhow::Error>> {
         }
     }
     let examples = match &layers.examples {
-        Some(dir) => take(load_dir(dir), &mut errors),
+        Some(dir) => take(load_dir(dir), &mut broken),
         None => Vec::new(),
     };
     for rule in examples {
@@ -65,6 +82,12 @@ pub fn resolve(layers: &Layers) -> Result<Vec<Resolved>, Vec<anyhow::Error>> {
             rule,
         });
     }
+    let skipped = if skip_broken {
+        broken
+    } else {
+        errors = broken;
+        Vec::new()
+    };
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -141,25 +164,24 @@ pub fn resolve(layers: &Layers) -> Result<Vec<Resolved>, Vec<anyhow::Error>> {
             out.push(candidate);
         }
     }
-    Ok(out)
+    Ok((out, skipped))
 }
 
-fn take(
-    loaded: Result<Vec<Rule>, Vec<anyhow::Error>>,
-    errors: &mut Vec<anyhow::Error>,
-) -> Vec<Rule> {
-    match loaded {
-        Ok(rules) => rules,
-        Err(found) => {
-            errors.extend(found);
-            Vec::new()
+fn take(loaded: (Vec<Rule>, Vec<anyhow::Error>), errors: &mut Vec<anyhow::Error>) -> Vec<Rule> {
+    errors.extend(loaded.1);
+    loaded.0
+}
+
+fn load_dir(dir: &Path) -> (Vec<Rule>, Vec<anyhow::Error>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return (
+                Vec::new(),
+                vec![anyhow!("reading {}: {error}", dir.display())],
+            )
         }
-    }
-}
-
-fn load_dir(dir: &Path) -> Result<Vec<Rule>, Vec<anyhow::Error>> {
-    let entries = std::fs::read_dir(dir)
-        .map_err(|error| vec![anyhow!("reading {}: {error}", dir.display())])?;
+    };
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.is_dir() && !is_hidden(path))
@@ -173,11 +195,7 @@ fn load_dir(dir: &Path) -> Result<Vec<Rule>, Vec<anyhow::Error>> {
             Err(error) => errors.push(error),
         }
     }
-    if errors.is_empty() {
-        Ok(rules)
-    } else {
-        Err(errors)
-    }
+    (rules, errors)
 }
 
 fn is_hidden(path: &Path) -> bool {

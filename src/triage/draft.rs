@@ -10,6 +10,10 @@ pub const MAX_ID_CHARS: usize = 64;
 pub const MAX_TEXT_CHARS: usize = 1000;
 pub const MAX_FILE_BYTES: usize = 64 * 1024;
 pub const MAX_CORPUS_FILES: usize = 10;
+/// Characters Windows refuses in a file name; draft files are rejected on every
+/// platform so a rule written on Linux checks out on Windows.
+const WINDOWS_FORBIDDEN: [char; 6] = ['<', '>', '"', '|', '?', '*'];
+const WINDOWS_DEVICES: &[&str] = &["con", "prn", "aux", "nul"];
 const RULE_FILE: &str = "rule.toml";
 const CHECK_FILE: &str = "check.yml";
 const FIXTURES_DIR: &str = "fixtures";
@@ -130,6 +134,14 @@ impl Draft {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
         std::fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        if let Err(error) = self.write_contents(&dir) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(error);
+        }
+        Ok(dir)
+    }
+
+    fn write_contents(&self, dir: &Path) -> Result<()> {
         let rule = RuleToml {
             id: &self.id,
             description: self.description.trim(),
@@ -161,7 +173,7 @@ impl Draft {
                 write_file(&corpus_dir.join(&file.name), &file.content)?;
             }
         }
-        Ok(dir)
+        Ok(())
     }
 
     fn check_engine_keys(&self) -> Result<()> {
@@ -230,6 +242,18 @@ fn bounded_file(key: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
+fn is_windows_device(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    WINDOWS_DEVICES.contains(&stem.as_str())
+        || (stem.len() == 4
+            && (stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.ends_with(|c: char| c.is_ascii_digit() && c != '0'))
+}
+
 /// A draft file name is one plain path component; fixtures carry their stem.
 fn check_file_name(file: &DraftFile, stem: Option<&str>) -> Result<()> {
     let name = file.name.as_str();
@@ -237,7 +261,11 @@ fn check_file_name(file: &DraftFile, stem: Option<&str>) -> Result<()> {
     let plain = matches!(components.next(), Some(Component::Normal(_)))
         && components.next().is_none()
         && !name.contains(['/', '\\', ':'])
-        && !name.starts_with('.');
+        && !name.starts_with('.')
+        && !name.contains(WINDOWS_FORBIDDEN)
+        && !name.chars().any(char::is_control)
+        && !name.ends_with(['.', ' '])
+        && !is_windows_device(name);
     if !plain {
         bail!("draft file name `{name}` must be a plain file name");
     }

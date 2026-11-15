@@ -17,7 +17,7 @@
 | `repeat-failure` | A second failure with the same tool and normalized command in one session. Normalization collapses whitespace and replaces digits, paths and hex with `<n>`, `<path>` and `<hex>`. |
 | `test-fail-then-pass` | A test runner (`cargo test`, `pytest`, `npm test`, `vitest`, `jest`, `go test`) passes after the session's previous test run failed. |
 | `user-correction` | A prompt contains a phrase from the correction lexicon. Its detail lists the matched phrases, comma-separated and lowercased. |
-| `revert` | A Bash `git revert`, or `git checkout --` / `git restore` of a file the session edited. |
+| `revert` | A shell-tool `git revert` (Bash, Shell, shell, bash), or `git checkout --` / `git restore` of a file the session edited. Edited and command paths match when one is a path-component suffix of the other. |
 
 ### Correction lexicon
 
@@ -43,7 +43,7 @@
 | codex | verified from real payloads (`codex exec`) | `codex/UserPromptSubmit.json`, `codex/PreToolUse.json`, `codex/PostToolUse.json` | prompts only: `PostToolUse` carries `tool_response` as text with no error flag or exit code |
 | cursor | `sessionStart` verified from a real `cursor-agent` run; prompt and tool events from docs only (the probe model never reached them) | `cursor/sessionStart.json` | prompts, tool ok, tool failure |
 | copilot | `sessionStart` and `userPromptSubmitted` verified from a real `copilot` run; tool events from docs only | `copilot/sessionStart.json`, `copilot/userPromptSubmitted.json` | prompts, tool ok, tool failure. Native payloads carry no event name, so `toolName`/`toolResult` fields tell the events apart. |
-| opencode | `session.hook("prompt")` verified from a real `opencode run`; tool hook payload not captured | `opencode/prompt.json` | prompts only. Accepted as a triage host without a hooks-off proof (user decision). Triage is not built. |
+| opencode | `session.hook("prompt")` verified from a real `opencode run`; tool hook payload not captured | `opencode/prompt.json` | prompts only. Accepted as a triage host without a hooks-off proof (user decision); see [triage.md](triage.md). |
 | pi | `before_agent_start` (prompt) and `tool_result` (tool ok, tool failure) verified from a real `pi -p` run against a local mock provider (pi 0.73.1, `@mariozechner/pi-coding-agent`); the user-scope path is verified from pi's source only | `pi/before_agent_start.json`, `pi/tool_result.json` | prompts, tool ok, tool failure |
 
 Codex, cursor, copilot and pi fixtures hold real payloads with personal paths and the account email replaced. Codex and cursor payloads add no repo field beyond `cwd` / `workspace_roots`. Pi's session id is a random UUID and is kept. The pi fixtures are the payloads `packaging/pi/oncebitten.js` forwarded during the real run; the raw pi events were not recorded.
@@ -65,7 +65,7 @@ oncebitten hooks uninstall --host <host> --scope <user|project>
 | pi | user `.pi/agent/extensions/oncebitten.js`, project `.pi/extensions/oncebitten.js` | JS extension owned by oncebitten. Project scope is relative to the directory pi starts in, not the git root, and was verified by a real run. User scope is `~/.pi/agent` by pi's source. When `$PI_CODING_AGENT_DIR` is non-empty, `hooks install` and `hooks uninstall` use `$PI_CODING_AGENT_DIR/extensions/oncebitten.js` instead, expanding a leading `~` as pi does; a relative value is an error. |
 
 - `<home>` is `HOME`, or on Windows `USERPROFILE`, then `HOMEDRIVE`+`HOMEPATH`.
-- Commands call this executable by absolute, canonicalized path (`std::env::current_exe`), never through `PATH`. The path is single-quoted on Unix, double-quoted on Windows (cmd), `& '...'` in the copilot `powershell` field. No `${VAR:-default}` syntax. Running install again adds nothing; after the binary moves, it rewrites the path in place.
+- User-scope commands call this executable by absolute, canonicalized path (`std::env::current_exe`), never through `PATH`. Project-scope installs (`.claude/settings.json` and the other project files) write the bare command `oncebitten ...`, resolved from `PATH`, so the committed file works on every machine;. The absolute path is single-quoted on Unix, double-quoted on Windows (cmd), `& '...'` in the copilot `powershell` field. No `${VAR:-default}` syntax. Running install again adds nothing; after the binary moves, it rewrites the path in place.
 - Shared files (claude, codex, cursor) keep other keys and hooks; uninstall removes only oncebitten's entries. Owned files (copilot, opencode, pi) are written whole and deleted on uninstall. Both refuse a file they did not write.
 - `hooks install` also writes the steer hook (`oncebitten steer --host <host>`) for the same host and scope, and `hooks uninstall` removes it; see [steer.md](steer.md) for its events, files and what each host cannot do.
 - The opencode and pi scripts spawn the command with a shell, forward the event JSON on stdin, ignore every error and skip when `ONCEBITTEN_TRIAGE=1`.

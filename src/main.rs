@@ -1009,7 +1009,12 @@ fn run_hooks(action: HooksAction) -> Result<()> {
         .context("no absolute home directory in HOME, USERPROFILE or HOMEDRIVE+HOMEPATH")?;
     let path = hooks::install_target(host, scope, &home, &inputs.cwd, &inputs.vars)?;
     let steer_path = hooks::steer_target(host, scope, &home, &inputs.cwd, &inputs.vars)?;
-    let (changed, steer_changed) = if install {
+    let (changed, steer_changed) = if install && scope == hooks::Scope::Project {
+        (
+            hooks::install(host, &path)?,
+            hooks::install_steer(host, &steer_path)?,
+        )
+    } else if install {
         let exe = hooks::current_exe()?;
         (
             hooks::install_exe(host, &path, &exe, Platform::current())?,

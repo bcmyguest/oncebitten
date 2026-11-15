@@ -348,3 +348,20 @@ fn steer_cli_fails_open_on_bad_input() {
         assert!(!output.stderr.is_empty(), "{}", both(&output));
     }
 }
+
+#[test]
+fn a_rule_that_fails_to_load_disables_only_itself() {
+    let repo = repo_with_no_sudo();
+    repo.write(
+        ".oncebitten/rules/half-written/rule.toml",
+        "id = \"half-written\"\n",
+    );
+
+    let output = steer(&repo, "claude", &sudo_payload(&repo, "sudo id"), &[]);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["hookSpecificOutput"]["permissionDecision"], "deny");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("half-written"), "{stderr}");
+}

@@ -286,8 +286,13 @@ pub fn run(host: Host, payload: &str, inputs: &Inputs) -> Result<Option<String>>
             inputs.cwd = dir;
         }
     }
-    let rules = match rules::load(&inputs, false) {
-        Ok(rules) => rules,
+    let rules = match rules::load_skipping_broken(&inputs) {
+        Ok((rules, skipped)) => {
+            for error in skipped {
+                eprintln!("oncebitten steer: skipped rule: {error:#}");
+            }
+            rules
+        }
         Err(Failure::Invalid(errors)) => {
             let errors: Vec<String> = errors.iter().map(|error| format!("{error:#}")).collect();
             bail!("invalid rules: {}", errors.join("; "))

@@ -1,3 +1,4 @@
+use crate::host::is_command_tool;
 use crate::store::{NewEvent, StoredEvent};
 
 pub const KIND_PROMPT: &str = "prompt";
@@ -217,7 +218,7 @@ fn repeats_failure(event: &NewEvent, history: &[StoredEvent]) -> bool {
 }
 
 fn is_revert(event: &NewEvent, history: &[StoredEvent]) -> bool {
-    if event.tool.as_deref() != Some("Bash") {
+    if !event.tool.as_deref().is_some_and(is_command_tool) {
         return false;
     }
     let command = event.summary.as_str();
@@ -241,10 +242,19 @@ fn touches_edited_file(command: &str, history: &[StoredEvent]) -> bool {
         .map(|past| past.summary.as_str())
         .collect();
     command.split_whitespace().any(|token| {
+        let token = token.strip_prefix("./").unwrap_or(token);
         edited
             .iter()
-            .any(|path| token == *path || token.ends_with(&format!("/{path}")))
+            .any(|path| is_path_suffix(token, path) || is_path_suffix(path, token))
     })
+}
+
+/// True when `whole` is `part` or ends with `/part`.
+fn is_path_suffix(whole: &str, part: &str) -> bool {
+    whole == part
+        || whole
+            .strip_suffix(part)
+            .is_some_and(|rest| rest.ends_with('/'))
 }
 
 fn is_tool_event(event: &StoredEvent) -> bool {

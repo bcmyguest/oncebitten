@@ -271,3 +271,57 @@ fn empty_values_for_unused_keys_count_as_absent() {
     assert!(draft.when_changed.is_none());
     assert!(draft.fired_output_contains.is_none());
 }
+
+#[test]
+fn names_a_windows_host_cannot_write_are_rejected() {
+    for name in [
+        "a?.rs",
+        "x*.rs",
+        "nul.json",
+        "con.rs",
+        "CON.txt",
+        "com1.diff",
+        "lpt9",
+        "a.diff.",
+        "a.diff ",
+        "a<b.diff",
+        "a>b.diff",
+        "a|b.diff",
+        "a\"b.diff",
+        "a\u{1}b.diff",
+    ] {
+        let draft = with(
+            diff_draft(),
+            "corpus",
+            serde_json::json!([{"name": name, "content": "x"}]),
+        );
+        let text = answer(&draft.to_string());
+        assert!(verdict::parse_answer(&text).is_err(), "accepted {name:?}");
+    }
+    let ok = with(
+        diff_draft(),
+        "corpus",
+        serde_json::json!([{"name": "console.diff", "content": "x"}]),
+    );
+    assert!(verdict::parse_answer(&answer(&ok.to_string())).is_ok());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_write_failing_midway_leaves_no_rule_directory() {
+    let long = format!("{}.diff", "a".repeat(200));
+    let draft = with(
+        diff_draft(),
+        "corpus",
+        serde_json::json!([{"name": long, "content": "x"}]),
+    );
+    let answer = verdict::parse_answer(&answer(&draft.to_string())).unwrap();
+    let root = TempDir::new().unwrap();
+    let mut parent = root.path().to_path_buf();
+    while parent.as_os_str().len() < 4020 {
+        parent.push("d".repeat(200));
+        std::fs::create_dir(&parent).unwrap();
+    }
+    assert!(answer.draft.unwrap().write(&parent).is_err());
+    assert!(!parent.join("docs-with-src").exists());
+}

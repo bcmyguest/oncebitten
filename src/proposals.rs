@@ -10,6 +10,7 @@ use crate::rule::{self, Rule, Status};
 use crate::rules::{self, Failure};
 pub use crate::store::{Kind, ProposalRow, State};
 use crate::store::{Outcome, Store};
+use crate::triage::draft::Draft;
 use crate::triage::verdict::Answer;
 
 pub const LIST_HINT: &str = "oncebitten proposals list";
@@ -141,7 +142,7 @@ pub fn record(
         return Ok(Recorded::AlreadyQueued);
     }
     let repo = config::repo_root(&inputs.cwd).context("not inside a git repository")?;
-    let mut row = ProposalRow {
+    let row = ProposalRow {
         cluster: cluster.id.clone(),
         ts,
         repo: repo_key(&repo),
@@ -167,20 +168,35 @@ pub fn record(
         bail!("a rule named `{}` already exists", draft.id);
     }
     let dir = draft.write(&PROJECT_RULES.iter().fold(repo, |dir, part| dir.join(part)))?;
-    if let Err(error) = load_rules(inputs) {
+    let queued = queue_written(store, inputs, draft, &dir, row, prove);
+    if !matches!(queued, Ok(Recorded::Proposed { .. })) {
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    queued
+}
+
+/// Proves and queues the rule directory `dir`. The caller removes `dir`
+/// unless this returns `Proposed`.
+fn queue_written(
+    store: &Store,
+    inputs: &Inputs,
+    draft: &Draft,
+    dir: &Path,
+    mut row: ProposalRow,
+    prove: &dyn Fn(&Rule) -> Replayed,
+) -> Result<Recorded> {
+    if let Err(error) = load_rules(inputs) {
         return Err(error.context(format!("proposal `{}` breaks the rule set", draft.id)));
     }
-    let rule = rule::load_rule(&dir)?;
+    let rule = rule::load_rule(dir)?;
     let (proven, note) = proven(&rule, &prove(&rule));
     row.kind = Kind::Proposal;
     row.rule = Some(draft.id.clone());
-    row.dir = Some(dir.clone());
+    row.dir = Some(dir.to_path_buf());
     row.proven = proven;
     row.note = note;
     row.rationale = Some(draft.rationale.trim().to_owned());
     if !store.insert_proposal(&row)? {
-        let _ = std::fs::remove_dir_all(&dir);
         return Ok(Recorded::AlreadyQueued);
     }
     Ok(Recorded::Proposed { proven })

@@ -255,3 +255,23 @@ fn derive_with_uses_a_custom_lexicon_only() {
     let signals = derive_with(&prompt("use spaces", 1), &[], &lexicon);
     assert_eq!(kinds(&signals), vec![USER_CORRECTION]);
 }
+
+#[test]
+fn checkout_of_a_relative_path_after_an_absolute_edit_is_a_revert() {
+    let history = past(vec![tool(KIND_TOOL_OK, "Edit", "/r/src/a.rs", 1)]);
+    let signals = derive(&bash("git checkout -- src/a.rs", true, 2), &history);
+    assert_eq!(kinds(&signals), vec![REVERT]);
+    let signals = derive(&bash("git restore ./src/a.rs", true, 3), &history);
+    assert_eq!(kinds(&signals), vec![REVERT]);
+    assert!(derive(&bash("git checkout -- rc/a.rs", true, 4), &history).is_empty());
+}
+
+#[test]
+fn every_host_shell_tool_can_revert() {
+    for name in ["Bash", "bash", "Shell", "shell"] {
+        let event = tool(KIND_TOOL_OK, name, "git revert HEAD", 2);
+        assert_eq!(kinds(&derive(&event, &[])), vec![REVERT], "{name}");
+    }
+    let event = tool(KIND_TOOL_OK, "Read", "git revert HEAD", 2);
+    assert!(derive(&event, &[]).is_empty());
+}

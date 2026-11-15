@@ -23,7 +23,7 @@ Every `warn` and `fail` line ends with a fix. Exit 0 when no check fails, 1 when
 | `pre-push hook` | `.pre-commit-config.yaml` lists `oncebitten-gate`, `oncebitten-gate-system` or `oncebitten-gate-python` | | no file, or none of the hook ids |
 | `rules.lock` | every configured source has a lock entry with the same URL, and the lock names no other source | the file is missing | a source lacks an entry, an entry names an unknown source, or a URL differs |
 | `rules` | every rule loads and resolves | | a rule error or a source that is not cloned |
-| `proof <id>` | the proof of an active ast-grep or diff rule is valid | the proof of a `steer` rule is missing, stale or not proven | the proof of a `block` rule is missing, stale or not proven |
+| `proof <id>` | the proof of an active ast-grep, diff or steer rule is valid, by the same test as `gate pr` (including the local matcher replay and checker hash) | the proof of a non-`block` ast-grep or diff rule is missing, stale or not proven | the proof of a `block` or `steer` rule is missing, stale or not proven; `gate pr` exits 2 on the same rules |
 | `exceptions` | the file loads and no exception has expired | one line per expired exception | the file does not load |
 | `capture <host>` | the capture hook is in the user or project file, or the host is not installed | the host is installed without the hook | |
 | `evidence store` | the store opens, is absent (the first capture creates it), or has an older schema the next capture upgrades | | the file is not a readable store, or a newer oncebitten wrote it |

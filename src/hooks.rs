@@ -135,7 +135,7 @@ pub fn default_shell(platform: Platform) -> Shell {
     }
 }
 
-/// Bare command resolved through `PATH`. The CLI never writes it.
+/// Bare command resolved through `PATH`. `hooks install` writes it for project scope.
 pub fn path_command(host: Host) -> String {
     format!("{BIN_NAME} {}", capture_args(host))
 }
@@ -556,6 +556,11 @@ pub fn steer_command(exe: &Path, host: Host, shell: Shell) -> String {
 
 fn steer_args(host: Host) -> String {
     format!("steer --host {}", host.name())
+}
+
+/// Installs the steer hook as a bare command resolved through `PATH`.
+pub fn install_steer(host: Host, path: &Path) -> Result<bool> {
+    install_steer_with(host, path, &format!("{BIN_NAME} {}", steer_args(host)))
 }
 
 /// Installs the steer hook with the absolute path of the running executable.

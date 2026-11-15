@@ -34,7 +34,7 @@ The draft is the optional `draft` key of the triage answer, `null` when no rule 
 | `bad`, `fixed` | `{name, content}`; named `bad.<ext>` and `fixed.<ext>` (diff: `.diff`), at most 64 KiB each |
 | `corpus` | up to 10 `{name, content}` files the check must pass; replay needs at least one |
 
-Validation is as strict as for a hand-written rule: the written `rule.toml` must load, `check.yml` must compile, globs must parse, and file names must be plain names. Keys for another engine are rejected.
+Validation is as strict as for a hand-written rule: the written `rule.toml` must load, `check.yml` must compile, globs must parse, and file names must be plain names that Windows can also write (no `<>:"|?*` or control characters, no trailing dot or space, no reserved device names such as `nul`, `con` or `com1`). A write that fails midway removes the rule directory. Keys for another engine are rejected.
 
 ## Commands
 

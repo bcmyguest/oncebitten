@@ -11,7 +11,7 @@ oncebitten ships these rules inside its binary. None runs until you turn it on.
 | `rust-no-unwrap` | native | `cargo clippy` reports `clippy::unwrap_used` |
 | `arch-diagram` | diff | `src/lib.rs` or a `src/**/mod.rs` changes and no `docs/architecture/*.svg` or `*.png` does |
 | `ui-screenshot` | diff | `src/ui/**` changes and no `docs/screenshots/*.png` does |
-| `no-sudo` | steer | the agent runs a shell command starting with `sudo`; the hook denies it ([docs/steer.md](../docs/steer.md)) |
+| `no-sudo` | steer | the agent runs `sudo` as any command in a shell line (after `&&`, `;`, `|`, `env`, or by path); the hook denies it ([docs/steer.md](../docs/steer.md)) |
 
 ## Turn one on
 

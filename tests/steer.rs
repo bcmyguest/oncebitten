@@ -317,3 +317,39 @@ fn shipped_no_sudo_example_is_proposed_and_proves() {
     assert_eq!(steer_of(&rule).action, Action::Deny);
     assert_eq!(steer::replay(&dir, steer_of(&rule)), Verdict::Proven);
 }
+
+#[test]
+fn shipped_no_sudo_example_matches_sudo_as_any_compound_command() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/no-sudo");
+    let rule = load_rule(&dir).unwrap();
+    let matcher = Matcher::new(steer_of(&rule)).unwrap();
+    let run = |command: &str| {
+        matcher.matches(&SteerEvent::Tool {
+            tool: "Bash".to_owned(),
+            command: Some(command.to_owned()),
+            paths: Vec::new(),
+        })
+    };
+    for command in [
+        "cd /tmp && sudo rm -rf /x",
+        "ls; sudo id",
+        "env sudo id",
+        "/usr/bin/sudo id",
+        "true || sudo id",
+        "cat f | sudo tee g",
+        "ls\nsudo id",
+        "env -i FOO=1 sudo id",
+        "(sudo id)",
+    ] {
+        assert!(run(command), "{command}");
+    }
+    for command in [
+        "echo pseudo",
+        "grep sudo file",
+        "ls /usr/bin/sudo",
+        "echo sudo",
+        "apt install sudo-rs",
+    ] {
+        assert!(!run(command), "{command}");
+    }
+}

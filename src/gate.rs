@@ -17,7 +17,8 @@ use crate::exceptions::{self, Exception};
 use crate::forge::{self, Forge};
 use crate::proof::{self, Validity};
 use crate::registry::Resolved;
-use crate::rule::{Check, Mode, Status};
+use crate::replay::Verdict;
+use crate::rule::{Check, Mode, Rule, Status};
 use crate::rules::{self, Failure};
 use crate::sources;
 
@@ -94,7 +95,7 @@ pub fn run_with_forge(
     let proofs = proved(&rules)
         .into_iter()
         .filter(|resolved| needs_proof(&resolved.rule.check))
-        .filter_map(|resolved| match proof::validity(&resolved.rule) {
+        .filter_map(|resolved| match proof_validity(&resolved.rule) {
             Validity::Valid => None,
             other => Some((resolved.id.clone(), other)),
         })
@@ -260,6 +261,26 @@ pub fn proved(rules: &[Resolved]) -> Vec<&Resolved> {
                     || matches!(resolved.rule.check, Check::Steer(_)))
         })
         .collect()
+}
+
+/// Whether the rule's proof stands for this binary. A steer rule also replays
+/// its fixtures with the local matcher, whatever `proof.json` says.
+pub fn proof_validity(rule: &Rule) -> Validity {
+    let validity = proof::validity_with(rule, proof::local_checker(rule).as_deref());
+    match (&rule.check, validity) {
+        (Check::Steer(steer), Validity::Valid) => {
+            match crate::steer::replay(proof::rule_dir(rule), steer) {
+                Verdict::Proven => Validity::Valid,
+                Verdict::Rejected(reason) => {
+                    Validity::NotProven(format!("matcher replay: {reason}"))
+                }
+                Verdict::CouldNotRun(reason) => {
+                    Validity::NotProven(format!("matcher replay could not run: {reason}"))
+                }
+            }
+        }
+        (_, validity) => validity,
+    }
 }
 
 /// Native-linter rules are exempt from replay proofs until replay can run their
