@@ -1,6 +1,17 @@
 {
   "description": "oncebitten capture on the GitHub Copilot CLI.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" --version > /dev/null",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

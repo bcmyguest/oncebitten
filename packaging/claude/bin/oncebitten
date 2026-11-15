@@ -1,10 +1,10 @@
 #!/bin/sh
-# Claude Code plugin launcher. Runs the release binary that matches this
+# Agent plugin launcher. Runs the release binary that matches this
 # plugin's version, installing it into the plugin data dir on first use.
 set -u
 
 version=0.1.0
-data="${CLAUDE_PLUGIN_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/oncebitten}"
+data="${CLAUDE_PLUGIN_DATA:-${PLUGIN_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/oncebitten}}"
 dir="$data/bin/$version"
 here="$(cd "$(dirname "$0")" && pwd)"
 case "$(uname -s)" in

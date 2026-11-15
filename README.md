@@ -8,14 +8,18 @@ The pre-push gate requires the [pre-commit](https://pre-commit.com) framework (3
 
 ## Install
 
-Claude Code plugin (capture hooks, plus `oncebitten` on the agent's `PATH`):
+Agent plugin (capture hooks; nothing to build):
 
-```
-/plugin marketplace add bcmyguest/oncebitten
-/plugin install oncebitten@oncebitten
-```
+| Host | Install |
+| --- | --- |
+| Claude Code | `/plugin marketplace add bcmyguest/oncebitten` then `/plugin install oncebitten@oncebitten` |
+| Codex | `codex plugin marketplace add bcmyguest/oncebitten`, then install `oncebitten` from `/plugins` |
+| Copilot CLI | `copilot plugin marketplace add bcmyguest/oncebitten` then `copilot plugin install oncebitten@oncebitten` |
+| Cursor | Import `https://github.com/bcmyguest/oncebitten` as a team marketplace (Dashboard, Settings, Plugins) |
+| pi | `pi install git:github.com/bcmyguest/oncebitten` |
+| opencode | Command line install below, then `oncebitten hooks install --host opencode --scope user` |
 
-The plugin downloads the release binary for its version on the first session start. Nothing to build.
+Each plugin downloads the release binary for its version on first use and checks its SHA-256.
 
 Command line, for the gate and `evidence`:
 

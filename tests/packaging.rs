@@ -71,15 +71,79 @@ fn json(path: &str) -> Value {
     serde_json::from_str(&fs::read_to_string(root().join(path)).unwrap()).unwrap()
 }
 
+const MARKETPLACES: [(&str, &str, &str); 4] = [
+    (
+        ".claude-plugin/marketplace.json",
+        "./packaging/claude",
+        ".claude-plugin/plugin.json",
+    ),
+    (
+        ".agents/plugins/marketplace.json",
+        "./packaging/codex",
+        ".codex-plugin/plugin.json",
+    ),
+    (
+        ".cursor-plugin/marketplace.json",
+        "./packaging/cursor",
+        ".cursor-plugin/plugin.json",
+    ),
+    (
+        ".github/plugin/marketplace.json",
+        "./packaging/copilot",
+        ".github/plugin/plugin.json",
+    ),
+];
+
 #[test]
-fn marketplace_lists_the_claude_plugin_under_its_manifest_name() {
-    let marketplace = json(".claude-plugin/marketplace.json");
-    assert!(marketplace["owner"]["name"].is_string());
-    let entry = &marketplace["plugins"][0];
-    let source = entry["source"].as_str().unwrap();
-    assert!(source.starts_with("./") && !source.contains(".."));
-    let manifest = json(&format!("{source}/.claude-plugin/plugin.json"));
-    assert_eq!(entry["name"], manifest["name"]);
+fn each_marketplace_lists_its_host_plugin_under_the_manifest_name() {
+    for (file, source, manifest) in MARKETPLACES {
+        let marketplace = json(file);
+        assert!(marketplace["owner"]["name"].is_string(), "{file}");
+        let entry = &marketplace["plugins"][0];
+        assert_eq!(entry["source"], source, "{file}");
+        assert_eq!(
+            entry["name"],
+            json(&format!("{source}/{manifest}"))["name"],
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn every_plugin_ships_the_same_launcher_and_installer() {
+    let launcher = fs::read(root().join("packaging/claude/bin/oncebitten")).unwrap();
+    let installer = fs::read(root().join("install.sh")).unwrap();
+    for (_, source, _) in MARKETPLACES {
+        let dir = root().join(source);
+        assert_eq!(
+            fs::read(dir.join("bin/oncebitten")).unwrap(),
+            launcher,
+            "{source}"
+        );
+        assert_eq!(
+            fs::read(dir.join("scripts/install.sh")).unwrap(),
+            installer,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn pi_package_runs_the_installed_extension_code_through_the_launcher() {
+    let manifest = json("package.json");
+    assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(manifest["pi"]["extensions"][0], "./packaging/pi/package.js");
+    let body = |path: &str| {
+        let text = fs::read_to_string(root().join(path)).unwrap();
+        let start = text.find("\nconst TIMEOUT_MS").unwrap();
+        text[start..].to_string()
+    };
+    assert_eq!(
+        body("packaging/pi/package.js"),
+        body("packaging/pi/oncebitten.js")
+    );
+    let package = fs::read_to_string(root().join("packaging/pi/package.js")).unwrap();
+    assert!(package.contains("\"../claude/bin/oncebitten\""));
 }
 
 #[test]
@@ -95,14 +159,6 @@ fn plugin_versions_and_the_launcher_match_the_crate() {
     }
     let launcher = fs::read_to_string(root().join("packaging/claude/bin/oncebitten")).unwrap();
     assert!(launcher.contains(&format!("\nversion={version}\n")));
-}
-
-#[test]
-fn the_plugin_installer_is_a_copy_of_install_sh() {
-    assert_eq!(
-        fs::read(root().join("install.sh")).unwrap(),
-        fs::read(root().join("packaging/claude/scripts/install.sh")).unwrap()
-    );
 }
 
 #[cfg(unix)]

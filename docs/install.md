@@ -8,19 +8,25 @@ No route needs a Rust toolchain. Every release on GitHub carries `oncebitten-<ta
 | `x86_64-apple-darwin`, `aarch64-apple-darwin` | macOS |
 | `x86_64-pc-windows-msvc` | Windows |
 
-## Claude Code plugin
+## Agent plugins
 
-```
-/plugin marketplace add bcmyguest/oncebitten
-/plugin install oncebitten@oncebitten
-```
+The repository is a plugin marketplace for four hosts and a pi package:
 
-Or from a shell: `claude plugin marketplace add bcmyguest/oncebitten` then `claude plugin install oncebitten@oncebitten`.
+| Host | Marketplace file | Plugin | Install |
+| --- | --- | --- | --- |
+| Claude Code | `.claude-plugin/marketplace.json` | `packaging/claude` | `/plugin marketplace add bcmyguest/oncebitten`, `/plugin install oncebitten@oncebitten` |
+| Codex | `.agents/plugins/marketplace.json` | `packaging/codex` | `codex plugin marketplace add bcmyguest/oncebitten`, then `/plugins` |
+| Copilot CLI | `.github/plugin/marketplace.json` | `packaging/copilot` | `copilot plugin marketplace add bcmyguest/oncebitten`, `copilot plugin install oncebitten@oncebitten` |
+| Cursor | `.cursor-plugin/marketplace.json` | `packaging/cursor` | Team marketplace import of the repository URL |
+| pi | `package.json` (`pi.extensions`) | `packaging/pi/package.js` | `pi install git:github.com/bcmyguest/oncebitten` |
 
-- The plugin's hooks capture prompts and tool outcomes (see [capture.md](capture.md)). `bin/oncebitten` is on the agent's Bash `PATH`, so the agent can run `oncebitten evidence list` and the other commands.
-- On the first session start the launcher downloads the release that matches the plugin's version into `${CLAUDE_PLUGIN_DATA}/bin/<version>/` and checks its SHA-256. A plugin update fetches its own version; uninstalling the plugin deletes the data dir.
-- On Windows the launcher needs Git Bash.
-- Do not also run `oncebitten hooks install --host claude`: each event would then be captured twice, and the store drops a duplicate only when both captures land in the same millisecond. The plugin and the command line share one events database.
+- Each plugin ships the same `bin/oncebitten` launcher and `scripts/install.sh`. The launcher runs the release binary that matches its version from `<data>/bin/<version>/`, where `<data>` is `$CLAUDE_PLUGIN_DATA`, else `$PLUGIN_DATA` (Codex), else `$XDG_DATA_HOME/oncebitten` or `~/.local/share/oncebitten`. A missing binary is installed with SHA-256 verification.
+- A `SessionStart` hook (cursor `sessionStart`) runs the launcher once with `--version`, so the download happens before any capture. pi has no such hook: its first event starts the download in the background and is dropped.
+- In Claude Code the plugin's `bin/` is on the agent's Bash `PATH`, so the agent can run `oncebitten evidence list` and the other commands.
+- The launcher is a POSIX `sh` script. On Windows it needs Git Bash (or another `sh` on `PATH`); otherwise use `install.ps1` and `oncebitten hooks install`.
+- opencode loads plugins from npm or local files only, and oncebitten is not on npm: install the binary and run `oncebitten hooks install --host opencode --scope user`.
+- Verified here: `claude plugin validate` on the marketplace and plugin; the launcher and the pi package against a local release with the real Linux binary. The Codex, Copilot and Cursor marketplace formats come from their CLIs and docs, not from a live install.
+- Do not also run `oncebitten hooks install` for a host whose plugin is installed: each event would then be captured twice, and the store drops a duplicate only when both captures land in the same millisecond. Plugins and the command line share one events database.
 
 ## Command line
 
@@ -56,5 +62,5 @@ The build compiles tree-sitter grammars and SQLite, so it needs a C compiler.
 
 ## Releasing
 
-1. Set the same version in `Cargo.toml`, every `packaging/*` plugin manifest, `version=` in `packaging/claude/bin/oncebitten` and the pins in `templates/`. `tests/packaging.rs` and `tests/gate.rs` fail if they differ.
+1. Set the same version in `Cargo.toml`, `package.json`, every `packaging/*` plugin manifest, `version=` in `packaging/claude/bin/oncebitten` and the pins in `templates/`. `tests/packaging.rs` and `tests/gate.rs` fail if they differ.
 2. Merge, then push a tag `v<version>`. `.github/workflows/release.yml` builds all five targets and publishes the release; it fails if the tag does not match `Cargo.toml`.

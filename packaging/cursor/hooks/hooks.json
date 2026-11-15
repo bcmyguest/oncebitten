@@ -1,6 +1,11 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "command": "\"${CURSOR_PLUGIN_ROOT}/bin/oncebitten\" --version > /dev/null"
+      }
+    ],
     "beforeSubmitPrompt": [
       {
         "command": "\"${CURSOR_PLUGIN_ROOT}/bin/oncebitten\" capture --host cursor"
