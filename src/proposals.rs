@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::{self, Inputs, SessionTrigger, Triggers};
+use crate::duplicates::{first_match, Candidate, Mark};
 use crate::evidence::{self, Cluster};
 use crate::hits;
 use crate::proof::{self, Replayed, Validity};
@@ -229,8 +230,17 @@ pub fn record(
         pr_url: None,
         hits: None,
     };
+    let class = answer.verdict.mistake_class.as_deref();
+    let text = answer
+        .draft
+        .as_ref()
+        .map_or(answer.verdict.root_cause.as_str(), |draft| {
+            draft.rationale.as_str()
+        });
+    let mark = possible_duplicate(store, &cluster.id, class, Some(text))?.map(|m| m.to_string());
     let Some(draft) = &answer.draft else {
         store.insert_proposal(&row)?;
+        store.set_proposal_marks(&cluster.id, class, mark.as_deref())?;
         return Ok(Recorded::Finding);
     };
     let existing = load_rules(inputs).context("the current rules do not load")?;
@@ -241,8 +251,31 @@ pub fn record(
     let queued = queue_written(store, inputs, draft, &dir, row, prove);
     if !matches!(queued, Ok(Recorded::Proposed { .. })) {
         let _ = std::fs::remove_dir_all(&dir);
+    } else {
+        store.set_proposal_marks(&cluster.id, class, mark.as_deref())?;
     }
     queued
+}
+
+/// The first queued or rejected proposal that `class` or `text` matches, other
+/// than `id` itself. Matching is advisory: the user decides what to merge.
+pub fn possible_duplicate(
+    store: &Store,
+    id: &str,
+    class: Option<&str>,
+    text: Option<&str>,
+) -> Result<Option<Mark>> {
+    let rows = store.mark_candidates()?;
+    let others: Vec<Candidate> = rows
+        .iter()
+        .filter(|row| row.cluster != id)
+        .map(|row| Candidate {
+            id: &row.cluster,
+            class: row.mistake_class.as_deref(),
+            text: row.rationale.as_deref(),
+        })
+        .collect();
+    Ok(first_match(&Candidate { id, class, text }, &others))
 }
 
 /// Proves and queues the rule directory `dir`. The caller removes `dir`

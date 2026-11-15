@@ -1,4 +1,4 @@
-use oncebitten::proposals::{Kind, State};
+use oncebitten::proposals::{self, Kind, State};
 use oncebitten::store::{ProposalRow, Store};
 
 fn row(cluster: &str) -> ProposalRow {
@@ -76,4 +76,42 @@ fn candidates_carry_class_and_rationale() {
         candidates[0].rationale.as_deref(),
         Some("never use unwrap in library code")
     );
+}
+
+#[test]
+fn a_reworded_proposal_matches_the_queued_one() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c0")).unwrap();
+    let mark = proposals::possible_duplicate(
+        &store,
+        "c1",
+        None,
+        Some("stop using unwrap in library code"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(mark.of, "c0");
+    assert!(mark.reason.starts_with("similar text"), "{}", mark.reason);
+}
+
+#[test]
+fn equal_mistake_class_matches_regardless_of_text() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c0")).unwrap();
+    store
+        .set_proposal_marks("c0", Some("unwrap-in-lib"), None)
+        .unwrap();
+    let mark = proposals::possible_duplicate(&store, "c1", Some("unwrap-in-lib"), Some("zzz"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(mark.reason, "same mistake_class");
+}
+
+#[test]
+fn an_unrelated_proposal_is_not_marked() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c0")).unwrap();
+    let mark = proposals::possible_duplicate(&store, "c1", None, Some("always pin the toolchain"))
+        .unwrap();
+    assert!(mark.is_none());
 }
