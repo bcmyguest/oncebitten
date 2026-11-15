@@ -11,7 +11,7 @@ Each signal maps to a class and a key. Signals with the same key form one cluste
 | `failure` | `tool-failure`, `repeat-failure` | tool + normalized command | mined |
 | `test-fail-then-pass` | `test-fail-then-pass` | tool + normalized command | mined |
 | `revert` | `revert` | tool + normalized command | mined |
-| `user-correction` | `user-correction` | prompt digest | stated |
+| `user-correction` | `user-correction` | prompt text | stated |
 
 - Normalization is the one `repeat-failure` uses: whitespace collapsed, digits, paths and hex replaced with `<n>`, `<path>` and `<hex>`.
 - A cluster id is the first 12 hex digits of the SHA-256 of its key, so the same mistake has the same id on every machine.

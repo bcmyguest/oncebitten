@@ -226,7 +226,7 @@ impl Store {
         capture: &Capture,
     ) -> Result<Option<i64>> {
         let event = NewEvent {
-            summary: stored_summary(event),
+            summary: stored_summary(event, signals),
             ..event.clone()
         };
         let tx = self.conn.unchecked_transaction()?;
@@ -577,10 +577,13 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
 }
 
-/// Prompts keep a SHA-256 digest, never their text. Tool summaries keep their
+/// A prompt with a `user-correction` signal keeps its text, cut to
+/// `SUMMARY_LIMIT`, because triage drafts the rule from what the user said.
+/// Any other prompt keeps only a SHA-256 digest. Tool summaries keep their
 /// command or path, cut to `SUMMARY_LIMIT`.
-fn stored_summary(event: &NewEvent) -> String {
-    if event.kind == KIND_PROMPT {
+fn stored_summary(event: &NewEvent, signals: &[Signal]) -> String {
+    let correction = signals.iter().any(|s| s.kind == USER_CORRECTION);
+    if event.kind == KIND_PROMPT && !correction {
         prompt_digest(&event.summary)
     } else {
         truncate_chars(&event.summary, SUMMARY_LIMIT)

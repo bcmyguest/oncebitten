@@ -166,7 +166,7 @@ fn run_with_uses_the_given_lexicon() {
 }
 
 #[test]
-fn stored_prompt_is_a_digest_and_the_signal_names_only_the_phrase() {
+fn stored_correction_keeps_its_text_and_the_signal_names_only_the_phrase() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("events.db");
     run(
@@ -183,8 +183,7 @@ fn stored_prompt_is_a_digest_and_the_signal_names_only_the_phrase() {
     let detail: String = conn
         .query_row("SELECT detail FROM signals", [], |r| r.get(0))
         .unwrap();
-    assert!(summary.starts_with("sha256:"));
-    assert!(!summary.contains("private"));
+    assert_eq!(summary, "No, my private note");
     assert_eq!(detail, "no,");
 }
 
