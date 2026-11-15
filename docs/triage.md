@@ -64,3 +64,14 @@ No verdict is ever printed with exit 2.
 ## Background mode
 
 `capture` starts `oncebitten triage <id> --queue` (a hidden flag) when a cluster reaches its threshold. It takes the cluster's triage lock, queues the answer, prints nothing and exits 2 on any failure. See [proposals.md](proposals.md#background-triage).
+
+## Daily budget
+
+Each triage run is two host calls for claude and codex, so `triage.max_per_day` (default `10`) caps background cost. The `triage_runs` table in the events store records every run: `ts` (unix ms), `cluster`, `host` and `outcome`.
+
+| outcome | written by | counts toward the cap |
+| --- | --- | --- |
+| `started` | `capture` when it spawns `triage --queue`; manual `triage <id>` | yes |
+| `skipped: budget` | `capture` when the day's runs reach the cap; spawns nothing | no |
+
+The day is the local calendar day. `capture` counts `started` rows since local midnight, then spawns or skips each due cluster. The `--queue` child writes no row, so one background run counts once. Manual `triage <id>` runs past the cap and prints `warning: triage budget spent: N of M runs today` to stderr; it still counts as a run.
