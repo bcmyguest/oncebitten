@@ -12,6 +12,11 @@
 - Language: Rust single binary. ast-grep-core (crates.io 0.51.2, tree-sitter based) embedded for global cross-language rules; native linter (ruff/clippy/eslint) when the project already has one that fits and the rule is project-specific. OpenShell: openshell-sdk crate exists in NVIDIA/OpenShell but is not on crates.io -> shell out to `openshell` CLI first.
 - Registry layers, precedence project > rules repos (ordered) > shipped examples. Project = .oncebitten/rules/. Rules repos = user/team-owned git repos listed in config `[rules] sources = [...]`, cloned locally, synced across machines/teammates; one marked writable receives approved rules. Tool ships EXAMPLE rules only (inactive) plus an llms.txt so an LLM can help a user adopt/adapt them into their rules repo.
 - Config/docs modeled on smarter-compact.
+- Rule layout: one directory per rule: `rule.toml`, check file (`check.yml` for ast-grep), `fixtures/bad.*`, `fixtures/fixed.*`.
+- Rule ids: each `[[rules.sources]]` entry has a required `name`; ids are `<source-name>/<rule-id>`; project rules are bare ids.
+- Overrides: a project rule replaces a source rule only with `overrides = "<source>/<id>"` and a `reason`; an unmarked id clash is an error.
+- Reproducibility: committed `.oncebitten/rules.lock` pins each source to a commit; `rules sync` updates it; CI reads the lock and never fetches newer.
+- Status: `status = "proposed" | "active" | "retired"` in `rule.toml`; approval flips it in the PR; CI verifies the replay proof for every active rule.
 
 ## Gate guarantee
 Pre-push is fast feedback only (bypassable with --no-verify). The guarantee is a required CI check (branch protection) before human review. Proposed rules stay inactive until merged; approval covers one exact rule version at one scope. Without a sandbox a proposal ships marked unproven and inactive. Gate exit codes separate "rule fired" from "check could not run". Lessons git cannot observe (e.g. running sudo) become steer rules or agent PreToolUse hooks.
