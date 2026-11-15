@@ -16,10 +16,17 @@ Run all four before a commit. CI runs the same commands.
 ## Layout
 
 - `src/config.rs`: layered configuration loader, validation, origin rendering.
-- `src/main.rs`: CLI (`config show`, `config path`).
+- `src/rule.rs`: rule directory schema and loader (`rule.toml`, check file, fixtures).
+- `src/registry.rs`: resolves project, source and example rules into qualified ids; precedence and overrides.
+- `src/sources.rs`: source clone location and `git` invocations.
+- `src/lockfile.rs`: `.oncebitten/rules.lock` read and write.
+- `src/rules.rs`: `rules sync`, `rules list` and `rules validate` logic, including `--ci` checks.
+- `src/main.rs`: CLI (`config show`, `config path`, `rules sync|list|validate`).
 - `src/lib.rs`: library root.
 - `tests/config.rs`: loader tests (precedence, merge, validation). `tests/cli.rs`: binary tests.
+- `tests/rule.rs`, `tests/registry.rs`: rule schema and resolution tests. `tests/sources.rs`: clone, sync and lockfile tests, using local git repos. `tests/rules_cli.rs`: `rules` subcommand tests.
 - `docs/configuration.md`: settings reference. Keep it in step with `src/config.rs`.
+- `docs/rules.md`: rule format, ids, overrides, lockfile and commands. Keep it in step with `src/rule.rs`, `src/registry.rs` and `src/rules.rs`.
 - `docs/research/`: written by other agents. Do not edit.
 
 ## Conventions

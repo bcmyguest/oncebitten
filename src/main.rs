@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use oncebitten::config::{self, Inputs};
+use oncebitten::rules::{self, Failure};
 
 #[derive(Parser)]
 #[command(
@@ -20,6 +21,29 @@ enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Sync, list and validate rules
+    Rules {
+        #[command(subcommand)]
+        action: RulesAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum RulesAction {
+    /// Clone or fetch each source and write .oncebitten/rules.lock
+    Sync,
+    /// Print each resolved rule as id, mode, status and origin
+    List {
+        /// Check sources against rules.lock without fetching; exit 2 if they differ
+        #[arg(long)]
+        ci: bool,
+    },
+    /// Load and resolve every rule; exit 1 on rule errors, 2 if the check cannot run
+    Validate {
+        /// Check sources against rules.lock without fetching; exit 2 if they differ
+        #[arg(long)]
+        ci: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -38,6 +62,49 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Config { action } => run_config(action),
+        Command::Rules { action } => run_rules(action),
+    }
+}
+
+fn run_rules(action: RulesAction) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    match action {
+        RulesAction::Sync => rules::sync(&inputs)?,
+        RulesAction::List { ci } => match rules::load(&inputs, ci) {
+            Ok(resolved) => {
+                for entry in &resolved {
+                    println!(
+                        "{}  {}  {}  {}",
+                        entry.id,
+                        entry.rule.mode.as_str(),
+                        entry.rule.status.as_str(),
+                        entry.layer.label()
+                    );
+                }
+            }
+            Err(failure) => exit_with(failure),
+        },
+        RulesAction::Validate { ci } => {
+            if let Err(failure) = rules::load(&inputs, ci) {
+                exit_with(failure);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn exit_with(failure: Failure) -> ! {
+    match failure {
+        Failure::Invalid(errors) => {
+            for error in errors {
+                eprintln!("error: {error:#}");
+            }
+            std::process::exit(1)
+        }
+        Failure::CouldNotRun(error) => {
+            eprintln!("error: {error:#}");
+            std::process::exit(2)
+        }
     }
 }
 

@@ -310,7 +310,7 @@ impl Platform {
         }
     }
 
-    fn is_absolute(self, path: &str) -> bool {
+    pub(crate) fn is_absolute(self, path: &str) -> bool {
         match self {
             Platform::Unix => path.starts_with('/'),
             Platform::Windows => {
@@ -353,6 +353,12 @@ pub fn user_config_path_for(
         },
     };
     Ok(base.join("oncebitten").join(CONFIG_FILE))
+}
+
+pub fn repo_root(cwd: &Path) -> Option<PathBuf> {
+    cwd.ancestors()
+        .find(|dir| dir.join(GIT_MARKER).exists())
+        .map(Path::to_path_buf)
 }
 
 pub fn project_config_path(cwd: &Path) -> Option<PathBuf> {
