@@ -363,45 +363,51 @@ impl Forge for GitLab {
 /// source `azext_devops/dev/repos/pull_request.py`. `az repos pr` has no comment
 /// listing, so `read` returns the description only.
 ///
-/// KNOWN DEFECT, not yet fixed: the code reads `_links.web.href`, but the Azure
-/// DevOps REST GitPullRequest `_links` holds self, repository, workItems,
-/// sourceBranch, targetBranch, sourceCommit, targetCommit, createdBy and
-/// iterations, with no `web`
-/// (https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.1).
-/// `pr list` also omits `_links` unless `--include-links` is set. The extension
-/// itself builds the URL as `<org>/<project>/_git/<repo>/pullrequest/<id>`
-/// (`_open_pull_request`). Its v5_0 SDK model drops `repository.webUrl`, but keeps
-/// `repository.remoteUrl`, the repository web URL with an optional `user@`.
-/// `tests/forge.rs::azure_find_open_uses_source_branch_and_active_status` asserts
-/// the `_links.web.href` shape, so the fix awaits a decision on that test.
+/// The PR URL comes from `repository.remoteUrl` with any `user@` userinfo
+/// dropped, plus `/pullrequest/<id>`, as the extension's `_open_pull_request`
+/// builds it. `_links` carries no `web` link
+/// (https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.1),
+/// and `pr list` omits `_links` unless `--include-links` is set.
 struct Azure(Cli);
 
 #[derive(Deserialize)]
 struct AzPr {
     #[serde(rename = "pullRequestId")]
     pull_request_id: u64,
-    #[serde(rename = "_links")]
-    links: AzLinks,
+    repository: AzRepository,
     description: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct AzLinks {
-    web: AzHref,
-}
-
-#[derive(Deserialize)]
-struct AzHref {
-    href: String,
+struct AzRepository {
+    #[serde(rename = "remoteUrl")]
+    remote_url: String,
 }
 
 impl AzPr {
     fn pr(&self) -> Pr {
+        let repo = without_userinfo(&self.repository.remote_url);
         Pr {
             number: self.pull_request_id,
-            url: self.links.web.href.clone(),
+            url: format!(
+                "{}/pullrequest/{}",
+                repo.trim_end_matches('/'),
+                self.pull_request_id
+            ),
         }
     }
+}
+
+/// `https://user@host/path` to `https://host/path`.
+fn without_userinfo(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_owned();
+    };
+    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    format!("{scheme}://{host}{path}")
 }
 
 impl Forge for Azure {

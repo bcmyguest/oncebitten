@@ -201,7 +201,7 @@ fn azure_find_open_uses_source_branch_and_active_status() {
     let program = fake_cli(dir.path(), "az");
     fs::write(
         dir.path().join("reply"),
-        r#"[{"pullRequestId":9,"_links":{"web":{"href":"https://dev.azure.com/o/p/_git/r/pullrequest/9"}}}]"#,
+        r#"[{"pullRequestId":9,"repository":{"remoteUrl":"https://dev.azure.com/o/p/_git/r"}}]"#,
     )
     .unwrap();
     let backend = forge::backend_with(Kind::Azure, program, dir.path());
@@ -224,6 +224,22 @@ fn azure_find_open_uses_source_branch_and_active_status() {
             "json"
         ])
     );
+}
+
+#[test]
+fn azure_pr_url_drops_userinfo_from_remote_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = fake_cli(dir.path(), "az");
+    fs::write(
+        dir.path().join("reply"),
+        r#"[{"pullRequestId":9,"repository":{"remoteUrl":"https://o@dev.azure.com/o/p/_git/r"}}]"#,
+    )
+    .unwrap();
+    let backend = forge::backend_with(Kind::Azure, program, dir.path());
+
+    let found = backend.find_open("feat/x").unwrap().expect("a PR");
+
+    assert_eq!(found.url, "https://dev.azure.com/o/p/_git/r/pullrequest/9");
 }
 
 #[test]
