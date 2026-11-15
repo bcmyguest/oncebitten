@@ -1,0 +1,31 @@
+{
+  "name": "oncebitten",
+  "version": "0.1.0",
+  "description": "Turns repeated agent mistakes into git-enforced rules",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bcmyguest/oncebitten.git",
+    "directory": "packaging/npm/oncebitten"
+  },
+  "homepage": "https://bcmyguest.github.io/oncebitten/",
+  "bin": {
+    "oncebitten": "bin/oncebitten.js",
+    "oncebitten-checker": "bin/oncebitten-checker.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "oncebitten-linux-x64": "0.1.0",
+    "oncebitten-linux-arm64": "0.1.0",
+    "oncebitten-darwin-x64": "0.1.0",
+    "oncebitten-darwin-arm64": "0.1.0",
+    "oncebitten-win32-x64": "0.1.0"
+  }
+}
