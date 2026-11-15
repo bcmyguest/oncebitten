@@ -27,7 +27,7 @@ fn claude_command_uses_the_verified_flags() {
     assert_eq!(inv.program, "claude");
     let args = args_of(&inv.args);
     assert_eq!(args[0], "-p");
-    assert_eq!(args[1], PROMPT);
+    assert!(!args.contains(&PROMPT));
     assert_eq!(args[position(&args, "--output-format") + 1], "json");
     assert_eq!(
         args[position(&args, "--setting-sources") + 1],
@@ -38,7 +38,7 @@ fn claude_command_uses_the_verified_flags() {
     assert_eq!(args[position(&args, "--json-schema") + 1], SCHEMA);
     assert_eq!(args[position(&args, "--model") + 1], "haiku");
     assert!(args.contains(&"--no-session-persistence"));
-    assert!(inv.stdin_null);
+    assert_eq!(inv.stdin.as_deref(), Some(PROMPT));
     assert!(!inv.streaming);
     assert!(inv.files.is_empty());
     assert!(inv.answer_file.is_none());
@@ -62,7 +62,7 @@ fn codex_command_disables_hooks_and_writes_the_answer_file() {
     assert_eq!(args[position(&args, "--disable") + 1], "hooks");
     assert_eq!(args[position(&args, "-s") + 1], "read-only");
     assert_eq!(args[position(&args, "-m") + 1], "gpt-6.1-terra");
-    assert!(inv.stdin_null);
+    assert_eq!(inv.stdin.as_deref(), Some(PROMPT));
     assert!(!inv.streaming);
 
     let schema = inv
@@ -89,7 +89,7 @@ fn opencode_command_streams_and_names_the_model() {
     assert_eq!(args[4], "plan");
     assert_eq!(args[position(&args, "-m") + 1], "lemonade/qwen");
     assert!(inv.streaming);
-    assert!(inv.stdin_null);
+    assert_eq!(inv.stdin.as_deref(), Some(PROMPT));
 }
 
 #[test]

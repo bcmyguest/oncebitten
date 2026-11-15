@@ -18,9 +18,9 @@ The host must return these five keys plus an optional `draft`: a proposed rule, 
 
 | Host | Status | Command | Hooks off |
 |---|---|---|---|
-| claude | implemented | `claude -p <prompt> --output-format json --setting-sources project,local --settings '{"disableAllHooks": true}' --disable-slash-commands --tools "" --json-schema <schema> --no-session-persistence` | proof required |
-| codex | implemented | `codex exec --skip-git-repo-check --json --ephemeral --disable hooks -s read-only --output-schema <file> -o <file> <prompt>` | proof required |
-| opencode | implemented | `opencode run --format json --agent plan <prompt>` | no proof (accepted by decision) |
+| claude | implemented | `claude -p --output-format json --setting-sources project,local --settings '{"disableAllHooks": true}' --disable-slash-commands --tools "" --json-schema <schema> --no-session-persistence` | proof required |
+| codex | implemented | `codex exec --skip-git-repo-check --json --ephemeral --disable hooks -s read-only --output-schema <file> -o <file>` | proof required |
+| opencode | implemented | `opencode run --format json --agent plan` | no proof (accepted by decision) |
 | pi | unsupported | none | none |
 
 The commands follow [docs/research/spike-triage.md](research/spike-triage.md). The spike verified the claude and codex flags. It did not verify the combined codex command, and it found no verified hooks-off mechanism for opencode. The `--settings` inline setting for claude is an addition the spike did not test; the hooks-off proof checks it.
@@ -32,6 +32,7 @@ The model comes from the target: `triage.default` or `triage.<host>` in configur
 ## Call contract
 
 - Each call runs in a fresh empty temp directory, removed afterwards, with `ONCEBITTEN_TRIAGE=1`. Every `oncebitten capture` call exits 0 at once when that variable is `1`.
+- The prompt goes to the host on stdin, which then closes. Every host reads its prompt from stdin when the command names none. Argv cannot carry it on Windows: npm installs hosts as `.cmd` wrappers, and Rust refuses a multi-line argument to a batch file.
 - The prompt holds at most 12,000 bytes, at most 10 occurrences, and at most 400 bytes per summary. A cut ends with `[truncated]`.
 - The default timeout is 120 seconds. A call that exceeds it is killed.
 - Opencode may print its answer and keep running. The caller parses the first complete verdict from the JSON event lines and kills the process.
