@@ -8,12 +8,13 @@ use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
 use crate::config::{home_dir, windows_app_dir, Platform};
-use crate::signal::Signal;
+use crate::signal::{self, Signal, DEFAULT_CORRECTION_LEXICON, KIND_PROMPT, USER_CORRECTION};
 
 const APP_DIR: &str = "oncebitten";
 const DB_FILE: &str = "events.db";
 pub const SUMMARY_LIMIT: usize = 2000;
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+const PROMPT_DIGEST_PREFIX: &str = "sha256:";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SCHEMA: &str = "
 CREATE TABLE events (
@@ -89,7 +90,7 @@ impl Store {
 
     pub fn record(&self, event: &NewEvent, signals: &[Signal]) -> Result<Option<i64>> {
         let event = NewEvent {
-            summary: truncate_chars(&event.summary, SUMMARY_LIMIT),
+            summary: stored_summary(event),
             ..event.clone()
         };
         let tx = self.conn.unchecked_transaction()?;
@@ -203,11 +204,62 @@ fn migrate(conn: &Connection) -> Result<()> {
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             Ok(())
         }
+        1 => {
+            redact_prompts(conn)?;
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            Ok(())
+        }
         SCHEMA_VERSION => Ok(()),
         other => bail!(
             "events database schema version {other} is newer than supported version {SCHEMA_VERSION}"
         ),
     }
+}
+
+/// Prompts keep a SHA-256 digest, never their text. Tool summaries keep their
+/// command or path, cut to `SUMMARY_LIMIT`.
+fn stored_summary(event: &NewEvent) -> String {
+    if event.kind == KIND_PROMPT {
+        prompt_digest(&event.summary)
+    } else {
+        truncate_chars(&event.summary, SUMMARY_LIMIT)
+    }
+}
+
+fn prompt_digest(prompt: &str) -> String {
+    format!("{PROMPT_DIGEST_PREFIX}{}", hex_sha256(prompt.as_bytes()))
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Schema 1 stored prompt text in `events.summary` and in the detail of
+/// `user-correction` signals. This replaces both: the summary becomes a digest,
+/// and the detail becomes the lexicon phrases the default list matches.
+fn redact_prompts(conn: &Connection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let prompts: Vec<(i64, String)> = {
+        let mut stmt = tx.prepare("SELECT id, summary FROM events WHERE kind = ?1")?;
+        let rows = stmt.query_map([KIND_PROMPT], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for (id, prompt) in prompts {
+        let phrases = signal::matched_phrases(&prompt, DEFAULT_CORRECTION_LEXICON);
+        tx.execute(
+            "UPDATE events SET summary = ?1 WHERE id = ?2",
+            params![prompt_digest(&prompt), id],
+        )?;
+        tx.execute(
+            "UPDATE signals SET detail = ?1 WHERE event_id = ?2 AND kind = ?3",
+            params![phrases.join(", "), id, USER_CORRECTION],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 fn payload_hash(event: &NewEvent) -> String {
@@ -221,10 +273,7 @@ fn payload_hash(event: &NewEvent) -> String {
         "summary": event.summary,
     })
     .to_string();
-    Sha256::digest(canonical.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex_sha256(canonical.as_bytes())
 }
 
 fn truncate_chars(text: &str, limit: usize) -> String {

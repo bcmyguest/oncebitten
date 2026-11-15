@@ -93,7 +93,7 @@ fn open_creates_schema_and_wal_mode() {
     let mode: String = conn
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
     assert_eq!(mode, "wal");
 }
 
@@ -208,4 +208,87 @@ fn unknown_future_schema_version_is_an_error() {
         conn.pragma_update(None, "user_version", 99).unwrap();
     }
     assert!(Store::open(&path).is_err());
+}
+
+fn prompt_event(session: &str, text: &str, ts: i64) -> NewEvent {
+    NewEvent {
+        kind: "prompt".into(),
+        tool: None,
+        ..event(session, text, ts)
+    }
+}
+
+fn digest(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hex: String = Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("sha256:{hex}")
+}
+
+#[test]
+fn prompt_text_is_stored_as_a_digest() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    let signal = Signal {
+        kind: "user-correction",
+        detail: "no,".into(),
+    };
+    store
+        .record(&prompt_event("s", "No, my secret plan", 1), &[signal])
+        .unwrap();
+    let conn = raw(&path);
+    let summary: String = conn
+        .query_row("SELECT summary FROM events", [], |r| r.get(0))
+        .unwrap();
+    let detail: String = conn
+        .query_row("SELECT detail FROM signals", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(summary, digest("No, my secret plan"));
+    assert_eq!(detail, "no,");
+}
+
+#[test]
+fn migration_blanks_prompt_text_from_schema_one() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    {
+        let conn = raw(&path);
+        conn.execute_batch(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, host TEXT NOT NULL,
+             session_id TEXT NOT NULL, repo TEXT, kind TEXT NOT NULL, tool TEXT,
+             summary TEXT NOT NULL, payload_hash TEXT NOT NULL UNIQUE);
+             CREATE TABLE signals (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL,
+             ts INTEGER NOT NULL, host TEXT NOT NULL, session_id TEXT NOT NULL,
+             kind TEXT NOT NULL, detail TEXT NOT NULL);
+             INSERT INTO events VALUES (1, 1, 'claude', 's', NULL, 'prompt', NULL,
+             'Please never touch my keys', 'h1');
+             INSERT INTO events VALUES (2, 2, 'claude', 's', NULL, 'tool-ok', 'Bash',
+             'cargo test', 'h2');
+             INSERT INTO signals VALUES (1, 1, 1, 'claude', 's', 'user-correction',
+             'Please never touch my keys');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let _store = Store::open(&path).unwrap();
+    let conn = raw(&path);
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    let prompt: String = conn
+        .query_row("SELECT summary FROM events WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    let detail: String = conn
+        .query_row("SELECT detail FROM signals WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    let tool: String = conn
+        .query_row("SELECT summary FROM events WHERE id = 2", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+    assert_eq!(prompt, digest("Please never touch my keys"));
+    assert_eq!(detail, "never");
+    assert_eq!(tool, "cargo test");
 }

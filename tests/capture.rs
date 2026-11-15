@@ -138,3 +138,26 @@ fn run_with_uses_the_given_lexicon() {
     run_with("claude", &prompt_payload("s2", "use tabs"), &db, 6, &none).unwrap();
     assert_eq!(count(&db, "signals"), 1);
 }
+
+#[test]
+fn stored_prompt_is_a_digest_and_the_signal_names_only_the_phrase() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("events.db");
+    run(
+        "claude",
+        &prompt_payload("s1", "No, my private note"),
+        &db,
+        5,
+    )
+    .unwrap();
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let summary: String = conn
+        .query_row("SELECT summary FROM events", [], |r| r.get(0))
+        .unwrap();
+    let detail: String = conn
+        .query_row("SELECT detail FROM signals", [], |r| r.get(0))
+        .unwrap();
+    assert!(summary.starts_with("sha256:"));
+    assert!(!summary.contains("private"));
+    assert_eq!(detail, "no,");
+}
