@@ -530,3 +530,42 @@ fn unknown_use_examples_id_is_rejected() {
 
     assert!(message.contains("names no shipped example"), "{message}");
 }
+
+#[test]
+fn capture_phrases_default_to_the_built_in_lexicon() {
+    let sandbox = Sandbox::new();
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    let phrases = &loaded.config.capture.correction_phrases;
+    assert!(phrases.iter().any(|p| p == "no,"));
+    assert!(phrases.iter().any(|p| p == "doesn't work"));
+    assert!(loaded.config.capture.extra_correction_phrases.is_empty());
+}
+
+#[test]
+fn user_capture_phrases_replace_the_default_list() {
+    let sandbox = Sandbox::new();
+    sandbox.write_user("[capture]\ncorrection_phrases = [\"tabs\"]\n");
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    assert_eq!(loaded.config.capture.correction_phrases, ["tabs"]);
+    assert_eq!(loaded.origins["capture.correction_phrases"], Origin::User);
+}
+
+#[test]
+fn extra_capture_phrases_extend_the_default_list() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project("[capture]\nextra_correction_phrases = [\"tabs\"]\n");
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    assert_eq!(loaded.config.capture.extra_correction_phrases, ["tabs"]);
+    assert!(loaded.config.capture.correction_phrases.len() > 1);
+}
+
+#[test]
+fn empty_or_blank_capture_phrases_are_rejected() {
+    let sandbox = Sandbox::new();
+    sandbox.write_user("[capture]\ncorrection_phrases = []\n");
+    assert!(load(&sandbox.inputs(&[])).is_err());
+
+    let sandbox = Sandbox::new();
+    sandbox.write_user("[capture]\nextra_correction_phrases = [\"  \"]\n");
+    assert!(load(&sandbox.inputs(&[])).is_err());
+}

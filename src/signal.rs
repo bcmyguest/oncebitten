@@ -10,17 +10,64 @@ pub const TEST_FAIL_THEN_PASS: &str = "test-fail-then-pass";
 pub const USER_CORRECTION: &str = "user-correction";
 pub const REVERT: &str = "revert";
 
-const CORRECTION_LEXICON: &[&str] = &[
+pub const DEFAULT_CORRECTION_LEXICON: &[&str] = &[
     "no,",
-    "don't",
-    "stop",
-    "wrong",
-    "i told you",
-    "never",
-    "always",
+    "no.",
+    "no!",
+    "not that",
     "that's not",
+    "that's not right",
+    "not right",
+    "that's wrong",
+    "that is wrong",
+    "that's incorrect",
+    "incorrect",
+    "wrong",
+    "stop",
+    "please stop",
+    "don't",
+    "don't do",
+    "do not",
+    "do not use",
+    "please don't",
+    "never",
+    "never use",
+    "always",
+    "always use",
     "instead",
     "again",
+    "i told you",
+    "i already told you",
+    "i said",
+    "as i said",
+    "i asked you",
+    "i didn't ask",
+    "why did you",
+    "why didn't you",
+    "you forgot",
+    "you missed",
+    "you keep",
+    "you always",
+    "you never",
+    "every time",
+    "every single time",
+    "undo",
+    "revert that",
+    "roll that back",
+    "that broke",
+    "you broke",
+    "still broken",
+    "doesn't work",
+    "does not work",
+    "not working",
+    "isn't working",
+    "still not working",
+    "still doesn't work",
+    "from now on",
+    "going forward",
+    "remember to",
+    "make sure",
+    "the rule is",
 ];
 const TEST_RUNNERS: &[&str] = &[
     "cargo test",
@@ -39,11 +86,33 @@ pub struct Signal {
 }
 
 pub fn derive(event: &NewEvent, history: &[StoredEvent]) -> Vec<Signal> {
+    derive_with(event, history, DEFAULT_CORRECTION_LEXICON)
+}
+
+/// Phrases in `lexicon` that `text` contains, lowercased, in lexicon order, once each.
+pub fn matched_phrases<P: AsRef<str>>(text: &str, lexicon: &[P]) -> Vec<String> {
+    let lowered = normalize_apostrophes(&text.to_lowercase());
+    let mut found: Vec<String> = Vec::new();
+    for phrase in lexicon {
+        let phrase = normalize_apostrophes(&phrase.as_ref().trim().to_lowercase());
+        if !phrase.is_empty() && contains_phrase(&lowered, &phrase) && !found.contains(&phrase) {
+            found.push(phrase);
+        }
+    }
+    found
+}
+
+pub fn derive_with<P: AsRef<str>>(
+    event: &NewEvent,
+    history: &[StoredEvent],
+    lexicon: &[P],
+) -> Vec<Signal> {
     let mut signals = Vec::new();
     match event.kind.as_str() {
         KIND_PROMPT => {
-            if is_correction(&event.summary) {
-                signals.push(signal(USER_CORRECTION, &event.summary));
+            let phrases = matched_phrases(&event.summary, lexicon);
+            if !phrases.is_empty() {
+                signals.push(signal(USER_CORRECTION, &phrases.join(", ")));
             }
         }
         KIND_TOOL_ERROR => {
@@ -106,11 +175,8 @@ fn is_hex(token: &str) -> bool {
     digits.len() >= 7 && digits.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn is_correction(prompt: &str) -> bool {
-    let lowered = prompt.to_lowercase();
-    CORRECTION_LEXICON
-        .iter()
-        .any(|phrase| contains_phrase(&lowered, phrase))
+fn normalize_apostrophes(text: &str) -> String {
+    text.replace('\u{2019}', "'")
 }
 
 fn contains_phrase(text: &str, phrase: &str) -> bool {

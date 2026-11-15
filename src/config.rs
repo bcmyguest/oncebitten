@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::rule::is_kebab_case;
+use crate::signal::DEFAULT_CORRECTION_LEXICON;
 
 const PROJECT_DIR: &str = ".oncebitten";
 const CONFIG_FILE: &str = "config.toml";
@@ -186,6 +187,25 @@ pub struct Rules {
     pub use_examples: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Capture {
+    pub correction_phrases: Vec<String>,
+    pub extra_correction_phrases: Vec<String>,
+}
+
+impl Default for Capture {
+    fn default() -> Self {
+        Capture {
+            correction_phrases: DEFAULT_CORRECTION_LEXICON
+                .iter()
+                .map(|phrase| (*phrase).to_owned())
+                .collect(),
+            extra_correction_phrases: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -193,10 +213,24 @@ pub struct Config {
     pub triggers: Triggers,
     pub sandbox: Sandbox,
     pub rules: Rules,
+    pub capture: Capture,
 }
 
 impl Config {
     fn validate(&self) -> Result<()> {
+        if self.capture.correction_phrases.is_empty() {
+            bail!("capture.correction_phrases must list at least one phrase");
+        }
+        for phrase in self
+            .capture
+            .correction_phrases
+            .iter()
+            .chain(&self.capture.extra_correction_phrases)
+        {
+            if phrase.trim().is_empty() {
+                bail!("capture correction phrases must not be blank");
+            }
+        }
         let per_host = [
             (Host::Claude, &self.triage.claude),
             (Host::Codex, &self.triage.codex),

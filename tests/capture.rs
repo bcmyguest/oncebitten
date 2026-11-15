@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use oncebitten::capture::run;
+use oncebitten::capture::{run, run_with};
 use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_oncebitten");
@@ -119,4 +119,22 @@ fn one_hundred_captures_finish_within_budget() {
         5
     };
     assert!(elapsed < Duration::from_secs(budget), "took {elapsed:?}");
+}
+
+#[test]
+fn run_with_uses_the_given_lexicon() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("events.db");
+    run_with(
+        "claude",
+        &prompt_payload("s1", "use tabs"),
+        &db,
+        5,
+        &["tabs"],
+    )
+    .unwrap();
+    assert_eq!(count(&db, "signals"), 1);
+    let none: [&str; 0] = [];
+    run_with("claude", &prompt_payload("s2", "use tabs"), &db, 6, &none).unwrap();
+    assert_eq!(count(&db, "signals"), 1);
 }

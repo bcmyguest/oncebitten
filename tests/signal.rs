@@ -1,6 +1,6 @@
 use oncebitten::signal::{
-    derive, normalize_command, Signal, KIND_PROMPT, KIND_TOOL_ERROR, KIND_TOOL_OK, REPEAT_FAILURE,
-    REVERT, TEST_FAIL_THEN_PASS, TOOL_FAILURE, USER_CORRECTION,
+    derive, derive_with, matched_phrases, normalize_command, Signal, KIND_PROMPT, KIND_TOOL_ERROR,
+    KIND_TOOL_OK, REPEAT_FAILURE, REVERT, TEST_FAIL_THEN_PASS, TOOL_FAILURE, USER_CORRECTION,
 };
 use oncebitten::store::{NewEvent, StoredEvent};
 
@@ -209,4 +209,48 @@ fn checkout_of_an_unedited_file_or_a_branch_is_not_a_revert() {
     let history = past(vec![tool(KIND_TOOL_OK, "Edit", "src/a.rs", 1)]);
     assert!(derive(&bash("git checkout -- src/b.rs", true, 2), &history).is_empty());
     assert!(derive(&bash("git checkout main", true, 3), &history).is_empty());
+}
+
+#[test]
+fn broad_lexicon_hits_are_user_corrections() {
+    let hits = [
+        "I already told you, use tabs",
+        "Why did you rename that?",
+        "You forgot the changelog",
+        "undo that last change",
+        "that broke the build",
+        "it still doesn't work",
+        "from now on use snake case",
+        "please don't rewrite the parser",
+        "make sure the tests pass",
+    ];
+    for text in hits {
+        let signals = derive(&prompt(text, 1), &[]);
+        assert_eq!(kinds(&signals), vec![USER_CORRECTION], "prompt: {text}");
+    }
+}
+
+#[test]
+fn correction_detail_lists_matched_phrases_not_the_prompt() {
+    let signals = derive(&prompt("No, that's wrong and don't do it", 1), &[]);
+    assert_eq!(signals.len(), 1);
+    assert_eq!(
+        signals[0].detail,
+        "no,, that's wrong, wrong, don't, don't do"
+    );
+}
+
+#[test]
+fn matched_phrases_follow_the_given_lexicon() {
+    let lexicon = ["tabs", "NO,"];
+    let found = matched_phrases("No, use tabs. Tabs!", &lexicon);
+    assert_eq!(found, vec!["tabs".to_string(), "no,".to_string()]);
+}
+
+#[test]
+fn derive_with_uses_a_custom_lexicon_only() {
+    let lexicon = ["spaces"];
+    assert!(derive_with(&prompt("no, use tabs", 1), &[], &lexicon).is_empty());
+    let signals = derive_with(&prompt("use spaces", 1), &[], &lexicon);
+    assert_eq!(kinds(&signals), vec![USER_CORRECTION]);
 }
