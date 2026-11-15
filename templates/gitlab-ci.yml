@@ -12,4 +12,5 @@ oncebitten-gate:
     - curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.1.0/install.sh | ONCEBITTEN_VERSION=0.1.0 sh
     - export PATH="$HOME/.local/bin:$PATH"
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - oncebitten rules sync --frozen
     - oncebitten gate pr --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

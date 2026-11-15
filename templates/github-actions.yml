@@ -22,5 +22,7 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.1.0/install.sh | ONCEBITTEN_VERSION=0.1.0 sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Sync rules at the locked commits
+        run: oncebitten rules sync --frozen
       - name: Gate
         run: oncebitten gate pr --base "origin/${{ github.base_ref }}"

@@ -20,6 +20,8 @@ steps:
       curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.1.0/install.sh | ONCEBITTEN_VERSION=0.1.0 sh
       echo "##vso[task.prependpath]$HOME/.local/bin"
     displayName: Install oncebitten
+  - bash: oncebitten rules sync --frozen
+    displayName: Sync rules at the locked commits
   - bash: |
       target="${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}"
       git fetch origin "$target"

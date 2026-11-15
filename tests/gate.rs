@@ -387,6 +387,19 @@ fn rule_fixtures_do_not_trip_the_gate() {
     assert_eq!(code(&output), 0, "{}", both(&output));
 }
 
+/// This repo's own gate job must sync rules at the locked commits before the gate.
+#[test]
+fn ci_workflow_syncs_frozen_before_the_pr_gate() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+    let sync = text.find("rules sync --frozen");
+    let gate = text.find("gate pr --base ");
+    assert!(
+        matches!((sync, gate), (Some(sync), Some(gate)) if sync < gate),
+        "ci.yml must run rules sync --frozen before the pr gate"
+    );
+}
+
 /// The pre-commit hook and every CI template must call commands that exist.
 #[test]
 fn hook_and_templates_call_real_gate_commands() {
@@ -417,6 +430,12 @@ fn hook_and_templates_call_real_gate_commands() {
             text.contains(&format!("/v{version}/install.sh"))
                 && text.contains(&format!("ONCEBITTEN_VERSION={version} ")),
             "{template} must pin release {version}"
+        );
+        let sync = text.find("oncebitten rules sync --frozen");
+        let gate = text.find("oncebitten gate pr --base ");
+        assert!(
+            matches!((sync, gate), (Some(sync), Some(gate)) if sync < gate),
+            "{template} must run rules sync --frozen before the pr gate"
         );
     }
     let help = repo.run(&["gate", "pr", "--help"], &[]);

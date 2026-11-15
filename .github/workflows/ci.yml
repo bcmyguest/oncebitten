@@ -53,5 +53,7 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Sync rules at the locked commits
+        run: cargo run --locked --bin oncebitten -- rules sync --frozen
       - name: oncebitten gate pr
         run: cargo run --locked --bin oncebitten -- gate pr --base "origin/${{ github.base_ref }}"
