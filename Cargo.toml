@@ -11,6 +11,10 @@ readme = "README.md"
 name = "oncebitten"
 path = "src/main.rs"
 
+[[bin]]
+name = "oncebitten-checker"
+path = "src/bin/oncebitten-checker.rs"
+
 [lib]
 name = "oncebitten"
 path = "src/lib.rs"
