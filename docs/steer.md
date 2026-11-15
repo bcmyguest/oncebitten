@@ -19,7 +19,7 @@ message = "Do not run sudo. Print the command and ask the user to run it."
 
 [steer.trigger]
 tool = "{bash,shell,run_shell_command}"
-command = '^\s*sudo\b'
+command = '(^|[;&|(\n])\s*(env\s+(-\S+\s+|\w+=\S*\s+)*|command\s+|exec\s+|nohup\s+|time\s+)?(\S*/)?sudo($|[\s;&|)])'
 ```
 
 | Key | Required | Values |
@@ -60,7 +60,7 @@ A steer rule's fixtures are recorded events in the normalized shape:
 oncebitten steer --host <claude|codex|cursor|copilot|opencode|pi>
 ```
 
-The hook reads the host's payload from stdin, maps a pre-tool or prompt event to the normalized shape, loads rules as `check` does (project, sources, examples) from the payload's working directory, matches every active steer rule and prints the host's output. It prints nothing when no rule matches or the event is of another kind. It always exits 0: a bad payload or a rule that fails to load goes to stderr and the agent carries on unsteered. With `ONCEBITTEN_TRIAGE=1` it drains stdin and exits 0.
+The hook reads the host's payload from stdin, maps a pre-tool or prompt event to the normalized shape, loads rules as `check` does (project, sources, examples) from the payload's working directory, matches every active steer rule and prints the host's output. It prints nothing when no rule matches or the event is of another kind. It always exits 0: a bad payload goes to stderr and the agent carries on unsteered. A rule that fails to load disables only itself: its error goes to stderr and the valid rules still match. A clash between valid rules (duplicate id, bad override) still fails the whole load and the agent carries on unsteered. With `ONCEBITTEN_TRIAGE=1` it drains stdin and exits 0.
 
 `oncebitten hooks install` writes the steer hook beside the capture hook for the same host and scope, and `hooks uninstall` removes both. The plugin packages in `packaging/` install only the capture hook.
 

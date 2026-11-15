@@ -5,7 +5,7 @@ use include_dir::{include_dir, Dir};
 
 use crate::config::{self, Inputs, Platform, Source};
 use crate::lockfile::{self, LockedSource, Lockfile};
-use crate::registry::{resolve, Layer, Layers, Resolved};
+use crate::registry::{resolve, resolve_skipping_broken, Layer, Layers, Resolved};
 use crate::rule::Status;
 use crate::sources::{checkout_locked, git, is_cloned, sources_root, sync_source};
 
@@ -104,6 +104,22 @@ pub fn is_shipped_example(id: &str) -> bool {
 }
 
 pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
+    load_with(inputs, ci, false).map(|(rules, _)| rules)
+}
+
+/// Loads like `load`, but a rule that fails to load is dropped and reported
+/// in the second element instead of failing the whole load.
+pub fn load_skipping_broken(
+    inputs: &Inputs,
+) -> Result<(Vec<Resolved>, Vec<anyhow::Error>), Failure> {
+    load_with(inputs, false, true)
+}
+
+fn load_with(
+    inputs: &Inputs,
+    ci: bool,
+    skip_broken: bool,
+) -> Result<(Vec<Resolved>, Vec<anyhow::Error>), Failure> {
     let loaded = config::load(inputs).map_err(Failure::CouldNotRun)?;
     let repo = repo_root(inputs).map_err(Failure::CouldNotRun)?;
     let root = sources_root(&inputs.vars, Platform::current()).map_err(Failure::CouldNotRun)?;
@@ -138,13 +154,18 @@ pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
         sources,
         examples,
     };
-    let mut rules = resolve(&layers).map_err(Failure::Invalid)?;
+    let (mut rules, skipped) = if skip_broken {
+        resolve_skipping_broken(&layers)
+    } else {
+        resolve(&layers).map(|rules| (rules, Vec::new()))
+    }
+    .map_err(Failure::Invalid)?;
     for resolved in &mut rules {
         if resolved.layer == Layer::Example {
             resolved.rule.status = Status::Active;
         }
     }
-    Ok(rules)
+    Ok((rules, skipped))
 }
 
 /// Extracts the listed shipped examples to a directory that outlives `load`,
