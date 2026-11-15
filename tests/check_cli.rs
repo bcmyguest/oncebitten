@@ -377,3 +377,25 @@ fn example_removed_from_use_examples_is_not_active_on_the_next_run() {
         stdout(&output)
     );
 }
+
+#[test]
+fn file_name_with_a_tab_is_checked() {
+    if cfg!(windows) {
+        return; // Windows does not allow tabs in file names.
+    }
+    let repo = Repo::new();
+    repo.write("src/app.py", "x = 1\n");
+    add_ast_grep_rule(
+        &repo,
+        "id: py-no-print\nlanguage: python\nmessage: no print\nseverity: error\n\
+         rule:\n  pattern: print($$$A)\n",
+    );
+    repo.commit_all("base");
+    repo.write("src/tab\tname.py", "print(\"hi\")\n");
+    repo.commit_all("change");
+
+    let output = repo.check(&["--base", "HEAD~1"]);
+
+    assert_eq!(code(&output), 1, "{}{}", stdout(&output), stderr(&output));
+    assert!(stdout(&output).contains("tab"), "{}", stdout(&output));
+}

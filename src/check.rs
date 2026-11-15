@@ -39,13 +39,26 @@ pub fn run_rules<'a>(
 }
 
 /// Runs `git -c core.quotePath=false <args>` in `repo` and returns its
-/// non-empty output lines: one repo-relative `/`-separated path each.
+/// non-empty output lines, such as a ref.
 pub fn git_paths(inputs: &Inputs, repo: &Path, args: &[&str]) -> Result<Vec<String>> {
     let mut full = vec!["-c", "core.quotePath=false"];
     full.extend_from_slice(args);
     Ok(git(&inputs.vars, repo, &full)?
         .lines()
         .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Runs `git -c core.quotePath=false <args>` in `repo` and returns the
+/// NUL-separated paths in its output. `args` must include `-z`, so names
+/// with tabs or newlines arrive intact. Each path is repo-relative and `/`-separated.
+pub fn git_names(inputs: &Inputs, repo: &Path, args: &[&str]) -> Result<Vec<String>> {
+    let mut full = vec!["-c", "core.quotePath=false"];
+    full.extend_from_slice(args);
+    Ok(git(&inputs.vars, repo, &full)?
+        .split('\0')
+        .filter(|path| !path.is_empty())
         .map(str::to_owned)
         .collect())
 }
@@ -96,11 +109,11 @@ fn run_rule(resolved: &Resolved, repo: &Path, changed: &[String]) -> Outcome {
 }
 
 fn changed_paths(inputs: &Inputs, repo: &Path, base: &str) -> Result<Vec<String>> {
-    let mut paths = git_paths(inputs, repo, &["diff", "--name-only", base])?;
-    paths.extend(git_paths(
+    let mut paths = git_names(inputs, repo, &["diff", "-z", "--name-only", base])?;
+    paths.extend(git_names(
         inputs,
         repo,
-        &["ls-files", "--others", "--exclude-standard"],
+        &["ls-files", "-z", "--others", "--exclude-standard"],
     )?);
     Ok(paths)
 }

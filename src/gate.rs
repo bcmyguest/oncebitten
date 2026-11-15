@@ -194,9 +194,9 @@ fn since_merge_base(inputs: &Inputs, repo: &Path, base: &str) -> Result<Range> {
 fn changed(inputs: &Inputs, repo: &Path, range: &Range) -> Result<Vec<String>> {
     let paths = match range {
         Range::Diff { from, to } => {
-            check::git_paths(inputs, repo, &["diff", "--name-only", from, to])?
+            check::git_names(inputs, repo, &["diff", "-z", "--name-only", from, to])?
         }
-        Range::AllTracked => check::git_paths(inputs, repo, &["ls-files"])?,
+        Range::AllTracked => check::git_names(inputs, repo, &["ls-files", "-z"])?,
     };
     Ok(paths
         .into_iter()
