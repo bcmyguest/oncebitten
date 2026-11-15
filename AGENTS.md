@@ -24,9 +24,10 @@ Run all four before a commit. CI runs the same commands.
 - `src/proof.rs`: `proof.json` in a rule directory: directory hash, validity, writing a proof after an OpenShell replay.
 - `src/gate.rs`: `gate pre-push|pr`: range of changed paths, proof checks, baseline filtering. Reuses `src/check.rs`.
 - `src/baseline.rs`: `.oncebitten/baseline.json` entries, matching and writing. `gate::current_baseline` backs `baseline update`.
-- `src/main.rs`: CLI (`config show`, `config path`, `rules sync|list|validate`, `check`, `replay`, `gate`, `baseline update`, `capture`, `hooks install|uninstall`).
+- `src/main.rs`: CLI (`config show`, `config path`, `rules sync|list|validate`, `check`, `replay`, `gate`, `baseline update`, `capture`, `hooks install|uninstall`, `evidence list|show|reject`).
 - `src/lib.rs`: library root.
-- `src/store.rs`: SQLite event store (`events`, `signals`).
+- `src/store.rs`: SQLite event store (`events`, `signals`, `rejections`).
+- `src/evidence.rs`: clusters signals into mistake classes, independent session counts, rejection memory. Backs `evidence list|show|reject`.
 - `src/signal.rs`: signal kinds and pure derivation from an event and its session history.
 - `src/host.rs`: per-host hook payload to normalized event (claude, codex, cursor, copilot, opencode, pi).
 - `src/capture.rs`: capture pipeline behind `oncebitten capture`.
@@ -41,6 +42,7 @@ Run all four before a commit. CI runs the same commands.
 - `docs/gate.md`: gate stages, ranges, proofs, baseline, exit codes. Keep it in step with `src/gate.rs` and `src/baseline.rs`.
 - `.pre-commit-hooks.yaml`: the `oncebitten-gate` pre-commit hook. `templates/`: CI gate jobs (GitHub Actions, GitLab CI, Azure Pipelines). `tests/gate.rs` checks both call real commands.
 - `docs/capture.md`: signals, host support, hook install. Keep it in step with `src/signal.rs`, `src/host.rs` and `src/hooks.rs`.
+- `docs/evidence.md`: clusters, counts, provenance, rejections. Keep it in step with `src/evidence.rs`. `tests/evidence.rs` covers library and CLI.
 - `docs/research/`: written by other agents. Do not edit.
 
 ## Conventions

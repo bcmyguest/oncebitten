@@ -13,7 +13,7 @@ use crate::signal::{self, Signal, DEFAULT_CORRECTION_LEXICON, KIND_PROMPT, USER_
 const APP_DIR: &str = "oncebitten";
 const DB_FILE: &str = "events.db";
 pub const SUMMARY_LIMIT: usize = 2000;
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const PROMPT_DIGEST_PREFIX: &str = "sha256:";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SCHEMA: &str = "
@@ -39,6 +39,13 @@ CREATE TABLE signals (
     detail TEXT NOT NULL
 );
 ";
+const REJECTIONS: &str = "
+CREATE TABLE IF NOT EXISTS rejections (
+    cluster TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    reason TEXT NOT NULL
+);
+";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewEvent {
@@ -61,6 +68,20 @@ pub struct StoredEvent {
     pub kind: String,
     pub tool: Option<String>,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalRow {
+    pub kind: String,
+    pub detail: String,
+    pub event: StoredEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejection {
+    pub cluster: String,
+    pub ts: i64,
+    pub reason: String,
 }
 
 pub struct Store {
@@ -143,15 +164,44 @@ impl Store {
              ORDER BY id",
         )?;
         let rows = stmt.query_map(params![host, session_id, limit as i64], |row| {
-            Ok(StoredEvent {
-                id: row.get(0)?,
+            stored_event(row, 0)
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn signals(&self) -> Result<Vec<SignalRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.kind, s.detail, e.id, e.ts, e.host, e.session_id, e.repo, e.kind, \
+             e.tool, e.summary FROM signals s JOIN events e ON e.id = s.event_id \
+             ORDER BY e.id, s.id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SignalRow {
+                kind: row.get(0)?,
+                detail: row.get(1)?,
+                event: stored_event(row, 2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn reject(&self, cluster: &str, ts: i64, reason: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO rejections (cluster, ts, reason) VALUES (?1, ?2, ?3)",
+            params![cluster, ts, reason],
+        )?;
+        Ok(())
+    }
+
+    pub fn rejections(&self) -> Result<Vec<Rejection>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT cluster, ts, reason FROM rejections ORDER BY cluster")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Rejection {
+                cluster: row.get(0)?,
                 ts: row.get(1)?,
-                host: row.get(2)?,
-                session_id: row.get(3)?,
-                repo: row.get(4)?,
-                kind: row.get(5)?,
-                tool: row.get(6)?,
-                summary: row.get(7)?,
+                reason: row.get(2)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -196,19 +246,39 @@ pub fn events_db_path() -> Result<PathBuf> {
     events_db_path_for(&vars, Platform::current())
 }
 
+fn stored_event(row: &rusqlite::Row, start: usize) -> rusqlite::Result<StoredEvent> {
+    Ok(StoredEvent {
+        id: row.get(start)?,
+        ts: row.get(start + 1)?,
+        host: row.get(start + 2)?,
+        session_id: row.get(start + 3)?,
+        repo: row.get(start + 4)?,
+        kind: row.get(start + 5)?,
+        tool: row.get(start + 6)?,
+        summary: row.get(start + 7)?,
+    })
+}
+
 fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     match version {
         0 => {
             conn.execute_batch(SCHEMA)?;
+            conn.execute_batch(REJECTIONS)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             Ok(())
         }
         1 => {
             redact_prompts(conn)?;
             purge_freed_pages(conn)?;
+            conn.execute_batch(REJECTIONS)?;
             // Set last: if the purge fails, the next open redoes both steps,
             // and `redact_prompts` skips rows it already digested.
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            Ok(())
+        }
+        2 => {
+            conn.execute_batch(REJECTIONS)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             Ok(())
         }
@@ -233,7 +303,7 @@ fn prompt_digest(prompt: &str) -> String {
     format!("{PROMPT_DIGEST_PREFIX}{}", hex_sha256(prompt.as_bytes()))
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))

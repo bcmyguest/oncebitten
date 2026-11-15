@@ -7,6 +7,7 @@ use oncebitten::capture;
 use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
 use oncebitten::engine::Outcome;
+use oncebitten::evidence::{self, Cluster};
 use oncebitten::gate::{self, Stage};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
@@ -14,6 +15,7 @@ use oncebitten::proof::{self, BackendKind};
 use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
 use oncebitten::rules::{self, Failure};
+use oncebitten::store::{self, Store};
 
 #[derive(Parser)]
 #[command(
@@ -33,6 +35,11 @@ enum Command {
         /// Agent host that sent the payload
         #[arg(long)]
         host: String,
+    },
+    /// Inspect mistake clusters built from captured signals
+    Evidence {
+        #[command(subcommand)]
+        action: EvidenceAction,
     },
     /// Inspect the layered configuration
     Config {
@@ -78,6 +85,24 @@ enum Command {
         /// Run the checker on the host without a sandbox; reports only, writes no proof
         #[arg(long)]
         local: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvidenceAction {
+    /// Print candidate clusters: id, class, status, sessions, occurrences, tool, pattern
+    List {
+        /// Include clusters below the threshold and rejected clusters
+        #[arg(long)]
+        all: bool,
+    },
+    /// Print one cluster and the provenance of each occurrence
+    Show { id: String },
+    /// Record that a cluster is not a rule, so it is never a candidate again
+    Reject {
+        id: String,
+        #[arg(long)]
+        reason: String,
     },
 }
 
@@ -160,6 +185,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Evidence { action } => run_evidence(action),
         Command::Config { action } => run_config(action),
         Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
@@ -175,6 +201,71 @@ fn main() -> Result<()> {
             local,
         } => run_replay(&rule, checker, gateway, local),
     }
+}
+
+fn run_evidence(action: EvidenceAction) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let store = Store::open(&store::events_db_path_for(
+        &inputs.vars,
+        Platform::current(),
+    )?)?;
+    match action {
+        EvidenceAction::List { all } => {
+            for cluster in evidence::load(&store)? {
+                if all || cluster.is_candidate() {
+                    println!("{}", cluster_line(&cluster));
+                }
+            }
+        }
+        EvidenceAction::Show { id } => {
+            let clusters = evidence::load(&store)?;
+            let cluster = evidence::find(&clusters, &id)?;
+            println!("{}", cluster_line(cluster));
+            println!("source: {}", cluster.source.as_str());
+            println!("repos: {}", cluster.repos().join(", "));
+            if let Some(rejection) = &cluster.rejection {
+                println!("rejected: {}", rejection.reason);
+            }
+            for occurrence in &cluster.occurrences {
+                let event = &occurrence.event;
+                println!(
+                    "{}  {}  {}  {}  event {}  {}  {}",
+                    event.ts,
+                    event.host,
+                    event.session_id,
+                    event.repo.as_deref().unwrap_or("-"),
+                    event.id,
+                    occurrence.signals.join(","),
+                    event.summary
+                );
+            }
+        }
+        EvidenceAction::Reject { id, reason } => {
+            evidence::reject(&store, &id, now_millis()?, &reason)?;
+            println!("rejected {id}");
+        }
+    }
+    Ok(())
+}
+
+fn cluster_line(cluster: &Cluster) -> String {
+    format!(
+        "{}  {}  {}  sessions={}  occurrences={}  {}  {}",
+        cluster.id,
+        cluster.class,
+        cluster.status(),
+        cluster.sessions(),
+        cluster.occurrences.len(),
+        cluster.tool.as_deref().unwrap_or("-"),
+        cluster.pattern
+    )
+}
+
+fn now_millis() -> Result<i64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before the unix epoch")?
+        .as_millis() as i64)
 }
 
 fn run_rules(action: RulesAction) -> Result<()> {
