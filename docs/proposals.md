@@ -43,6 +43,7 @@ oncebitten proposals list
 oncebitten proposals show <cluster-id>
 oncebitten proposals accept <cluster-id>
 oncebitten proposals reject <cluster-id> --reason <text>
+oncebitten proposals reject <cluster-id> --duplicate-of <other-cluster-id>
 ```
 
 Proposals are keyed by their evidence cluster id.
@@ -51,9 +52,19 @@ Proposals are keyed by their evidence cluster id.
 - `show` adds the rule directory, the hits with up to three sample lines (`path:line: text`), rationale, proof note, verdict JSON and the occurrence event ids that produced it. After a decision it prints the kept counts instead, because the events are gone.
 - `accept` flips `status = "proposed"` to `status = "active"` only when the rule has a valid proof. Otherwise it exits 2 with the reason: no proof, a stale proof, or a finding. Commit the rule directory with its `proof.json`. On activation, `accept` also writes, in the proposal's own repo whatever the cwd, one `.oncebitten/baseline.json` entry per existing hit of that rule, and keeps the entries of other rules. Later commits that touch those lines pass the gate; a new hit fails it.
 - `reject` records the rejection in the evidence store (as `evidence reject` does) and removes the rule directory if it is still proposed. The cluster is never proposed again.
+- `reject --duplicate-of <other>` rejects the cluster as a duplicate of `<other>`, which must be a queued or rejected proposal. It stores the link in the `duplicate_of` column and rejects the cluster with the reason `duplicate of <other>`. It never merges or drops another proposal.
 - `accept` and `reject` delete the cluster's captured events and keep one provenance record: outcome, rule, reason, occurrence and session counts, first and last seen, decision time. The `rejections` table, not the events, keeps a rejected cluster from returning.
 
 Exit 0 on success, 2 on any error.
+
+## Possible duplicates
+
+When a proposal is recorded, it is compared with every row in the `proposals` table except itself, whatever its state. Two checks run, and the first match wins:
+
+1. Equal `mistake_class` (reason `same mistake_class`).
+2. Text similarity of the rationale at or above 0.5 by normalised token Jaccard (reason `similar text`). Tokens are lowercase alphanumeric runs. The score is `|A ∩ B| / |A ∪ B|`. "never use unwrap in library code" and "stop using unwrap in library code" score 0.5 and match. "never use unwrap in code" and "never run clippy in code" score 0.43 and do not.
+
+A match is shown as `possible duplicate of <id> (<reason>)` in `proposals list`, `proposals show`, and the forge PR body. The match is advisory. Nothing merges or drops automatically. Confirm a duplicate with `proposals reject <id> --duplicate-of <other>`, which shows as `confirmed duplicate of <other>`.
 
 ## Gate notice
 
