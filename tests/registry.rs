@@ -226,3 +226,18 @@ fn every_invalid_rule_is_reported_with_its_file() {
     assert!(text.iter().any(|t| t.contains("broken-one")), "{text:?}");
     assert!(text.iter().any(|t| t.contains("broken-two")), "{text:?}");
 }
+
+#[test]
+fn hidden_directories_are_not_rules() {
+    let root = TempDir::new().unwrap();
+    let team = root.path().join("team");
+    write_rule(&team, "no-unwrap", "");
+    fs::create_dir_all(team.join(".git")).unwrap();
+    let layers = Layers {
+        project: None,
+        sources: vec![source("team", &team)],
+        examples: None,
+    };
+
+    assert_eq!(ids(&resolve(&layers).unwrap()), ["team/no-unwrap"]);
+}

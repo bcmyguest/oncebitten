@@ -162,7 +162,7 @@ fn load_dir(dir: &Path) -> Result<Vec<Rule>, Vec<anyhow::Error>> {
         .map_err(|error| vec![anyhow!("reading {}: {error}", dir.display())])?;
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.is_dir())
+        .filter(|path| path.is_dir() && !is_hidden(path))
         .collect();
     paths.sort();
     let mut rules = Vec::new();
@@ -178,4 +178,10 @@ fn load_dir(dir: &Path) -> Result<Vec<Rule>, Vec<anyhow::Error>> {
     } else {
         Err(errors)
     }
+}
+
+fn is_hidden(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with('.'))
 }
