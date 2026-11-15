@@ -404,11 +404,14 @@ pub fn reject(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
 /// Rejects `id` as a duplicate of `other`, which must be a queued or rejected
 /// proposal. The link is kept for the user; nothing merges automatically.
 pub fn reject_duplicate(store: &Store, id: &str, other: &str, ts: i64) -> Result<()> {
+    if id == other {
+        bail!("proposal `{id}` cannot be a duplicate of itself");
+    }
     if store.proposal(other)?.is_none() {
         bail!("no proposal `{other}`; see {LIST_HINT}");
     }
-    store.set_duplicate_of(id, other)?;
-    reject_with_reason(store, id, &format!("duplicate of {other}"), ts)
+    reject_with_reason(store, id, &format!("duplicate of {other}"), ts)?;
+    store.set_duplicate_of(id, other)
 }
 
 fn reject_with_reason(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {

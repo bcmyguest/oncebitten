@@ -170,3 +170,66 @@ fn triage_context_carries_past_rejection_reasons() {
     assert!(context.contains("rejected proposals:"), "{context}");
     assert!(context.contains("duplicate of unwrap-rule"), "{context}");
 }
+
+#[test]
+fn reject_duplicate_refuses_the_proposals_own_id() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c1")).unwrap();
+    let error = proposals::reject_duplicate(&store, "c1", "c1", 2).unwrap_err();
+    assert!(error.to_string().contains("itself"), "{error:#}");
+    assert_eq!(store.proposal("c1").unwrap().unwrap().state, State::Waiting);
+    assert_eq!(
+        store.proposal_marks("c1").unwrap().unwrap().duplicate_of,
+        None
+    );
+}
+
+/// Copies `examples/<id>` into `dest`, a proposed rule directory.
+#[cfg(unix)]
+fn copy_example(id: &str, dest: &std::path::Path) {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join(id);
+    for entry in walk(&src) {
+        let target = dest.join(entry.strip_prefix(&src).unwrap());
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::copy(&entry, &target).unwrap();
+    }
+}
+
+#[cfg(unix)]
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(walk(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_duplicate_reject_writes_no_duplicate_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::TempDir::new().unwrap();
+    let rules = root.path().join("rules");
+    let dir = rules.join("py-utcnow");
+    copy_example("py-utcnow", &dir);
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c0")).unwrap();
+    let mut proposal = row("c1");
+    proposal.dir = Some(dir.clone());
+    store.insert_proposal(&proposal).unwrap();
+    std::fs::set_permissions(&rules, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let result = proposals::reject_duplicate(&store, "c1", "c0", 2);
+    std::fs::set_permissions(&rules, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(result.is_err(), "the rule dir was removable");
+    assert_eq!(
+        store.proposal_marks("c1").unwrap().unwrap().duplicate_of,
+        None
+    );
+}
