@@ -27,8 +27,8 @@
 ## Privacy
 
 - A prompt is stored as `sha256:<hex>` of its text, in `events.summary`. The text itself is not stored. The `user-correction` detail holds only the matched phrases.
-- Schema 2 (`PRAGMA user_version = 2`) migrates old databases. On first open, each stored prompt becomes its digest, and each `user-correction` detail is rebuilt from the default lexicon. A phrase that appears only in a custom list is not recovered from old rows.
-- The migration overwrites the old rows, then runs `VACUUM` and a `wal_checkpoint(TRUNCATE)`, so no old prompt text stays in freed pages or the WAL. It sets schema version 2 only after both succeed; if one fails, the next open retries and skips rows already digested.
+- Schema 2 (`PRAGMA user_version = 2`) migrated schema 1 databases; schema 3 adds the `rejections` table (see [evidence.md](evidence.md)). On first open, each stored prompt becomes its digest, and each `user-correction` detail is rebuilt from the default lexicon. A phrase that appears only in a custom list is not recovered from old rows.
+- The migration overwrites the old rows, then runs `VACUUM` and a `wal_checkpoint(TRUNCATE)`, so no old prompt text stays in freed pages or the WAL. It sets the schema version only after both succeed; if one fails, the next open retries and skips rows already digested.
 - Tool summaries (the Bash command or the file path, cut to 2000 characters) are not redacted. The agent writes them from its tool input. A command can still contain text the user typed, for example a pasted value in `echo`. Redacting them would drop the command that the `repeat-failure`, `test-fail-then-pass` and `revert` signals need.
 
 ## Hosts
@@ -69,4 +69,4 @@ oncebitten hooks uninstall --host <host> --scope <user|project>
 
 ## Plugin packaging
 
-`packaging/<host>/` holds plugin manifests and hook files for claude, codex, cursor and copilot, plus the opencode and pi scripts that `hooks install` writes. The plugin hooks run `"${<ROOT>}/bin/oncebitten" capture --host <host>`, with `<ROOT>` the host's plugin-root variable (`CLAUDE_PLUGIN_ROOT`, `PLUGIN_ROOT` for codex and copilot, `CURSOR_PLUGIN_ROOT`). Place the `oncebitten` binary in the plugin's `bin/` directory. The plugin files are not tested against a live host install.
+`packaging/<host>/` holds plugin manifests and hook files for claude, codex, cursor and copilot, plus the opencode and pi scripts that `hooks install` writes. The plugin hooks run `"${<ROOT>}/bin/oncebitten" capture --host <host>`, with `<ROOT>` the host's plugin-root variable (`CLAUDE_PLUGIN_ROOT`, `PLUGIN_ROOT` for codex and copilot, `CURSOR_PLUGIN_ROOT`). For every plugin, `bin/oncebitten` is a POSIX `sh` launcher that runs the release binary matching the plugin's version, installing it with the bundled `scripts/install.sh` when missing (see [install.md](install.md)). The plugin's `SessionStart` hook runs it once with `--version` (120 s timeout) so the download happens before any capture. A `capture` call that finds no binary drains stdin, starts the download in the background and exits 0, so that event is dropped rather than delaying the agent. On Windows the launcher needs Git Bash. The codex, cursor and copilot plugins are not tested against a live host install.

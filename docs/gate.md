@@ -27,13 +27,15 @@ pre-commit install --hook-type pre-push
 
 The hook, in this repository's [`.pre-commit-hooks.yaml`](../.pre-commit-hooks.yaml), runs `oncebitten gate pre-push` once per push (`pass_filenames: false`, `always_run: true`, `stages: [pre-push]`). It needs pre-commit 3.2.0 or later, the first release with the `pre-push` stage name.
 
-It uses `language: rust`. On first use pre-commit clones this repository and runs `cargo install --bins --root <env> --path .` in it, which builds `oncebitten` and `oncebitten-checker` into a cached environment (source: `pre_commit/languages/rust.py`, read in pre-commit 4.6.0). It uses the `cargo` on `PATH`, or installs rustup when there is none. The build compiles tree-sitter grammars, so it needs a C compiler. `language: system` would instead run whatever `oncebitten` is on `PATH`: nothing to build, but each user must install a matching binary first, and this repository publishes no prebuilt binaries. `language: rust` works for anyone with a Rust toolchain or network access.
+It uses `language: rust`. On first use pre-commit clones this repository and runs `cargo install --bins --root <env> --path .` in it, which builds `oncebitten` and `oncebitten-checker` into a cached environment (source: `pre_commit/languages/rust.py`, read in pre-commit 4.6.0). It uses the `cargo` on `PATH`, or installs rustup when there is none. The build compiles tree-sitter grammars, so it needs a C compiler. `language: rust` works for anyone with a Rust toolchain or network access.
+
+`oncebitten-gate-system` is the same hook with `language: system`: it runs the `oncebitten` on `PATH` and builds nothing. Install the binary first with `install.sh` or `install.ps1` (see [install.md](install.md)), at a version that matches `rev`.
 
 Checked by running `pre-commit try-repo <this repo> oncebitten-gate --hook-stage pre-push --from-ref <a> --to-ref <b>` with pre-commit 4.6.0 on Linux.
 
 ## CI
 
-`templates/` holds a gate job for three CI systems. Each checks out full history, installs oncebitten with `cargo install --locked --git https://github.com/bcmyguest/oncebitten oncebitten` and runs `oncebitten gate pr --base origin/<target branch>`.
+`templates/` holds a gate job for three CI systems. Each checks out full history, installs the release binary with `install.sh` from the release's tag, pinned with `ONCEBITTEN_VERSION`, and runs `oncebitten gate pr --base origin/<target branch>`.
 
 | File | Target branch from | Make it required |
 |---|---|---|

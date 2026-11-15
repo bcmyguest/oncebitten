@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/oncebitten\" --version > /dev/null",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

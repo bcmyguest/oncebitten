@@ -93,7 +93,7 @@ fn open_creates_schema_and_wal_mode() {
     let mode: String = conn
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(mode, "wal");
 }
 
@@ -287,7 +287,7 @@ fn migration_blanks_prompt_text_from_schema_one() {
     let tool: String = conn
         .query_row("SELECT summary FROM events WHERE id = 2", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(prompt, digest("Please never touch my keys"));
     assert_eq!(detail, "never");
     assert_eq!(tool, "cargo test");
@@ -367,4 +367,27 @@ fn rerunning_the_migration_keeps_digested_rows() {
         .unwrap();
     assert_eq!(prompt, digested);
     assert_eq!(detail, "never");
+}
+
+#[test]
+fn migration_from_schema_two_adds_rejections_and_keeps_rows() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    {
+        let conn = raw(&path);
+        conn.execute_batch(SCHEMA_ONE).unwrap();
+        conn.execute_batch(
+            "INSERT INTO events VALUES (1, 1, 'claude', 's', NULL, 'tool-ok', 'Bash', 'ls', 'h1');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    store.reject("abc", 1, "one-off").unwrap();
+    assert_eq!(store.rejections().unwrap()[0].reason, "one-off");
+    assert_eq!(store.session_history("claude", "s", 10).unwrap().len(), 1);
+    let version: i64 = raw(&path)
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
 }

@@ -1,0 +1,16 @@
+{
+  "name": "oncebitten",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "pi package: oncebitten capture extension",
+  "license": "Apache-2.0",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./packaging/pi/package.js"
+    ]
+  }
+}
