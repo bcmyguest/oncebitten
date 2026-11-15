@@ -78,3 +78,17 @@ fn rule_that_never_fires_is_rejected_in_a_real_sandbox() {
         "{verdict:?}"
     );
 }
+
+#[test]
+#[ignore = "needs a live OpenShell gateway, Docker and a musl checker build"]
+fn shipped_py_utcnow_example_is_proven_in_a_real_sandbox() {
+    let gateway =
+        std::env::var("ONCEBITTEN_OPENSHELL_GATEWAY").expect("set ONCEBITTEN_OPENSHELL_GATEWAY");
+    let checker =
+        PathBuf::from(std::env::var("ONCEBITTEN_CHECKER").expect("set ONCEBITTEN_CHECKER"));
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/py-utcnow");
+
+    let verdict = replay_dir(&dir, &checker, &OpenShell::new(Some(gateway)));
+
+    assert_eq!(verdict, Verdict::Proven);
+}
