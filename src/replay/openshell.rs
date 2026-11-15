@@ -37,9 +37,10 @@ filesystem_policy:
 network_policies: {}
 ";
 
-/// The OpenShell CLI and the image it starts sandboxes from.
+/// The OpenShell CLI, the Docker CLI and the image sandboxes start from.
 pub struct OpenShell {
     pub binary: String,
+    pub docker: String,
     pub gateway: Option<String>,
     pub base_image: String,
 }
@@ -48,6 +49,7 @@ impl OpenShell {
     pub fn new(gateway: Option<String>) -> Self {
         Self {
             binary: "openshell".to_owned(),
+            docker: "docker".to_owned(),
             gateway,
             base_image: DEFAULT_BASE_IMAGE.to_owned(),
         }
@@ -71,7 +73,7 @@ impl Backend for OpenShell {
         let image = format!("oncebitten-replay:{stamp}");
         let sandbox = sandbox_name();
 
-        let result = build_image(&image, &context).and_then(|()| {
+        let result = build_image(&self.docker, &image, &context).and_then(|()| {
             self.create_sandbox(&sandbox, &image, &work.path().join("policy.yaml"))?;
             (0..files.len())
                 .map(|index| self.exec_checker(&sandbox, index, &files[index]))
@@ -80,7 +82,7 @@ impl Backend for OpenShell {
 
         // Cleanup runs on success and failure alike. Failures here do not change the verdict.
         let _ = self.command(&["sandbox", "delete", &sandbox]).output();
-        let _ = Command::new("docker")
+        let _ = Command::new(&self.docker)
             .args(["rmi", "--force", &image])
             .output();
         result
@@ -174,13 +176,13 @@ fn build_context(
     Ok(context)
 }
 
-fn build_image(image: &str, context: &Path) -> Result<(), String> {
-    let output = Command::new("docker")
+fn build_image(docker: &str, image: &str, context: &Path) -> Result<(), String> {
+    let output = Command::new(docker)
         .arg("build")
         .args(["-t", image])
         .arg(context)
         .output()
-        .map_err(|error| format!("image build: starting docker: {error}"))?;
+        .map_err(|error| format!("image build: starting {docker}: {error}"))?;
     if output.status.success() {
         Ok(())
     } else {

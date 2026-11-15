@@ -92,3 +92,40 @@ fn shipped_py_utcnow_example_is_proven_in_a_real_sandbox() {
 
     assert_eq!(verdict, Verdict::Proven);
 }
+
+/// Writes an executable POSIX shell script named `name` into `dir`.
+#[cfg(unix)]
+fn stub(dir: &Path, name: &str, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn refused_sandbox_create_reports_the_gateway_reason() {
+    let dir = rule_dir();
+    let bin = tempfile::tempdir().unwrap();
+    let docker = stub(bin.path(), "docker", "exit 0");
+    let openshell = stub(
+        bin.path(),
+        "openshell",
+        "echo 'gateway refused: stub' >&2\nexit 3",
+    );
+    let checker = PathBuf::from(env!("CARGO_BIN_EXE_oncebitten-checker"));
+    let mut backend = OpenShell::new(Some("http://127.0.0.1:1".to_owned()));
+    backend.binary = openshell.display().to_string();
+    backend.docker = docker.display().to_string();
+
+    let verdict = replay_dir(dir.path(), &checker, &backend);
+
+    match verdict {
+        Verdict::CouldNotRun(reason) => {
+            assert!(reason.contains("sandbox create failed"), "{reason}");
+            assert!(reason.contains("gateway refused: stub"), "{reason}");
+        }
+        other => panic!("expected CouldNotRun, got {other:?}"),
+    }
+}
