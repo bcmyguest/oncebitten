@@ -48,9 +48,10 @@ oncebitten proposals reject <cluster-id> --reason <text>
 Proposals are keyed by their evidence cluster id.
 
 - `list` prints `cluster  state  kind  rule  proof  repo` per queued result. State is `waiting`, `accepted` or `rejected`; kind is `proposal` or `finding`; proof is `proven`, `unproven` or `-`.
-- `show` adds the rule directory, rationale, proof note, verdict JSON and the occurrence event ids that produced it.
+- `show` adds the rule directory, rationale, proof note, verdict JSON and the occurrence event ids that produced it. After a decision it prints the kept counts instead, because the events are gone.
 - `accept` flips `status = "proposed"` to `status = "active"` only when the rule has a valid proof. Otherwise it exits 2 with the reason: no proof, a stale proof, or a finding. Commit the rule directory with its `proof.json`.
 - `reject` records the rejection in the evidence store (as `evidence reject` does) and removes the rule directory if it is still proposed. The cluster is never proposed again.
+- `accept` and `reject` delete the cluster's captured events and keep one provenance record: outcome, rule, reason, occurrence and session counts, first and last seen, decision time. The `rejections` table, not the events, keeps a rejected cluster from returning.
 
 Exit 0 on success, 2 on any error.
 

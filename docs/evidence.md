@@ -2,6 +2,8 @@
 
 `oncebitten evidence` groups the signals that `capture` recorded (see [capture.md](capture.md)) into mistake classes, counts independent occurrences and remembers rejections. It makes no model call. Triage (PLAN.md step 8) reads the same clusters.
 
+Evidence is temporary. `proposals accept` and `proposals reject` delete a cluster's events and keep one record of its counts, and `capture` deletes any other event older than `evidence.ttl_days` (default 30) unless a waiting proposal names it.
+
 ## Clusters
 
 Each signal maps to a class and a key. Signals with the same key form one cluster.
@@ -40,11 +42,11 @@ oncebitten evidence show <id>     # one cluster with each occurrence's provenanc
 oncebitten evidence reject <id> --reason "one-off"
 ```
 
-Status is `candidate`, `below-threshold` or `rejected`. Clusters print most sessions first, then by id.
+Status is `candidate`, `below-threshold`, `accepted` or `rejected`. A decided cluster stays listed after its events are gone; `evidence show` then prints the decision and its counts. Clusters print most sessions first, then by id.
 
 ## Storage
 
-Clusters are computed on read from `events` and `signals`; only rejections are stored. Schema 3 (`PRAGMA user_version = 3`) adds the `rejections` table. Schema 4 (`PRAGMA user_version = 4`) adds `events.git_head`; opening a schema 0 to 3 database migrates it.
+Clusters are computed on read from `events` and `signals`; rejections and decisions are stored. The `decisions` table, created with `IF NOT EXISTS`, holds per cluster the outcome, rule, reject reason, occurrence and session counts, first and last seen timestamps and the decision time. Schema 3 (`PRAGMA user_version = 3`) adds the `rejections` table. Schema 4 (`PRAGMA user_version = 4`) adds `events.git_head`; opening a schema 0 to 3 database migrates it.
 
 ## Provenance and dedupe
 
