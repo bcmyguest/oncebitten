@@ -44,6 +44,14 @@ Before a claude or codex call, oncebitten runs the same call with hooks on and s
 
 The user settings scope (`~/.claude`, `~/.codex`) is not sentinel-tested. Those files hold the host's credentials and the proof cannot move HOME. Coverage of that scope rests on the hooks-off flag for each host.
 
+## Code hunks
+
+Before the call, triage reads the code the sessions changed. For each occurrence with a stored `git_head`, it diffs that commit against the working tree, limited to the files the session's edit tools named. The diff is appended to the prompt, capped at `triage.max_code_bytes` (default 16,384) on top of the 12,000-byte prompt limit. Nothing from the diff is stored; the store keeps only hashes and phrases.
+
+A drafted `bad` fixture must contain every added line of one hunk, in order, to pass. Line endings are normalised to LF and trailing spaces ignored. A draft that quotes no changed code is "could not run".
+
+Code hunks go to the configured triage host. The user is responsible for that host's data handling. To keep code out of the prompt, set `send_code = false` under `[triage]`; triage then runs as before with no code and no quote check. No hunks found (no `git_head`, no edits, or a git failure) also runs as before.
+
 ## Exit codes
 
 | Code | Meaning |
