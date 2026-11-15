@@ -109,11 +109,3 @@ fn missing_session_id_is_an_error() {
     let payload = r#"{"hook_event_name":"UserPromptSubmit","prompt":"x"}"#;
     assert!(normalize(Host::Claude, payload, TS).is_err());
 }
-
-#[test]
-fn unverified_hosts_report_unsupported() {
-    for host in [Host::Codex, Host::OpenCode, Host::Cursor, Host::Pi] {
-        let err = normalize(host, "{}", TS).unwrap_err().to_string();
-        assert!(err.contains("unsupported host"), "{host:?}: {err}");
-    }
-}

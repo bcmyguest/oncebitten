@@ -1,0 +1,27 @@
+{
+  "description": "oncebitten capture on the GitHub Copilot CLI.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" capture --host copilot",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" capture --host copilot",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

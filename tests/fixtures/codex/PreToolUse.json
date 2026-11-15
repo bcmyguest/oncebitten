@@ -1,0 +1,14 @@
+{
+  "session_id": "01a1dcc7-2d7a-7f80-a567-91fb61812977",
+  "turn_id": "01a1dcc7-2f4c-76b1-9d8c-8dd2c577fb00",
+  "transcript_path": null,
+  "cwd": "/work/project",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-terra",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ls; cat nonexistent-file"
+  },
+  "tool_use_id": "exec-5f62af7e-2266-4d81-82f5-198029ed1451"
+}

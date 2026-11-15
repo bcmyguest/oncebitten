@@ -175,17 +175,6 @@ fn invalid_json_is_an_error_and_is_left_alone() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
 }
 
-#[test]
-fn unverified_hosts_are_refused() {
-    let dir = TempDir::new().unwrap();
-    let path = settings(&dir);
-    for host in [Host::Codex, Host::OpenCode, Host::Cursor, Host::Pi] {
-        let err = install(host, &path).unwrap_err().to_string();
-        assert!(err.contains("unsupported host"), "{host:?}: {err}");
-        assert!(!path.exists());
-    }
-}
-
 mod absolute_exe {
     use std::path::Path;
 

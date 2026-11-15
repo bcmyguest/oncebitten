@@ -90,7 +90,7 @@ fn errors_exit_zero_with_one_stderr_line() {
     assert!(out.stdout.is_empty());
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert_eq!(stderr.lines().count(), 1);
-    assert!(stderr.contains("unsupported host"));
+    assert!(stderr.contains("no session id"));
 }
 
 #[test]

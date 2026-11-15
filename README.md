@@ -18,7 +18,11 @@ cargo install --path .
 oncebitten config show            # merged configuration as TOML
 oncebitten config show --origin   # annotate each value with its layer
 oncebitten config path            # configuration files it reads
+oncebitten hooks install --host claude --scope user   # also codex, cursor, copilot, opencode, pi
+oncebitten hooks uninstall --host claude --scope user
 ```
+
+Hooks record prompts and tool outcomes locally: [docs/capture.md](docs/capture.md) lists what each host reports and how each was verified.
 
 Settings and their precedence: [docs/configuration.md](docs/configuration.md).
 
