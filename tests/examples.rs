@@ -193,8 +193,7 @@ fn ui_screenshot_fires_on_bad_and_not_on_fixed() {
     );
 }
 
-#[test]
-fn load_for_check_includes_the_embedded_examples() {
+fn git_repo_with_project_config(config: Option<&str>) -> TempDir {
     let repo = TempDir::new().unwrap();
     let status = std::process::Command::new("git")
         .arg("init")
@@ -203,7 +202,15 @@ fn load_for_check_includes_the_embedded_examples() {
         .status()
         .unwrap();
     assert!(status.success());
+    if let Some(config) = config {
+        let dir = repo.path().join(".oncebitten");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("config.toml"), config).unwrap();
+    }
+    repo
+}
 
+fn inputs_for(repo: &TempDir) -> oncebitten::config::Inputs {
     let home = repo.path().join("home").display().to_string();
     let vars = [
         ("HOME".to_owned(), home.clone()),
@@ -212,14 +219,37 @@ fn load_for_check_includes_the_embedded_examples() {
     ]
     .into_iter()
     .collect();
-    let inputs = oncebitten::config::Inputs {
+    oncebitten::config::Inputs {
         cwd: repo.path().to_path_buf(),
         vars,
-    };
-    let loaded = oncebitten::rules::load_for_check(&inputs).unwrap();
-    let ids: Vec<&str> = loaded.rules.iter().map(|rule| rule.id.as_str()).collect();
+    }
+}
 
-    assert!(ids.contains(&"examples/py-utcnow"), "{ids:?}");
-    assert!(ids.contains(&"examples/rust-no-unwrap"), "{ids:?}");
-    assert_eq!(ids.len(), 7, "{ids:?}");
+#[test]
+fn unlisted_examples_are_not_loaded() {
+    let repo = git_repo_with_project_config(None);
+
+    let rules = oncebitten::rules::load(&inputs_for(&repo), false).unwrap();
+
+    assert!(
+        rules.is_empty(),
+        "{:?}",
+        rules.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn listed_examples_load_as_active_and_only_those() {
+    let repo = git_repo_with_project_config(Some(
+        "[rules]\nuse_examples = [\"py-utcnow\", \"rust-no-unwrap\"]\n",
+    ));
+
+    let rules = oncebitten::rules::load(&inputs_for(&repo), false).unwrap();
+    let mut ids: Vec<&str> = rules.iter().map(|rule| rule.id.as_str()).collect();
+    ids.sort_unstable();
+
+    assert_eq!(ids, ["examples/py-utcnow", "examples/rust-no-unwrap"]);
+    assert!(rules
+        .iter()
+        .all(|rule| rule.rule.status == oncebitten::rule::Status::Active));
 }

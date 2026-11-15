@@ -176,6 +176,7 @@ pub struct Source {
 #[serde(deny_unknown_fields, default)]
 pub struct Rules {
     pub sources: Vec<Source>,
+    pub use_examples: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,6 +210,15 @@ impl Config {
         let writable = self.rules.sources.iter().filter(|s| s.writable).count();
         if writable > 1 {
             bail!("rules.sources: {writable} sources are writable; at most one may be");
+        }
+        let mut examples = BTreeSet::new();
+        for example in &self.rules.use_examples {
+            if !crate::rules::is_shipped_example(example) {
+                bail!("rules.use_examples: `{example}` names no shipped example");
+            }
+            if !examples.insert(example.as_str()) {
+                bail!("rules.use_examples: duplicate example `{example}`");
+            }
         }
         let mut names = BTreeSet::new();
         for source in &self.rules.sources {

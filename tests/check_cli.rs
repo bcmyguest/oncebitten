@@ -209,3 +209,40 @@ fn outside_a_git_repository_exits_2() {
 
     assert_eq!(code(&output), 2, "{}{}", stdout(&output), stderr(&output));
 }
+
+fn repo_with_examples_listed(ids: &str) -> Repo {
+    let repo = Repo::new();
+    repo.write("src/api/mod.rs", "pub mod users;\n");
+    repo.write("docs/architecture/api.svg", "<svg/>\n");
+    repo.commit_all("baseline");
+    repo.write(
+        ".oncebitten/config.toml",
+        &format!("[rules]\nuse_examples = {ids}\n"),
+    );
+    repo.write("src/api/mod.rs", "pub mod users;\npub mod orders;\n");
+    repo
+}
+
+#[test]
+fn listed_example_runs_in_check() {
+    let repo = repo_with_examples_listed("[\"arch-diagram\"]");
+
+    let output = repo.check(&[]);
+
+    assert_eq!(code(&output), 1, "{}{}", stdout(&output), stderr(&output));
+    assert!(
+        stdout(&output).contains("examples/arch-diagram"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn unlisted_example_does_not_run_in_check() {
+    let repo = repo_with_examples_listed("[]");
+
+    let output = repo.check(&[]);
+
+    assert_eq!(code(&output), 0, "{}{}", stdout(&output), stderr(&output));
+    assert!(stdout(&output).is_empty());
+}

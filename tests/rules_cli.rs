@@ -210,3 +210,58 @@ fn validate_ci_with_a_drifted_clone_exits_2_and_does_not_fetch() {
         before
     );
 }
+
+fn use_examples(s: &Setup, ids: &str) {
+    fs::write(
+        s.project.join(".oncebitten/config.toml"),
+        format!(
+            "[rules]\nuse_examples = {ids}\n\n[[rules.sources]]\nname = \"team\"\nurl = \"{}\"\n",
+            s.fx.url(&s.team)
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn list_omits_examples_that_are_not_listed() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+
+    let output = s.fx.oncebitten(&s.project, &["rules", "list"]);
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        !stdout(&output).contains("examples/"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn list_shows_a_listed_example_as_active() {
+    let s = setup();
+    use_examples(&s, "[\"py-no-print\"]");
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+
+    let output = s.fx.oncebitten(&s.project, &["rules", "list"]);
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("examples/py-no-print"), "{out}");
+    assert!(out.contains("  active  examples"), "{out}");
+}
+
+#[test]
+fn unknown_listed_example_is_an_error() {
+    let s = setup();
+    use_examples(&s, "[\"no-such-example\"]");
+
+    let output = s.fx.oncebitten(&s.project, &["rules", "list"]);
+
+    assert_ne!(code(&output), 0, "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("names no shipped example"),
+        "{}",
+        stderr(&output)
+    );
+}

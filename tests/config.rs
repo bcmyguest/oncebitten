@@ -507,3 +507,21 @@ fn non_unicode_relevant_variable_is_an_error() {
         assert!(message.contains(name), "{message}");
     }
 }
+
+#[test]
+fn use_examples_lists_shipped_example_ids() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project("[rules]\nuse_examples = [\"rust-no-unwrap\"]\n");
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+
+    assert_eq!(loaded.config.rules.use_examples, ["rust-no-unwrap"]);
+}
+
+#[test]
+fn unknown_use_examples_id_is_rejected() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project("[rules]\nuse_examples = [\"no-such-example\"]\n");
+    let message = error_chain(load(&sandbox.inputs(&[])));
+
+    assert!(message.contains("names no shipped example"), "{message}");
+}

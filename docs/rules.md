@@ -50,11 +50,16 @@ Unknown keys fail the load. Every error names the file.
 |---|---|---|
 | project | `<repo>/.oncebitten/rules/<id>/` | `<id>` |
 | source | `[[rules.sources]]` clone, `<name>` in config | `<source>/<id>` |
-| examples | shipped in the binary (`examples/` in the repository) | `examples/<id>` |
+| examples | shipped in the binary (`examples/` in the repository), only those named in `rules.use_examples` | `examples/<id>` |
 
 Precedence: project, then sources in config order, then examples.
 
-The examples layer is loaded by `check` only. `rules list` and `rules validate` do not show it. All shipped examples have `status = "proposed"`, so `check` skips them. Copy one into `.oncebitten/rules/` and set `status = "active"` to run it.
+Examples are opt-in. Without `rules.use_examples`, no example is loaded, extracted or shown by `check`, `rules list` or `rules validate`. Each id in `rules.use_examples` must name a shipped example directory, and that rule is then loaded as active. Shipped examples have `status = "proposed"` in their file; listing one overrides that. To change a listed example, copy it into `.oncebitten/rules/` under an id of its own.
+
+```toml
+[rules]
+use_examples = ["py-no-print", "rust-no-unwrap"]
+```
 
 Shipped examples:
 

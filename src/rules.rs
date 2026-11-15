@@ -1,22 +1,18 @@
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use include_dir::{include_dir, Dir};
 use tempfile::TempDir;
 
 use crate::config::{self, Inputs, Platform};
 use crate::lockfile::{self, LockedSource, Lockfile};
-use crate::registry::{resolve, Layers, Resolved};
+use crate::registry::{resolve, Layer, Layers, Resolved};
+use crate::rule::Status;
 use crate::sources::{git, is_cloned, sources_root, sync_source};
 
 const PROJECT_DIR: &str = ".oncebitten";
 const PROJECT_RULES: &str = "rules";
 static EXAMPLES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/examples");
-
-pub struct Loaded {
-    pub rules: Vec<Resolved>,
-    _examples: Option<TempDir>,
-}
 
 #[derive(Debug)]
 pub enum Failure {
@@ -46,15 +42,13 @@ pub fn sync(inputs: &Inputs) -> Result<()> {
     lockfile::write(&repo, &lock)
 }
 
+pub fn is_shipped_example(id: &str) -> bool {
+    EXAMPLES
+        .dirs()
+        .any(|dir| dir.path() == std::path::Path::new(id))
+}
+
 pub fn load(inputs: &Inputs, ci: bool) -> Result<Vec<Resolved>, Failure> {
-    load_layers(inputs, ci, false).map(|loaded| loaded.rules)
-}
-
-pub fn load_for_check(inputs: &Inputs) -> Result<Loaded, Failure> {
-    load_layers(inputs, false, true)
-}
-
-fn load_layers(inputs: &Inputs, ci: bool, with_examples: bool) -> Result<Loaded, Failure> {
     let loaded = config::load(inputs).map_err(Failure::CouldNotRun)?;
     let repo = repo_root(inputs).map_err(Failure::CouldNotRun)?;
     let root = sources_root(&inputs.vars, Platform::current()).map_err(Failure::CouldNotRun)?;
@@ -82,28 +76,36 @@ fn load_layers(inputs: &Inputs, ci: bool, with_examples: bool) -> Result<Loaded,
         sources.push((source.name.clone(), dir));
     }
     let project = repo.join(PROJECT_DIR).join(PROJECT_RULES);
-    let examples = if with_examples {
-        Some(examples_dir().map_err(Failure::CouldNotRun)?)
-    } else {
-        None
-    };
+    let examples = examples_dir(&loaded.config.rules.use_examples).map_err(Failure::CouldNotRun)?;
     let layers = Layers {
         project: project.is_dir().then_some(project),
         sources,
-        examples: examples.as_ref().map(|dir| dir.path().to_path_buf()),
+        examples: Some(examples.path().to_path_buf()),
     };
-    let rules = resolve(&layers).map_err(Failure::Invalid)?;
-    Ok(Loaded {
-        rules,
-        _examples: examples,
-    })
+    let mut rules = resolve(&layers).map_err(Failure::Invalid)?;
+    for resolved in &mut rules {
+        if resolved.layer == Layer::Example {
+            resolved.rule.status = Status::Active;
+        }
+    }
+    Ok(rules)
 }
 
-fn examples_dir() -> Result<TempDir> {
+fn examples_dir(listed: &[String]) -> Result<TempDir> {
     let dir = TempDir::new().context("creating a directory for the shipped examples")?;
-    EXAMPLES
-        .extract(dir.path())
-        .context("extracting the shipped examples")?;
+    for id in listed {
+        let Some(example) = EXAMPLES
+            .dirs()
+            .find(|d| d.path() == std::path::Path::new(id))
+        else {
+            bail!("`{id}` names no shipped example");
+        };
+        std::fs::create_dir_all(dir.path().join(id))
+            .with_context(|| format!("creating the directory for `{id}`"))?;
+        example
+            .extract(dir.path())
+            .with_context(|| format!("extracting the shipped example `{id}`"))?;
+    }
     Ok(dir)
 }
 

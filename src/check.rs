@@ -15,12 +15,11 @@ pub struct Checked {
 }
 
 pub fn run(inputs: &Inputs, base: &str) -> Result<Vec<Checked>, Failure> {
-    let loaded = rules::load_for_check(inputs)?;
+    let rules = rules::load(inputs, false)?;
     let repo = config::repo_root(&inputs.cwd)
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
     let changed = changed_paths(inputs, &repo, base).map_err(Failure::CouldNotRun)?;
-    Ok(loaded
-        .rules
+    Ok(rules
         .iter()
         .filter(|resolved| resolved.rule.status == Status::Active)
         .map(|resolved| Checked {
