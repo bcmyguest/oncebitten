@@ -1,11 +1,14 @@
+pub mod attachments;
 pub mod baseline;
 pub mod capture;
 pub mod check;
 pub mod config;
+pub mod delivery;
 pub mod doctor;
 pub mod engine;
 pub mod evidence;
 pub mod exceptions;
+pub mod forge;
 pub mod gate;
 pub mod hooks;
 pub mod host;

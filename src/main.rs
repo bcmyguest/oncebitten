@@ -6,10 +6,12 @@ use oncebitten::baseline;
 use oncebitten::capture;
 use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
+use oncebitten::delivery;
 use oncebitten::doctor;
 use oncebitten::engine::Outcome;
 use oncebitten::evidence::{self, Cluster};
 use oncebitten::exceptions::{self, Exception};
+use oncebitten::forge;
 use oncebitten::gate::{self, Stage};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
@@ -118,7 +120,11 @@ enum Command {
     /// Replay an ast-grep rule against its fixtures and corpus; exit 0 proven, 1 rejected, 2 could not run
     Replay {
         /// Qualified rule id, as `rules list` prints it
-        rule: String,
+        #[arg(required_unless_present = "stale", conflicts_with = "stale")]
+        rule: Option<String>,
+        /// Replay every project rule that is active or proposed and has a missing or stale proof
+        #[arg(long)]
+        stale: bool,
         /// The oncebitten-checker binary to bake into the sandbox image (default: next to oncebitten)
         #[arg(long)]
         checker: Option<PathBuf>,
@@ -183,6 +189,23 @@ enum ProposalsAction {
         #[arg(long)]
         reason: String,
     },
+    /// Commit a proposed rule to the current branch or to the writable rules source; exit 2 on a finding or a rejected proposal
+    Deliver {
+        id: String,
+        /// `pr` commits on the current branch; `rules-repo` commits to a branch of the writable source.
+        /// Default: `pr` when the forge reports an open PR for the branch, else `rules-repo`
+        #[arg(long, value_enum)]
+        to: Option<DeliverTarget>,
+        /// Push the commit; a rules-repo push also opens a PR
+        #[arg(long)]
+        push: bool,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum DeliverTarget {
+    Pr,
+    RulesRepo,
 }
 
 #[derive(Subcommand)]
@@ -308,10 +331,11 @@ fn main() -> Result<()> {
         } => run_baseline_update(),
         Command::Replay {
             rule,
+            stale,
             checker,
             gateway,
             local,
-        } => run_replay(&rule, checker, gateway, local),
+        } => run_replay(rule.as_deref(), stale, checker, gateway, local),
     }
 }
 
@@ -432,6 +456,7 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
         ProposalsAction::Accept { id } => proposals::accept(&store, &id).map(|dir| {
             println!("accepted {id}: {} is active", dir.display());
         }),
+        ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
         ProposalsAction::Reject { id, reason } => {
             proposals::reject(&store, &id, &reason, now_millis()?)
                 .map(|()| println!("rejected {id}"))
@@ -440,6 +465,40 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
     if let Err(error) = result {
         eprintln!("error: {error:#}");
         std::process::exit(2)
+    }
+    Ok(())
+}
+
+fn run_deliver(
+    store: &Store,
+    inputs: &Inputs,
+    id: &str,
+    to: Option<DeliverTarget>,
+    push: bool,
+) -> Result<()> {
+    let checker = default_checker()?;
+    let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
+    let to = to.map(|target| match target {
+        DeliverTarget::Pr => delivery::Target::Pr,
+        DeliverTarget::RulesRepo => delivery::Target::RulesRepo,
+    });
+    let delivered = delivery::deliver(store, inputs, id, to, push, &prove, &forge::backend)?;
+    println!(
+        "delivered {id} to {}: commit {}",
+        delivered.target.as_str(),
+        delivered.commit
+    );
+    if let Some(branch) = &delivered.branch {
+        println!("branch: {branch}");
+    }
+    if let delivery::Proof::Unproven(reason) = &delivered.proof {
+        println!("unproven: {reason}");
+    }
+    if let Some(url) = &delivered.pr_url {
+        println!("pr: {url}");
+    }
+    if let Some(hint) = &delivered.push_hint {
+        println!("to publish: {hint}");
     }
     Ok(())
 }
@@ -468,6 +527,12 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
     println!("{}", proposal_line(&row));
     if let Some(dir) = &row.dir {
         println!("rule dir: {}", dir.display());
+    }
+    if let (Some(target), Some(commit)) = (&row.target, &row.commit) {
+        println!("delivered: {target} {commit}");
+    }
+    if let Some(url) = &row.pr_url {
+        println!("pr: {url}");
     }
     if let Some(rationale) = &row.rationale {
         println!("rationale: {rationale}");
@@ -651,6 +716,9 @@ fn run_gate(stage: GateStage) -> Result<()> {
         };
         eprintln!("{level}: {}", gate::describe(id, validity));
     }
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
     report_checks(&report.checked);
     if report.known > 0 {
         eprintln!(
@@ -753,7 +821,8 @@ fn run_baseline_update() -> Result<()> {
 }
 
 fn run_replay(
-    id: &str,
+    id: Option<&str>,
+    stale: bool,
     checker: Option<PathBuf>,
     gateway: Option<String>,
     local: bool,
@@ -763,20 +832,36 @@ fn run_replay(
         Ok(rules) => rules,
         Err(failure) => exit_could_not_run(failure),
     };
+    if stale {
+        let code = replay_stale(&rules, checker.as_deref(), gateway, local)?;
+        std::process::exit(code)
+    }
+    let id = id.context("replay needs a rule id or --stale")?;
     let Some(resolved) = rules.iter().find(|resolved| resolved.id == id) else {
         eprintln!("error: no rule named `{id}`; see oncebitten rules list");
         std::process::exit(2)
     };
-    if matches!(resolved.rule.check, Check::Steer(_)) {
-        if local || gateway.is_some() {
-            eprintln!("{id}: steer rules replay with the matcher; ignoring --local and --gateway");
-        }
+    if matches!(resolved.rule.check, Check::Steer(_)) && (local || gateway.is_some()) {
+        eprintln!("{id}: steer rules replay with the matcher; ignoring --local and --gateway");
+    }
+    let (replayed, runner) = replay_resolved(&resolved.rule, checker.as_deref(), gateway, local)?;
+    std::process::exit(report_replay(id, &replayed, runner))
+}
+
+/// Replays one rule: a steer rule with the matcher, any other in the sandbox
+/// (or on the host with `local`).
+fn replay_resolved(
+    rule: &Rule,
+    checker: Option<&Path>,
+    gateway: Option<String>,
+    local: bool,
+) -> Result<(proof::Replayed, &'static str)> {
+    if matches!(rule.check, Check::Steer(_)) {
         let exe = std::env::current_exe().context("locating the oncebitten binary")?;
-        let replayed = proof::replay_steer(&resolved.rule, &exe);
-        std::process::exit(report_replay(id, &replayed, "matcher"));
+        return Ok((proof::replay_steer(rule, &exe), proof::MATCHER));
     }
     let checker = match checker {
-        Some(path) => path,
+        Some(path) => path.to_path_buf(),
         None => default_checker()?,
     };
     let (backend, kind): (Box<dyn Backend>, BackendKind) = if local {
@@ -784,8 +869,37 @@ fn run_replay(
     } else {
         (Box::new(OpenShell::new(gateway)), BackendKind::OpenShell)
     };
-    let replayed = proof::replay_rule(&resolved.rule, &checker, backend.as_ref(), kind);
-    std::process::exit(report_replay(id, &replayed, kind.as_str()))
+    Ok((
+        proof::replay_rule(rule, &checker, backend.as_ref(), kind),
+        kind.as_str(),
+    ))
+}
+
+/// Exit code of `replay --stale`: 2 if any rule could not run, else 1 if any
+/// was rejected, else 0.
+fn replay_stale(
+    rules: &[oncebitten::registry::Resolved],
+    checker: Option<&Path>,
+    gateway: Option<String>,
+    local: bool,
+) -> Result<i32> {
+    let mut code = 0;
+    for resolved in proof::needing_replay(rules) {
+        let (replayed, _) = replay_resolved(&resolved.rule, checker, gateway.clone(), local)?;
+        let id = &resolved.id;
+        match &replayed.verdict {
+            Verdict::Proven => println!("{id}: proven"),
+            Verdict::Rejected(reason) => {
+                println!("{id}: rejected: {reason}");
+                code = code.max(1);
+            }
+            Verdict::CouldNotRun(reason) => {
+                println!("{id}: could not run: {reason}");
+                code = 2;
+            }
+        }
+    }
+    Ok(code)
 }
 
 fn report_replay(id: &str, replayed: &proof::Replayed, runner: &str) -> i32 {

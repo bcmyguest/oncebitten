@@ -10,8 +10,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::registry::{Layer, Resolved};
 use crate::replay::{replay_dir, Backend, Verdict};
-use crate::rule::{Check, Rule};
+use crate::rule::{Check, Rule, Status};
 
 pub const PROOF_FILE: &str = "proof.json";
 const RULE_FILE: &str = "rule.toml";
@@ -173,6 +174,20 @@ pub fn validity(rule: &Rule) -> Validity {
         Ok(_) => Validity::Stale("the rule directory changed since the replay".to_owned()),
         Err(error) => Validity::NotProven(format!("hashing the rule directory: {error:#}")),
     }
+}
+
+/// The project rules `replay --stale` runs: active or proposed, needing a
+/// proof, whose proof is missing, stale or not accepted.
+pub fn needing_replay(rules: &[Resolved]) -> Vec<&Resolved> {
+    rules
+        .iter()
+        .filter(|resolved| {
+            resolved.layer == Layer::Project
+                && matches!(resolved.rule.status, Status::Active | Status::Proposed)
+                && !matches!(resolved.rule.check, Check::Native { .. })
+                && validity(&resolved.rule) != Validity::Valid
+        })
+        .collect()
 }
 
 /// Replays an ast-grep or diff rule. A proven verdict from the OpenShell backend writes

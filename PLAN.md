@@ -27,7 +27,7 @@
 - Existing violations: a committed baseline (`.oncebitten/baseline.json`) records violations present when a rule turns active; `check` and the gate fail only on violations not in the baseline.
 - PR evidence (screenshot, video, diagram) may live as an attachment in the PR description or a PR comment, read through the forge trait (gh, glab, az) at PR time; a committed file also satisfies a `diff` rule.
 - Correction lexicon: start broad and let triage filter; the list is configurable.
-- Privacy: the event store keeps a SHA-256 of the prompt plus the matched phrase, never full prompt text.
+- Privacy: the event store keeps the text of a prompt that matches the correction lexicon (cut to the summary limit) and a SHA-256 of every other prompt.
 - Triage writes the proposed rule and its fixtures in the same call.
 - opencode is accepted as a triage host without a hooks-off proof; docs say so.
 - pi support is verified against a locally installed pi.

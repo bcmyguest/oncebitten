@@ -27,6 +27,9 @@ Run all four before a commit. CI runs the same commands.
 - `src/exceptions.rs`: `.oncebitten/exceptions.toml`: parsing, expiry, matching findings, appending entries. Applied by `check`, `gate` and `baseline update`.
 - `src/lifecycle.rs`: `rules retire` and `rules rollback`: in-place `rule.toml` status edits for project rules.
 - `src/doctor.rs`: `oncebitten doctor` read-only checks. Reuses the config, lockfile, rule, proof, exception, hook and store loaders.
+- `src/forge.rs`: `Forge` trait (find open PR, open PR, read PR text) with `gh`, `glab` and `az repos` backends, chosen from the `forge` key or the `origin` remote. `tests/support/fake_forge.rs`: the `fake-forge` test binary, copied as `gh`, `glab` or `az`. `tests/forge.rs` covers it.
+- `src/delivery.rs`: `proposals deliver` (PR commit or rules-repo branch). `tests/delivery.rs` covers it. `docs/proposals.md` has the flow.
+- `src/attachments.rs`: pure matcher for attachment links in PR text; `gate pr` uses it for diff rules. `tests/gate_attachments.rs`.
 - `src/main.rs`: CLI (`config show`, `config path`, `rules sync|list|validate|retire|rollback`, `check`, `replay`, `gate`, `baseline update`, `exception add|list`, `doctor`, `capture`, `hooks install|uninstall`, `evidence list|show|reject`).
 - `src/lib.rs`: library root.
 - `src/store.rs`: SQLite event store (`events`, `signals`, `rejections`).

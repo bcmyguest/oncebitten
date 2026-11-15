@@ -81,8 +81,36 @@ Capture ignores events outside a git repository for this purpose and never fails
 
 ## Store
 
-Two tables in the evidence database, created on open: `proposals` (one row per cluster: repo, kind, state, rule id and directory, proof flag and note, verdict JSON, rationale, occurrence ids) and `triage_locks`.
+Two tables in the evidence database, created on open: `proposals` (one row per cluster: repo, kind, state, rule id and directory, proof flag and note, verdict JSON, rationale, occurrence ids, and after delivery the target, commit and PR URL) and `triage_locks`.
 
-## Not yet
+## Delivery
 
-Delivery as a commit in the current pull request or as a pull request to the rules repository (gh, glab, az), and replay of stale proofs, are step 9b.
+`oncebitten proposals deliver <cluster-id> [--to pr|rules-repo] [--push]` commits a proposed rule. It never sets the rule's status; `proposals accept` does.
+
+```mermaid
+flowchart TD
+    A[deliver id] --> B{kind and state}
+    B -->|finding or rejected| X[exit 2]
+    B -->|rule| C{proof valid?}
+    C -->|no| D[replay; unproven keeps going, stated in message]
+    C -->|yes| E
+    D --> E{--to given?}
+    E -->|pr| P
+    E -->|rules-repo| R
+    E -->|no| F{forge reports open PR for branch?}
+    F -->|yes| P
+    F -->|no| R
+    F -->|forge error| G{writable source?}
+    G -->|yes| R
+    G -->|no| X
+    P[commit the rule dir on the current branch] -->|--push| P2[git push]
+    R[copy the rule dir into the writable source clone, branch oncebitten/propose-id, commit] -->|--push| R2[push, open PR through the forge of the clone's origin]
+    R -->|no --push| R3[print the branch and the push command]
+```
+
+- A stale or missing proof replays first, with the prover `triage` uses. A rule that stays unproven is still delivered; the commit message and PR body say `unproven: <reason>`.
+- `pr` commits only the rule directory, with the message `chore(oncebitten): propose rule <id>` and a body that lists the cluster id, the rationale and the proof state. Nothing to commit exits 2. `--push` runs `git push` to the branch's upstream.
+- `rules-repo` needs the one source with `writable = true` (`rules.sources[].writable`) and that source cloned by `rules sync`. It copies the rule directory into the clone, creates `oncebitten/propose-<id>` there and commits. The clone stays on that branch until the next `rules sync`. With `--push` it pushes the branch and opens a PR against the source's `rev`, or origin's default branch; without it prints the branch and the push command.
+- The forge is chosen as in [configuration.md](configuration.md) (`forge` key, else the `origin` remote). A forge CLI that is missing or exits non-zero is an error that carries its stderr.
+- The store records the target, commit and PR URL; `proposals list` and `proposals show` print them. Older databases gain the three columns on open.
+- Exit 0 delivered; 2 a finding, a rejected proposal, no target, or any failure.

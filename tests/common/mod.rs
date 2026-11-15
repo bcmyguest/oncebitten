@@ -137,3 +137,39 @@ pub fn stderr(output: &Output) -> String {
 pub fn both(output: &Output) -> String {
     format!("{}{}", stdout(output), stderr(output))
 }
+
+/// A copy of the `fake-forge` binary installed under a forge CLI's name in its
+/// own temp directory. Canned replies and the argv log live beside it.
+pub struct FakeForge {
+    dir: TempDir,
+    program: PathBuf,
+}
+
+impl FakeForge {
+    pub fn new(cli: &str) -> Self {
+        let dir = TempDir::new().unwrap();
+        let program = dir
+            .path()
+            .join(format!("{cli}{}", std::env::consts::EXE_SUFFIX));
+        fs::copy(env!("CARGO_BIN_EXE_fake-forge"), &program).unwrap();
+        FakeForge { dir, program }
+    }
+
+    pub fn program(&self) -> &Path {
+        &self.program
+    }
+
+    /// Sets a canned file: `reply`, `status` or `stderr`, or `reply.N` for call N.
+    pub fn set(&self, name: &str, contents: &str) {
+        fs::write(self.dir.path().join(name), contents).unwrap();
+    }
+
+    /// Every call's argv, in order.
+    pub fn calls(&self) -> Vec<Vec<String>> {
+        fs::read_to_string(self.dir.path().join("calls.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+}
