@@ -1,5 +1,5 @@
 id = "no-sudo"
-description = "Agents never run sudo; the user runs privileged commands."
+description = "Agents never run sudo; the user runs privileged commands. Matches sudo as a command at the start or after &&, ||, ;, |, a newline or (, optionally behind env, command, exec, nohup, time or a path. Misses sudo behind other wrappers (xargs, sh -c, bash -c), command substitution and variables."
 mode = "steer"
 status = "proposed"
 engine = "steer"
@@ -10,4 +10,4 @@ message = "Do not run sudo. Print the command and ask the user to run it."
 
 [steer.trigger]
 tool = "{bash,shell,run_shell_command}"
-command = '^\s*sudo\b'
+command = '(^|[;&|(\n])\s*(env\s+(-\S+\s+|\w+=\S*\s+)*|command\s+|exec\s+|nohup\s+|time\s+)?(\S*/)?sudo($|[\s;&|)])'
