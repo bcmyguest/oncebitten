@@ -46,3 +46,38 @@ fn successful_commands_respects_the_limit() {
     assert_eq!(found.len(), 2);
     assert_eq!(found[0].summary, "cmd 5");
 }
+
+#[test]
+fn successful_commands_match_a_verbatim_windows_repo_path() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record(
+            &event(1, r"\\?\C:\work\r", KIND_TOOL_OK, "Bash", "cargo fmt"),
+            &[],
+        )
+        .unwrap();
+    let found = store.successful_commands(r"C:\work\r", "none", 10).unwrap();
+    assert_eq!(found.len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_commands_match_a_repo_reached_through_a_symlink() {
+    let root = tempfile::TempDir::new().unwrap();
+    let real = root.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = root.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record(
+            &event(1, link.to_str().unwrap(), KIND_TOOL_OK, "Bash", "cargo fmt"),
+            &[],
+        )
+        .unwrap();
+    let canonical = std::fs::canonicalize(&real).unwrap();
+    let found = store
+        .successful_commands(canonical.to_str().unwrap(), "none", 10)
+        .unwrap();
+    assert_eq!(found.len(), 1);
+}
