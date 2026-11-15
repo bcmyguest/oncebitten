@@ -17,6 +17,9 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
+ast-grep-config = "0.51.2"
+ast-grep-core = "0.51.2"
+ast-grep-language = { version = "0.51.2", default-features = false, features = ["tree-sitter-python", "tree-sitter-rust", "tree-sitter-javascript", "tree-sitter-typescript"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
