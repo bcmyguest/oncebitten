@@ -228,7 +228,7 @@ fn digest(text: &str) -> String {
 }
 
 #[test]
-fn prompt_text_is_stored_as_a_digest() {
+fn correction_prompt_text_is_stored() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("events.db");
     let store = Store::open(&path).unwrap();
@@ -246,8 +246,42 @@ fn prompt_text_is_stored_as_a_digest() {
     let detail: String = conn
         .query_row("SELECT detail FROM signals", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(summary, digest("No, my secret plan"));
+    assert_eq!(summary, "No, my secret plan");
     assert_eq!(detail, "no,");
+}
+
+#[test]
+fn prompt_without_a_correction_is_stored_as_a_digest() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    store
+        .record(&prompt_event("s", "add a login page", 1), &[])
+        .unwrap();
+    let summary: String = raw(&path)
+        .query_row("SELECT summary FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(summary, digest("add a login page"));
+}
+
+#[test]
+fn correction_prompt_text_is_cut_to_the_summary_limit() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    let signal = Signal {
+        kind: "user-correction",
+        detail: "never".into(),
+    };
+    let long = format!("never {}", "x".repeat(5000));
+    store
+        .record(&prompt_event("s", &long, 1), &[signal])
+        .unwrap();
+    let summary: String = raw(&path)
+        .query_row("SELECT summary FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert!(summary.starts_with("never x"));
+    assert!(summary.chars().count() <= 2000);
 }
 
 #[test]

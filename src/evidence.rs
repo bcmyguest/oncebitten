@@ -181,7 +181,7 @@ fn classify(row: &SignalRow) -> Option<(&'static str, Source, String)> {
         TOOL_FAILURE | REPEAT_FAILURE => Some((CLASS_FAILURE, Source::Mined, command())),
         TEST_FAIL_THEN_PASS => Some((TEST_FAIL_THEN_PASS, Source::Mined, command())),
         REVERT => Some((REVERT, Source::Mined, command())),
-        // The prompt digest keeps distinct corrections apart; identical
+        // The stored prompt text keeps distinct corrections apart; identical
         // prompts in different sessions still cluster.
         USER_CORRECTION => Some((USER_CORRECTION, Source::Stated, row.event.summary.clone())),
         _ => None,

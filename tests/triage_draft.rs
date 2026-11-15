@@ -256,3 +256,18 @@ fn the_prompt_asks_for_a_draft() {
     assert!(prompt.contains("draft"), "{prompt}");
     assert!(prompt.contains("null"), "{prompt}");
 }
+
+#[test]
+fn empty_values_for_unused_keys_count_as_absent() {
+    let draft = astgrep_draft();
+    let draft = with(draft, "command", serde_json::json!([]));
+    let draft = with(draft, "fired_exit_codes", serde_json::json!([]));
+    let draft = with(draft, "fired_output_contains", serde_json::json!(""));
+    let draft = with(draft, "when_changed", serde_json::json!([]));
+    let draft = with(draft, "require_changed", serde_json::json!([]));
+    let answer = verdict::parse_answer(&answer(&draft.to_string())).unwrap();
+    let draft = answer.draft.expect("draft kept");
+    assert!(draft.command.is_none());
+    assert!(draft.when_changed.is_none());
+    assert!(draft.fired_output_contains.is_none());
+}

@@ -24,24 +24,24 @@ pub struct Draft {
     pub description: String,
     pub mode: Mode,
     pub engine: Engine,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub language: Option<String>,
     /// The ast-grep `check.yml` text.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub check: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_vec_as_none")]
     pub command: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_vec_as_none")]
     pub fired_exit_codes: Option<Vec<i32>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub fired_output_contains: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_vec_as_none")]
     pub when_changed: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_vec_as_none")]
     pub require_changed: Option<Vec<String>>,
     pub bad: DraftFile,
     pub fixed: DraftFile,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_vec_as_none")]
     pub corpus: Option<Vec<DraftFile>>,
     pub rationale: String,
 }
@@ -251,4 +251,24 @@ fn check_file_name(file: &DraftFile, stem: Option<&str>) -> Result<()> {
 
 fn write_file(path: &Path, content: &str) -> Result<()> {
     std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))
+}
+
+/// Hosts that enforce strict JSON schemas send every draft key, and a model
+/// often fills an unused one with `""` rather than `null`. Both mean absent.
+fn empty_string_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<String> = Option::deserialize(deserializer)?;
+    Ok(value.filter(|text| !text.trim().is_empty()))
+}
+
+/// As `empty_string_as_none`, for `[]`.
+fn empty_vec_as_none<'de, D, T>(deserializer: D) -> std::result::Result<Option<Vec<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let value: Option<Vec<T>> = Option::deserialize(deserializer)?;
+    Ok(value.filter(|items| !items.is_empty()))
 }
