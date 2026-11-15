@@ -5,8 +5,10 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::config::{Host, Triage};
 use crate::evidence::Cluster;
+use crate::store::Store;
+use crate::triage::code::{self, Code};
 use crate::triage::host::{answer_from, control_invocation, invocation};
-use crate::triage::prompt::{build_prompt, Occurrence, PromptInput};
+use crate::triage::prompt::{build_prompt_with_code, Occurrence, PromptInput};
 use crate::triage::proof::{prove, requires_proof, workdir_sentinels};
 use crate::triage::run::Runner;
 use crate::triage::verdict::{Answer, Verdict};
@@ -87,6 +89,34 @@ pub fn run(
     run_answer(runner, host, agent, input, timeout).map(|answer| answer.verdict)
 }
 
+/// Asks the host about one cluster. With `send_code`, the prompt carries the
+/// changed code of the cluster's sessions, and a draft must quote an added line
+/// of it. Without code the prompt and the answer check are today's.
+pub fn ask_cluster(
+    runner: &dyn Runner,
+    host: Host,
+    agent: &str,
+    store: &Store,
+    cluster: &Cluster,
+    triage: &Triage,
+    timeout: Duration,
+) -> Result<Answer> {
+    let code = if triage.send_code {
+        code::collect(store, &cluster.occurrences, triage.max_code_bytes)?
+    } else {
+        Code::default()
+    };
+    let answer = run_answer_with_code(runner, host, agent, &prompt_input(cluster), &code, timeout)?;
+    if let Some(draft) = &answer.draft {
+        if !code.is_empty() && !code.quoted_by(&draft.bad.content) {
+            bail!(
+                "could not run: the drafted bad fixture quotes no added line of the changed code sent to triage"
+            );
+        }
+    }
+    Ok(answer)
+}
+
 /// `run`, keeping the rule the host drafted beside its verdict.
 pub fn run_answer(
     runner: &dyn Runner,
@@ -95,9 +125,21 @@ pub fn run_answer(
     input: &PromptInput,
     timeout: Duration,
 ) -> Result<Answer> {
+    run_answer_with_code(runner, host, agent, input, &Code::default(), timeout)
+}
+
+/// `run_answer` with the changed code appended to the prompt.
+pub fn run_answer_with_code(
+    runner: &dyn Runner,
+    host: Host,
+    agent: &str,
+    input: &PromptInput,
+    code: &Code,
+    timeout: Duration,
+) -> Result<Answer> {
     let workdir = Workdir::create()?;
     let dir = workdir.path();
-    let prompt = build_prompt(input);
+    let prompt = build_prompt_with_code(input, &code.diff);
     let triage = invocation(host, agent, &prompt, dir)?;
     let captured = if requires_proof(host) {
         let sentinels = workdir_sentinels(host, dir, &dir.join("markers"));

@@ -381,6 +381,25 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// The paths the session's edit tools named, as the hook payloads gave them.
+    pub fn session_edit_paths(&self, host: &str, session_id: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT tool, summary FROM events \
+             WHERE host = ?1 AND session_id = ?2 AND tool IS NOT NULL",
+        )?;
+        let rows = stmt.query_map(params![host, session_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut paths = Vec::new();
+        for row in rows {
+            let (tool, summary) = row?;
+            if crate::host::is_edit_tool(&tool) {
+                paths.push(summary);
+            }
+        }
+        Ok(paths)
+    }
+
     pub fn signals(&self) -> Result<Vec<SignalRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.kind, s.detail, e.id, e.ts, e.host, e.session_id, e.repo, e.kind, \
