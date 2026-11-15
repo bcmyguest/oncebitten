@@ -310,7 +310,7 @@ impl Platform {
         }
     }
 
-    fn is_absolute(self, path: &str) -> bool {
+    pub(crate) fn is_absolute(self, path: &str) -> bool {
         match self {
             Platform::Unix => path.starts_with('/'),
             Platform::Windows => {
