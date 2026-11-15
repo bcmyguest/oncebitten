@@ -3,7 +3,9 @@
 - [Install](install.md): Claude Code plugin, install scripts, CI, releases.
 - [Configuration](configuration.md): settings, precedence and the files they come from.
 - [Rules](rules.md): rule format, ids, overrides, lockfile and commands.
-- [Gate](gate.md): pre-push and pull request gate, proofs and baseline.
+- [Gate](gate.md): pre-push and CI stages, proofs, baseline, exit codes.
+- [Rule lifecycle](lifecycle.md): exceptions, retire and rollback.
+- [Doctor](doctor.md): read-only checks of the installation and the repository.
 - [Signal capture](capture.md): signals, host support and hook install.
 - [Evidence](evidence.md): clusters, independent counts, provenance and rejections.
 - [Roadmap](roadmap.md): milestones, build steps and their status.

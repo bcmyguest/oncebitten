@@ -26,7 +26,8 @@ Directories whose names start with `.` are skipped, so a source clone's `.git` i
 | `id` | yes | lowercase kebab-case, equal to the directory name |
 | `description` | yes | text |
 | `mode` | yes | `block`, `steer` |
-| `status` | yes | `proposed`, `active`, `retired` |
+| `status` | yes | `proposed`, `active`, `retired`; only `active` runs (see [lifecycle.md](lifecycle.md)) |
+| `retired_reason` | no | non-empty text; `rules retire` writes it |
 | `engine` | yes | `ast-grep`, `native`, `diff` |
 | `language` | no | text |
 | `overrides` | no | `<source>/<id>`; requires `reason` |
@@ -102,10 +103,14 @@ Git runs through the `git` binary.
 | `oncebitten rules sync --frozen` | Clone any missing source, check out each locked commit, fetching one only when the clone lacks it; never writes `rules.lock` | 0 on success; 2 when the lock is missing, a source has no entry, the lock names a source the config no longer has, or a locked commit is unreachable after fetching |
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
+| `oncebitten rules retire <id> --reason <text>` | Set `status = "retired"` and `retired_reason` on a project rule (see [lifecycle.md](lifecycle.md#retire)) | 0 retired; 2 unknown, source or example rule, empty reason, or already retired |
+| `oncebitten rules rollback <id>` | Return an active project rule to `proposed`, keep its files and proof, print the git commands that restore an earlier version (see [lifecycle.md](lifecycle.md#rollback)) | 0 rolled back; 2 unknown, source or example rule, or not active |
+| `oncebitten exception add\|list` | Add or list exceptions in `.oncebitten/exceptions.toml` (see [lifecycle.md](lifecycle.md#exceptions)) | 0; 2 invalid entry or file |
+| `oncebitten doctor [--gateway <endpoint>]` | Read-only checks of the installation and the repository (see [doctor.md](doctor.md)) | 0 no check failed; 1 a check failed |
 | `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep or diff rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
 | `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs, apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |
 | `oncebitten baseline update` | Replace `.oncebitten/baseline.json` with the current violations of active block rules in every tracked file | 0 written; 2 a rule could not run (nothing written) |
-| `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
+| `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), drop findings a live exception covers, print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
 
 `check` prints a could-not-run reason to stderr as `<id>: could not run: <reason>`. It reads the repository the current directory is in.
 
