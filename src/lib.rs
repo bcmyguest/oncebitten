@@ -5,6 +5,7 @@ pub mod engine;
 pub mod hooks;
 pub mod host;
 pub mod lockfile;
+pub mod proof;
 pub mod registry;
 pub mod replay;
 pub mod rule;

@@ -1,0 +1,256 @@
+//! Replay proofs. A rule directory that passed its replay in the OpenShell
+//! sandbox carries `proof.json`, which names the directory by a SHA-256 over
+//! every other file in it. The proof stands while that hash matches.
+
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::replay::{replay_dir, Backend, Verdict};
+use crate::rule::{Check, Rule};
+
+pub const PROOF_FILE: &str = "proof.json";
+pub const OPENSHELL: &str = "openshell";
+pub const LOCAL: &str = "local";
+pub const PROVEN: &str = "proven";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Proof {
+    /// The `id` in `rule.toml`, without a source prefix, so the proof survives
+    /// a move between the project and a rules repo.
+    pub rule: String,
+    pub dir_sha256: String,
+    /// The oncebitten version that ran the replay; the checker builds from the same crate.
+    pub checker_version: String,
+    pub checker_sha256: String,
+    pub backend: String,
+    /// Seconds since the Unix epoch.
+    pub timestamp: u64,
+    pub result: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Validity {
+    Valid,
+    Missing,
+    Stale(String),
+    NotProven(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendKind {
+    OpenShell,
+    Local,
+}
+
+impl BackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BackendKind::OpenShell => OPENSHELL,
+            BackendKind::Local => LOCAL,
+        }
+    }
+}
+
+/// What one replay produced: the verdict and the proof file, if one was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replayed {
+    pub verdict: Verdict,
+    pub written: Option<PathBuf>,
+}
+
+pub fn rule_dir(rule: &Rule) -> &Path {
+    rule.file.parent().unwrap_or_else(|| Path::new("."))
+}
+
+pub fn proof_path(dir: &Path) -> PathBuf {
+    dir.join(PROOF_FILE)
+}
+
+/// SHA-256 over every file under `dir` except the top-level `proof.json`, in
+/// sorted order of their `/`-separated relative paths. Each file adds its
+/// path, a NUL, its length as a little-endian u64, then its bytes with CRLF
+/// read as LF, so a Windows checkout hashes like a Unix one.
+pub fn dir_hash(dir: &Path) -> Result<String> {
+    let mut files = Vec::new();
+    collect(dir, dir, &mut files)?;
+    files.sort();
+    let mut hasher = Sha256::new();
+    for (relative, path) in &files {
+        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        let bytes = lf_only(&bytes);
+        hasher.update(relative.as_bytes());
+        hasher.update([0]);
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
+pub fn file_sha256(path: &Path) -> Result<String> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(hex(&Sha256::digest(&bytes)))
+}
+
+pub fn text_sha256(text: &str) -> String {
+    hex(&Sha256::digest(lf_only(text.as_bytes())))
+}
+
+pub fn read(dir: &Path) -> Result<Option<Proof>> {
+    let path = proof_path(dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let proof =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(Some(proof))
+}
+
+pub fn write(dir: &Path, proof: &Proof) -> Result<PathBuf> {
+    let path = proof_path(dir);
+    let mut text = serde_json::to_string_pretty(proof)?;
+    text.push('\n');
+    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
+/// Whether the rule directory carries a proof that still stands.
+pub fn validity(rule: &Rule) -> Validity {
+    let dir = rule_dir(rule);
+    let proof = match read(dir) {
+        Ok(Some(proof)) => proof,
+        Ok(None) => return Validity::Missing,
+        Err(error) => return Validity::NotProven(format!("unreadable: {error:#}")),
+    };
+    if proof.result != PROVEN {
+        return Validity::NotProven(format!("result is `{}`", proof.result));
+    }
+    if proof.backend != OPENSHELL {
+        return Validity::NotProven(format!(
+            "backend is `{}`; only {OPENSHELL} replays count",
+            proof.backend
+        ));
+    }
+    if proof.rule != rule.id {
+        return Validity::Stale(format!("proof names rule `{}`", proof.rule));
+    }
+    match dir_hash(dir) {
+        Ok(hash) if hash == proof.dir_sha256 => Validity::Valid,
+        Ok(_) => Validity::Stale("the rule directory changed since the replay".to_owned()),
+        Err(error) => Validity::NotProven(format!("hashing the rule directory: {error:#}")),
+    }
+}
+
+/// Replays an ast-grep rule. A proven verdict from the OpenShell backend writes
+/// `proof.json`; a local run only reports. A rejected rule loses its proof.
+pub fn replay_rule(
+    rule: &Rule,
+    checker: &Path,
+    backend: &dyn Backend,
+    kind: BackendKind,
+) -> Replayed {
+    let not_run = |reason: String| Replayed {
+        verdict: Verdict::CouldNotRun(reason),
+        written: None,
+    };
+    if !matches!(rule.check, Check::AstGrep { .. }) {
+        return not_run("replay supports ast-grep rules only".to_owned());
+    }
+    let dir = rule_dir(rule);
+    let verdict = replay_dir(dir, checker, backend);
+    match (&verdict, kind) {
+        (Verdict::Proven, BackendKind::OpenShell) => match record(rule, dir, checker) {
+            Ok(path) => Replayed {
+                verdict,
+                written: Some(path),
+            },
+            Err(error) => not_run(format!("writing the proof: {error:#}")),
+        },
+        (Verdict::Rejected(_), _) => match remove(dir) {
+            Ok(()) => Replayed {
+                verdict,
+                written: None,
+            },
+            Err(error) => not_run(format!("removing the old proof: {error:#}")),
+        },
+        _ => Replayed {
+            verdict,
+            written: None,
+        },
+    }
+}
+
+fn record(rule: &Rule, dir: &Path, checker: &Path) -> Result<PathBuf> {
+    let proof = Proof {
+        rule: rule.id.clone(),
+        dir_sha256: dir_hash(dir)?,
+        checker_version: env!("CARGO_PKG_VERSION").to_owned(),
+        checker_sha256: file_sha256(checker)?,
+        backend: OPENSHELL.to_owned(),
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default(),
+        result: PROVEN.to_owned(),
+    };
+    write(dir, &proof)
+}
+
+fn remove(dir: &Path) -> Result<()> {
+    let path = proof_path(dir);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("removing {}", path.display())),
+    }
+}
+
+fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
+    for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let entry = entry.with_context(|| format!("reading {}", dir.display()))?;
+        let path = entry.path();
+        let kind = entry
+            .file_type()
+            .with_context(|| format!("reading {}", path.display()))?;
+        if kind.is_symlink() {
+            bail!("{}: rule directories may not hold symlinks", path.display());
+        }
+        if kind.is_dir() {
+            collect(root, &path, out)?;
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .with_context(|| format!("{} is outside {}", path.display(), root.display()))?
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        if relative != PROOF_FILE {
+            out.push((relative, path));
+        }
+    }
+    Ok(())
+}
+
+fn lf_only(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut iter = bytes.iter().peekable();
+    while let Some(&byte) = iter.next() {
+        if byte == b'\r' && iter.peek() == Some(&&b'\n') {
+            continue;
+        }
+        out.push(byte);
+    }
+    out
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}

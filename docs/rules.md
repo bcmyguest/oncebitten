@@ -12,6 +12,7 @@ A rule is a directory. Rules come from three layers, and the project layer wins.
     bad.<ext>        # exactly one
     fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
   corpus/            # replay only: files that must stay clean
+  proof.json         # written by a proven OpenShell replay; not part of the hash
 ```
 
 `id` must equal the directory name.
@@ -100,6 +101,7 @@ Git runs through the `git` binary.
 | `oncebitten rules sync` | Clone or fetch each source, check out `rev` or `origin/HEAD`, write `rules.lock` | 0 on success |
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
+| `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
 | `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
 
 `check` prints a could-not-run reason to stderr as `<id>: could not run: <reason>`. It reads the repository the current directory is in.
@@ -117,4 +119,49 @@ Without `--ci`, a source that is not cloned exits 2 and asks for `rules sync`.
 - Missing rule file, fixture or corpus, a missing checker, a sandbox or gateway failure, and a checker error are could-not-run. A rule that misses `bad.*`, or fires on `fixed.*` or a corpus file, is rejected.
 - `OpenShell` runs the replay in an OpenShell sandbox. It builds an image per replay from `nvcr.io/nvidia/base/ubuntu:24.04` with the checker, rule and files baked in, creates the sandbox with a read-only policy, runs the checker once per file, and deletes the sandbox. The gateway limits sandbox names to 19 characters.
 - Build the checker for the image as a static musl binary: `cargo build --release --target x86_64-unknown-linux-musl --bin oncebitten-checker` (needs a musl C toolchain; the replay tests used a `rust:1-alpine` container).
-- Replay supports ast-grep rules only. No CLI command runs it yet.
+- Replay supports ast-grep rules only. A `native` or `diff` rule cannot be proven yet.
+
+### `oncebitten replay`
+
+```sh
+oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]
+```
+
+`<rule-id>` is the qualified id that `rules list` prints. The command loads rules as `check` does, replays that rule in the OpenShell sandbox and prints the verdict.
+
+| Verdict | Output | Exit |
+|---|---|---|
+| proven | `<id>: proven; wrote <path>` on stdout | 0 |
+| rejected | `<id>: rejected: <reason>` on stdout; any old `proof.json` is deleted | 1 |
+| could not run | `<id>: could not run: <reason>` on stderr; `proof.json` is left as it was | 2 |
+
+- `--checker`: the `oncebitten-checker` binary baked into the image. Default: `oncebitten-checker` next to the running `oncebitten`. The image runs Linux, so use the static musl build.
+- `--gateway`: the OpenShell gateway endpoint. Default: the `openshell` CLI's own.
+- `--local`: run the checker on the host, with no sandbox. It prints the verdict (`proven by the local runner; no proof written`) and writes no proof.
+
+### Proofs
+
+A proven sandbox replay writes `proof.json` into the rule directory, beside `rule.toml`. Commit it with the rule. A rule from a rules repo carries its proof in that repo, so replay it there and commit the proof to the rules repo.
+
+```json
+{
+  "rule": "py-utcnow",
+  "dir_sha256": "<SHA-256 of the rule directory>",
+  "checker_version": "0.0.0",
+  "checker_sha256": "<SHA-256 of the checker binary>",
+  "backend": "openshell",
+  "timestamp": 1794700000,
+  "result": "proven"
+}
+```
+
+- `rule` is the `id` in `rule.toml`, without a source prefix, so a proof stays valid when the directory moves between the project and a rules repo.
+- `dir_sha256` hashes every file in the rule directory except the top-level `proof.json`: files sorted by their `/`-separated relative path, each contributing its path, a NUL byte, its length as a little-endian 64-bit integer and its bytes, with CRLF read as LF. A Windows checkout with CRLF line endings therefore hashes like a Unix one. A symlink in the directory makes the hash fail.
+- `checker_version` is the version of the `oncebitten` that ran the replay; the checker builds from the same crate. `checker_sha256` names the exact checker binary. Validity does not compare either with the current checker, because CI need not have the musl checker.
+- `timestamp` counts seconds since the Unix epoch.
+
+A proof is valid when it parses, `result` is `proven`, `backend` is `openshell`, `rule` equals the rule's id and `dir_sha256` equals the directory's hash now. Any edit to the rule, its check file, fixtures or corpus makes the proof stale; replay again.
+
+Only an OpenShell replay writes a proof. `--local` never does, and a hand-written proof with another backend counts as not proven. On Windows the replay needs WSL 2 with OpenShell; run `oncebitten replay` inside WSL. Windows without WSL cannot produce a proof.
+
+Shipped examples are extracted to the data directory on each machine, so a proof written there stays on that machine. To prove an example for CI, copy it into `.oncebitten/rules/` under an id of its own, replay it and commit the proof.

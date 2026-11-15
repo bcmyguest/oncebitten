@@ -5,6 +5,7 @@ oncebitten turns repeated agent mistakes into rules that git enforces. A rule is
 ## Commands
 
 - `oncebitten check [--base <rev>]`: run each `active` rule against changes since `<rev>` (default `HEAD`). Changes are the tracked diff plus untracked files. Exit 0 clean, 1 a rule fired, 2 a rule could not run or rules did not load (2 wins over 1). Findings print to stdout as `<id>: <path>[:<line>]: <message>`. Could-not-run reasons print to stderr as `<id>: could not run: <reason>`.
+- `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]`: replay an ast-grep rule (fires on `fixtures/bad.*`, clean on `fixtures/fixed.*` and `corpus/`) in an OpenShell sandbox. A proven verdict writes `proof.json` into the rule directory; commit it. Exit 0 proven, 1 rejected, 2 could not run. `--local` runs without a sandbox and writes no proof.
 - `oncebitten rules sync`: clone each source to the data directory and write `.oncebitten/rules.lock`.
 - `oncebitten rules list [--ci]`: print `id  mode  status  origin` per rule.
 - `oncebitten rules validate [--ci]`: load and resolve every rule.
@@ -24,6 +25,7 @@ Precedence, highest first: project `.oncebitten/rules/<id>/`, then sources in co
     bad.<ext>        # exactly one
     fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
   corpus/            # replay only: files that must stay clean
+  proof.json         # written by a proven OpenShell replay; not part of the hash
 ```
 
 `rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check`), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.

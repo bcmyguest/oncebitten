@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use oncebitten::capture;
@@ -6,6 +8,9 @@ use oncebitten::config::{self, Inputs, Platform};
 use oncebitten::engine::Outcome;
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
+use oncebitten::proof::{self, BackendKind};
+use oncebitten::replay::openshell::OpenShell;
+use oncebitten::replay::{Backend, LocalRunner, Verdict};
 use oncebitten::rules::{self, Failure};
 
 #[derive(Parser)]
@@ -47,6 +52,20 @@ enum Command {
         /// Revision the working tree is compared with
         #[arg(long, default_value = "HEAD")]
         base: String,
+    },
+    /// Replay an ast-grep rule against its fixtures and corpus; exit 0 proven, 1 rejected, 2 could not run
+    Replay {
+        /// Qualified rule id, as `rules list` prints it
+        rule: String,
+        /// The oncebitten-checker binary to bake into the sandbox image (default: next to oncebitten)
+        #[arg(long)]
+        checker: Option<PathBuf>,
+        /// OpenShell gateway endpoint (default: the openshell CLI's own)
+        #[arg(long)]
+        gateway: Option<String>,
+        /// Run the checker on the host without a sandbox; reports only, writes no proof
+        #[arg(long)]
+        local: bool,
     },
 }
 
@@ -111,6 +130,12 @@ fn main() -> Result<()> {
         Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
         Command::Check { base } => run_check(&base),
+        Command::Replay {
+            rule,
+            checker,
+            gateway,
+            local,
+        } => run_replay(&rule, checker, gateway, local),
     }
 }
 
@@ -157,6 +182,74 @@ fn run_check(base: &str) -> Result<()> {
         }
     };
     std::process::exit(code)
+}
+
+fn run_replay(
+    id: &str,
+    checker: Option<PathBuf>,
+    gateway: Option<String>,
+    local: bool,
+) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let rules = match rules::load(&inputs, false) {
+        Ok(rules) => rules,
+        Err(failure) => exit_could_not_run(failure),
+    };
+    let Some(resolved) = rules.iter().find(|resolved| resolved.id == id) else {
+        eprintln!("error: no rule named `{id}`; see oncebitten rules list");
+        std::process::exit(2)
+    };
+    let checker = match checker {
+        Some(path) => path,
+        None => default_checker()?,
+    };
+    let (backend, kind): (Box<dyn Backend>, BackendKind) = if local {
+        (Box::new(LocalRunner), BackendKind::Local)
+    } else {
+        (Box::new(OpenShell::new(gateway)), BackendKind::OpenShell)
+    };
+    let replayed = proof::replay_rule(&resolved.rule, &checker, backend.as_ref(), kind);
+    let code = match &replayed.verdict {
+        Verdict::Proven => {
+            match &replayed.written {
+                Some(path) => println!("{id}: proven; wrote {}", path.display()),
+                None => println!(
+                    "{id}: proven by the {} runner; no proof written",
+                    kind.as_str()
+                ),
+            }
+            0
+        }
+        Verdict::Rejected(reason) => {
+            println!("{id}: rejected: {reason}");
+            1
+        }
+        Verdict::CouldNotRun(reason) => {
+            eprintln!("{id}: could not run: {reason}");
+            2
+        }
+    };
+    std::process::exit(code)
+}
+
+fn default_checker() -> Result<PathBuf> {
+    let exe = std::env::current_exe().context("locating the oncebitten binary")?;
+    Ok(exe.with_file_name(format!(
+        "oncebitten-checker{}",
+        std::env::consts::EXE_SUFFIX
+    )))
+}
+
+fn exit_could_not_run(failure: Failure) -> ! {
+    match failure {
+        Failure::Invalid(errors) => {
+            for error in errors {
+                eprintln!("error: {error:#}");
+            }
+        }
+        Failure::CouldNotRun(error) => eprintln!("error: {error:#}"),
+    }
+    std::process::exit(2)
 }
 
 fn report_checks(checked: &[Checked]) -> i32 {
