@@ -106,6 +106,10 @@ const HITS_COLUMNS: [(&str, &str); 3] = [
     ("hits_files", "INTEGER"),
     ("hits_samples", "TEXT"),
 ];
+/// Duplicate marks on `proposals`: the verdict's class, the record-time
+/// possible-duplicate note, and the link a user confirmed with `reject`.
+/// `add_mark_columns` adds each missing one on open.
+const MARK_COLUMNS: [&str; 3] = ["mistake_class", "possible_duplicate", "duplicate_of"];
 /// Indexes for expiry. Created by `Store::expire`, never by `open`, so the
 /// gate's open builds no index on a large store.
 const EXPIRY_INDEXES: &str = "
@@ -313,6 +317,22 @@ pub struct ProposalRow {
     pub hits: Option<HitsRow>,
 }
 
+/// The duplicate marks a proposal row holds.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProposalMarks {
+    pub mistake_class: Option<String>,
+    pub possible_duplicate: Option<String>,
+    pub duplicate_of: Option<String>,
+}
+
+/// The fields of a queued row that the duplicate check reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkCandidate {
+    pub cluster: String,
+    pub mistake_class: Option<String>,
+    pub rationale: Option<String>,
+}
+
 /// What `proposals deliver` did, as the store keeps it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryRow {
@@ -364,6 +384,7 @@ impl Store {
         conn.execute_batch(QUEUE)?;
         add_delivery_columns(&conn)?;
         add_hits_columns(&conn)?;
+        add_mark_columns(&conn)?;
         Ok(Store { conn })
     }
 
@@ -634,6 +655,65 @@ impl Store {
     /// Every queued row, oldest first.
     pub fn proposals(&self) -> Result<Vec<ProposalRow>> {
         self.query_proposals("", &[])
+    }
+
+    /// Stores the class and the record-time mark. `None` clears a field.
+    pub fn set_proposal_marks(
+        &self,
+        cluster: &str,
+        mistake_class: Option<&str>,
+        possible_duplicate: Option<&str>,
+    ) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE proposals SET mistake_class = ?2, possible_duplicate = ?3 WHERE cluster = ?1",
+            params![cluster, mistake_class, possible_duplicate],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
+    /// Records the duplicate link a user confirmed.
+    pub fn set_duplicate_of(&self, cluster: &str, other: &str) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE proposals SET duplicate_of = ?2 WHERE cluster = ?1",
+            params![cluster, other],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
+    pub fn proposal_marks(&self, cluster: &str) -> Result<Option<ProposalMarks>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mistake_class, possible_duplicate, duplicate_of FROM proposals WHERE cluster = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![cluster], |row| {
+            Ok(ProposalMarks {
+                mistake_class: row.get(0)?,
+                possible_duplicate: row.get(1)?,
+                duplicate_of: row.get(2)?,
+            })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Every queued row's class and rationale, oldest first. The duplicate
+    /// check compares a new proposal against these.
+    pub fn mark_candidates(&self) -> Result<Vec<MarkCandidate>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT cluster, mistake_class, rationale FROM proposals ORDER BY ts, cluster",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(MarkCandidate {
+                cluster: row.get(0)?,
+                mistake_class: row.get(1)?,
+                rationale: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     pub fn set_proposal_state(&self, cluster: &str, state: State) -> Result<()> {
@@ -1045,6 +1125,19 @@ fn add_git_head_column(conn: &Connection) -> Result<()> {
         .collect::<rusqlite::Result<_>>()?;
     if !columns.iter().any(|name| name == "git_head") {
         conn.execute_batch("ALTER TABLE events ADD COLUMN git_head TEXT")?;
+    }
+    Ok(())
+}
+
+fn add_mark_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(proposals)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    for name in MARK_COLUMNS {
+        if !columns.iter().any(|column| column == name) {
+            conn.execute_batch(&format!("ALTER TABLE proposals ADD COLUMN {name} TEXT"))?;
+        }
     }
     Ok(())
 }

@@ -1,0 +1,79 @@
+use oncebitten::proposals::{Kind, State};
+use oncebitten::store::{ProposalRow, Store};
+
+fn row(cluster: &str) -> ProposalRow {
+    ProposalRow {
+        cluster: cluster.into(),
+        ts: 1,
+        repo: "/r".into(),
+        kind: Kind::Proposal,
+        state: State::Waiting,
+        rule: None,
+        dir: None,
+        proven: false,
+        note: None,
+        verdict: "{}".into(),
+        rationale: Some("never use unwrap in library code".into()),
+        occurrences: vec![],
+        target: None,
+        commit: None,
+        pr_url: None,
+    }
+}
+
+#[test]
+fn marks_round_trip_through_the_store() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c1")).unwrap();
+    store
+        .set_proposal_marks(
+            "c1",
+            Some("unwrap-in-lib"),
+            Some("possible duplicate of c0 (same mistake_class)"),
+        )
+        .unwrap();
+    let marks = store.proposal_marks("c1").unwrap().unwrap();
+    assert_eq!(marks.mistake_class.as_deref(), Some("unwrap-in-lib"));
+    assert_eq!(
+        marks.possible_duplicate.as_deref(),
+        Some("possible duplicate of c0 (same mistake_class)")
+    );
+    assert_eq!(marks.duplicate_of, None);
+}
+
+#[test]
+fn a_confirmed_duplicate_link_is_stored_and_needs_a_queued_row() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c1")).unwrap();
+    store.set_duplicate_of("c1", "c0").unwrap();
+    assert_eq!(
+        store
+            .proposal_marks("c1")
+            .unwrap()
+            .unwrap()
+            .duplicate_of
+            .as_deref(),
+        Some("c0")
+    );
+    assert!(store.set_duplicate_of("missing", "c0").is_err());
+}
+
+#[test]
+fn candidates_carry_class_and_rationale() {
+    let store = Store::open_in_memory().unwrap();
+    store.insert_proposal(&row("c1")).unwrap();
+    store
+        .set_proposal_marks("c1", Some("unwrap-in-lib"), None)
+        .unwrap();
+    let candidates = store.mark_candidates().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].cluster, "c1");
+    assert_eq!(
+        candidates[0].mistake_class.as_deref(),
+        Some("unwrap-in-lib")
+    );
+    assert_eq!(
+        candidates[0].rationale.as_deref(),
+        Some("never use unwrap in library code")
+    );
+}
