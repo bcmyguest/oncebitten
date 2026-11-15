@@ -9,6 +9,10 @@ use crate::rule::{Check, Status};
 use crate::rules::{self, Failure};
 use crate::sources::git;
 
+/// The project's rule directories. Their `fixtures/bad.*` exist to violate
+/// the rule, so `check` and the gate never scan them.
+pub const RULES_PREFIX: &str = ".oncebitten/rules/";
+
 pub struct Checked {
     pub id: String,
     pub outcome: Outcome,
@@ -115,5 +119,13 @@ fn changed_paths(inputs: &Inputs, repo: &Path, base: &str) -> Result<Vec<String>
         repo,
         &["ls-files", "-z", "--others", "--exclude-standard"],
     )?);
-    Ok(paths)
+    Ok(without_rule_dirs(paths))
+}
+
+/// Drops paths under [`RULES_PREFIX`].
+pub fn without_rule_dirs(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| !path.starts_with(RULES_PREFIX))
+        .collect()
 }

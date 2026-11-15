@@ -19,7 +19,6 @@ use crate::rules::{self, Failure};
 /// Set by the pre-commit framework in the pre-push stage.
 pub const FROM_REF: &str = "PRE_COMMIT_FROM_REF";
 pub const TO_REF: &str = "PRE_COMMIT_TO_REF";
-const RULES_PREFIX: &str = ".oncebitten/rules/";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -199,10 +198,7 @@ fn changed(inputs: &Inputs, repo: &Path, range: &Range) -> Result<Vec<String>> {
         }
         Range::AllTracked => check::git_names(inputs, repo, &["ls-files", "-z"])?,
     };
-    Ok(paths
-        .into_iter()
-        .filter(|path| !path.starts_with(RULES_PREFIX))
-        .collect())
+    Ok(check::without_rule_dirs(paths))
 }
 
 fn apply_baseline(
