@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const RULE_FILE: &str = "rule.toml";
 const CHECK_FILE: &str = "check.yml";
@@ -10,7 +10,7 @@ const FIXTURES_DIR: &str = "fixtures";
 const GLOBS_ONLY_FOR_DIFF: &str = "when_changed and require_changed are only for engine = \"diff\"";
 const STEER_FIXTURE_EXTENSION: &str = "json";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     #[default]

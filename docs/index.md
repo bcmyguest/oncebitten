@@ -11,5 +11,6 @@
 - [Evidence](evidence.md): clusters, independent counts, provenance and rejections.
 - [Roadmap](roadmap.md): milestones, build steps and their status.
 - [Triage](triage.md): one-shot host verdicts on an evidence cluster, hooks-off proof and host support.
+- [Proposals](proposals.md): drafted rules, the review queue, background triage and the gate notice.
 - [PLAN.md](../PLAN.md): settled decisions and the build steps.
 - [README](../README.md): what oncebitten does, install and status.

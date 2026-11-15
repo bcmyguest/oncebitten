@@ -29,7 +29,7 @@ Each signal maps to a class and a key. Signals with the same key form one cluste
 
 ## Rejection
 
-`evidence reject <id> --reason <text>` records the cluster id, time and reason in the `rejections` table. A rejected cluster is never a candidate again, even as new occurrences arrive. The reason must be non-empty and the id must name an existing cluster. Rejecting again replaces the reason.
+`evidence reject <id> --reason <text>` records the cluster id, time and reason in the `rejections` table. A rejected cluster is never a candidate again, even as new occurrences arrive. The reason must be non-empty and the id must name an existing cluster. Rejecting again replaces the reason. `proposals reject` records the same rejection (see [proposals.md](proposals.md)).
 
 ## Commands
 

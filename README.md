@@ -11,7 +11,7 @@
 
 Docs: https://bcmyguest.github.io/oncebitten/
 
-Status: pre-alpha. Capture, evidence clustering, `check`, `replay`, the gate, steer rules, exceptions, retire, rollback and `doctor` work; triage is implemented for claude, codex and opencode ([docs/triage.md](docs/triage.md)), with fake-host tests only; rule proposals are in progress ([PLAN.md](PLAN.md)).
+Status: pre-alpha. Capture, evidence clustering, `check`, `replay`, the gate, steer rules, exceptions, retire, rollback and `doctor` work; triage is implemented for claude, codex and opencode ([docs/triage.md](docs/triage.md)), with fake-host tests only; triage drafts proposed rules that wait for review in `oncebitten proposals` ([docs/proposals.md](docs/proposals.md)); delivery to pull requests is not started ([PLAN.md](PLAN.md)).
 
 ## Install
 

@@ -48,6 +48,31 @@ CREATE TABLE IF NOT EXISTS rejections (
 );
 ";
 
+/// The proposal queue and the triage locks. Created on every open with
+/// IF NOT EXISTS, so they need no schema version bump.
+const QUEUE: &str = "
+CREATE TABLE IF NOT EXISTS proposals (
+    cluster TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    repo TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    rule TEXT,
+    dir TEXT,
+    proven INTEGER NOT NULL,
+    note TEXT,
+    verdict TEXT NOT NULL,
+    rationale TEXT,
+    occurrences TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS triage_locks (
+    cluster TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL
+);
+";
+const PROPOSAL_COLUMNS: &str =
+    "cluster, ts, repo, kind, state, rule, dir, proven, note, verdict, rationale, occurrences";
+
 /// Provenance the host payload supplies beside the event itself.
 /// `tool_use_id` is the host's id for one tool call; redelivery repeats it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -94,6 +119,74 @@ pub struct Rejection {
     pub reason: String,
 }
 
+/// What a queue row holds: a drafted rule, or a triage finding without one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Proposal,
+    Finding,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Proposal => "proposal",
+            Kind::Finding => "finding",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Kind> {
+        match text {
+            "proposal" => Some(Kind::Proposal),
+            "finding" => Some(Kind::Finding),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Waiting,
+    Accepted,
+    Rejected,
+}
+
+impl State {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            State::Waiting => "waiting",
+            State::Accepted => "accepted",
+            State::Rejected => "rejected",
+        }
+    }
+
+    fn parse(text: &str) -> Option<State> {
+        match text {
+            "waiting" => Some(State::Waiting),
+            "accepted" => Some(State::Accepted),
+            "rejected" => Some(State::Rejected),
+            _ => None,
+        }
+    }
+}
+
+/// One queued triage result. `cluster` is the evidence cluster that produced
+/// it and doubles as the proposal id; `occurrences` lists its event ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalRow {
+    pub cluster: String,
+    pub ts: i64,
+    pub repo: String,
+    pub kind: Kind,
+    pub state: State,
+    pub rule: Option<String>,
+    pub dir: Option<PathBuf>,
+    pub proven: bool,
+    pub note: Option<String>,
+    pub verdict: String,
+    pub rationale: Option<String>,
+    pub occurrences: Vec<i64>,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -116,6 +209,7 @@ impl Store {
         conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         migrate(&conn)?;
+        conn.execute_batch(QUEUE)?;
         Ok(Store { conn })
     }
 
@@ -227,6 +321,127 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Queues a triage result. Returns false when the cluster already has one.
+    pub fn insert_proposal(&self, row: &ProposalRow) -> Result<bool> {
+        let inserted = self.conn.execute(
+            &format!(
+                "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+            ),
+            params![
+                row.cluster,
+                row.ts,
+                row.repo,
+                row.kind.as_str(),
+                row.state.as_str(),
+                row.rule,
+                row.dir
+                    .as_ref()
+                    .map(|dir| dir.to_string_lossy().into_owned()),
+                row.proven,
+                row.note,
+                row.verdict,
+                row.rationale,
+                serde_json::to_string(&row.occurrences)?,
+            ],
+        )?;
+        Ok(inserted == 1)
+    }
+
+    pub fn proposal(&self, cluster: &str) -> Result<Option<ProposalRow>> {
+        Ok(self
+            .query_proposals("WHERE cluster = ?1", &[&cluster])?
+            .into_iter()
+            .next())
+    }
+
+    /// Every queued row, oldest first.
+    pub fn proposals(&self) -> Result<Vec<ProposalRow>> {
+        self.query_proposals("", &[])
+    }
+
+    pub fn set_proposal_state(&self, cluster: &str, state: State) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE proposals SET state = ?2 WHERE cluster = ?1",
+            params![cluster, state.as_str()],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
+    /// Takes the triage lock for `cluster`. A lock older than `stale_ms` is
+    /// taken over: its holder crashed or outlived any triage timeout.
+    pub fn try_lock_triage(&self, cluster: &str, now: i64, stale_ms: i64) -> Result<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        let taken = tx.execute(
+            "INSERT OR IGNORE INTO triage_locks (cluster, ts) VALUES (?1, ?2)",
+            params![cluster, now],
+        )? == 1
+            || tx.execute(
+                "UPDATE triage_locks SET ts = ?2 WHERE cluster = ?1 AND ts <= ?3",
+                params![cluster, now, now - stale_ms],
+            )? == 1;
+        tx.commit()?;
+        Ok(taken)
+    }
+
+    pub fn unlock_triage(&self, cluster: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM triage_locks WHERE cluster = ?1", [cluster])?;
+        Ok(())
+    }
+
+    fn query_proposals(
+        &self,
+        filter: &str,
+        args: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<ProposalRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {PROPOSAL_COLUMNS} FROM proposals {filter} ORDER BY ts, cluster"
+        ))?;
+        let rows = stmt.query_map(args, |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, bool>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, String>(11)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (cluster, ts, repo, kind, state, rule, dir, proven, note, verdict, rationale, occ) =
+                row?;
+            out.push(ProposalRow {
+                kind: Kind::parse(&kind)
+                    .with_context(|| format!("proposal `{cluster}` has unknown kind `{kind}`"))?,
+                state: State::parse(&state)
+                    .with_context(|| format!("proposal `{cluster}` has unknown state `{state}`"))?,
+                occurrences: serde_json::from_str(&occ)
+                    .with_context(|| format!("proposal `{cluster}` has unreadable occurrences"))?,
+                cluster,
+                ts,
+                repo,
+                rule,
+                dir: dir.map(PathBuf::from),
+                proven,
+                note,
+                verdict,
+                rationale,
+            });
+        }
+        Ok(out)
     }
 }
 

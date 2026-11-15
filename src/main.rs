@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -15,13 +15,16 @@ use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
 use oncebitten::lifecycle;
 use oncebitten::proof::{self, BackendKind};
+use oncebitten::proposals::{self, Kind, ProposalRow, Recorded};
 use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
 use oncebitten::rule::Check;
+use oncebitten::rule::Rule;
 use oncebitten::rules::{self, Failure};
 use oncebitten::steer;
 use oncebitten::store::{self, Store};
 use oncebitten::triage;
+use oncebitten::triage::verdict::Answer;
 
 #[derive(Parser)]
 #[command(
@@ -61,6 +64,14 @@ enum Command {
         /// Host to ask (default: the configured triage default)
         #[arg(long)]
         host: Option<String>,
+        /// Background mode capture starts: take the cluster's lock, queue the answer, print nothing
+        #[arg(long, hide = true)]
+        queue: bool,
+    },
+    /// Review rules triage drafted: list, show, accept or reject
+    Proposals {
+        #[command(subcommand)]
+        action: ProposalsAction,
     },
     /// Inspect the layered configuration
     Config {
@@ -156,6 +167,22 @@ enum ExceptionAction {
     },
     /// Print every exception as rule, paths, expires, live or expired, and reason
     List,
+}
+
+#[derive(Subcommand)]
+enum ProposalsAction {
+    /// Print each queued proposal and finding: id, state, kind, rule, proof
+    List,
+    /// Print one proposal: its rule, rationale, verdict, proof note and evidence
+    Show { id: String },
+    /// Make a proposed rule active; exit 2 unless it has a valid proof
+    Accept { id: String },
+    /// Reject a proposal; its cluster is never proposed again
+    Reject {
+        id: String,
+        #[arg(long)]
+        reason: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -261,7 +288,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Evidence { action } => run_evidence(action),
-        Command::Triage { id, host } => run_triage(&id, host.as_deref()),
+        Command::Triage { id, host, queue } => run_triage(&id, host.as_deref(), queue),
+        Command::Proposals { action } => run_proposals(action),
         Command::Config { action } => run_config(action),
         Command::Hooks { action } => run_hooks(action),
         Command::Rules { action } => run_rules(action),
@@ -287,40 +315,186 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_triage(id: &str, host: Option<&str>) -> Result<()> {
-    match triage_verdict(id, host) {
-        Ok(verdict) => {
-            println!("{}", serde_json::to_string_pretty(&verdict)?);
-            Ok(())
-        }
-        Err(error) => {
+fn run_triage(id: &str, host: Option<&str>, queue: bool) -> Result<()> {
+    let result = if queue {
+        triage_queued(id, host)
+    } else {
+        triage_now(id, host)
+    };
+    if let Err(error) = result {
+        if !queue {
             eprintln!("error: {error:#}");
-            std::process::exit(2)
         }
+        std::process::exit(2)
     }
+    Ok(())
 }
 
-fn triage_verdict(id: &str, host: Option<&str>) -> Result<triage::verdict::Verdict> {
+/// Everything a triage run needs: the cluster's store, config and host target.
+struct TriageSetup {
+    inputs: Inputs,
+    store: Store,
+    host: config::Host,
+    agent: String,
+}
+
+fn triage_setup(host: Option<&str>) -> Result<TriageSetup> {
     let inputs = Inputs::from_process()?;
     let loaded = config::load(&inputs)?;
-    let store = Store::open(&store::events_db_path_for(
-        &inputs.vars,
-        Platform::current(),
-    )?)?;
-    let clusters = evidence::load(&store)?;
-    let cluster = evidence::find(&clusters, id)?;
+    let store = open_store(&inputs)?;
     let host = host
         .map(|name| config::Host::parse(name).with_context(|| format!("unknown host `{name}`")))
         .transpose()?;
     let (host, agent) = triage::flow::target(&loaded.config.triage, host)?;
-    let input = triage::flow::prompt_input(cluster);
-    triage::flow::run(
-        &triage::run::ProcessRunner,
+    Ok(TriageSetup {
+        inputs,
+        store,
         host,
-        &agent,
-        &input,
+        agent,
+    })
+}
+
+fn ask(setup: &TriageSetup, cluster: &Cluster) -> Result<Answer> {
+    triage::flow::run_answer(
+        &triage::run::ProcessRunner,
+        setup.host,
+        &setup.agent,
+        &triage::flow::prompt_input(cluster),
         triage::flow::DEFAULT_TIMEOUT,
     )
+}
+
+/// Replays a new proposal in the OpenShell sandbox; without one it stays unproven.
+fn prove_in_sandbox(checker: &Path, rule: &Rule) -> proof::Replayed {
+    proof::replay_rule(rule, checker, &OpenShell::new(None), BackendKind::OpenShell)
+}
+
+/// Prints the verdict, then queues it and its draft. Queueing problems are
+/// warnings: the verdict stands.
+fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
+    let setup = triage_setup(host)?;
+    let clusters = evidence::load(&setup.store)?;
+    let cluster = evidence::find(&clusters, id)?;
+    let answer = ask(&setup, cluster)?;
+    println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
+    let checker = default_checker()?;
+    let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
+    let recorded = proposals::record(
+        &setup.store,
+        &setup.inputs,
+        cluster,
+        &answer,
+        &prove,
+        now_millis()?,
+    );
+    match recorded {
+        Ok(Recorded::Proposed { proven: true }) => {
+            eprintln!("proposed a proven rule: oncebitten proposals show {id}")
+        }
+        Ok(Recorded::Proposed { proven: false }) => {
+            eprintln!("proposed an unproven rule: oncebitten proposals show {id}")
+        }
+        Ok(Recorded::Finding) => eprintln!("queued as a finding without a rule draft"),
+        Ok(Recorded::AlreadyQueued) => eprintln!("{id} is already queued; nothing written"),
+        Ok(Recorded::Rejected) => eprintln!("{id} was rejected; nothing written"),
+        Err(error) => eprintln!("warning: not queued: {error:#}"),
+    }
+    Ok(())
+}
+
+fn triage_queued(id: &str, host: Option<&str>) -> Result<()> {
+    let setup = triage_setup(host)?;
+    let checker = default_checker()?;
+    let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
+    let ask = |cluster: &Cluster| ask(&setup, cluster);
+    proposals::triage_queued(&setup.store, &setup.inputs, id, &ask, &prove, now_millis()?)?;
+    Ok(())
+}
+
+fn open_store(inputs: &Inputs) -> Result<Store> {
+    Store::open(&store::events_db_path_for(
+        &inputs.vars,
+        Platform::current(),
+    )?)
+}
+
+fn run_proposals(action: ProposalsAction) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let store = open_store(&inputs)?;
+    let result = match action {
+        ProposalsAction::List => {
+            for row in store.proposals()? {
+                println!("{}", proposal_line(&row));
+            }
+            Ok(())
+        }
+        ProposalsAction::Show { id } => show_proposal(&store, &id),
+        ProposalsAction::Accept { id } => proposals::accept(&store, &id).map(|dir| {
+            println!("accepted {id}: {} is active", dir.display());
+        }),
+        ProposalsAction::Reject { id, reason } => {
+            proposals::reject(&store, &id, &reason, now_millis()?)
+                .map(|()| println!("rejected {id}"))
+        }
+    };
+    if let Err(error) = result {
+        eprintln!("error: {error:#}");
+        std::process::exit(2)
+    }
+    Ok(())
+}
+
+fn proposal_line(row: &ProposalRow) -> String {
+    let proof = match row.kind {
+        Kind::Finding => "-",
+        Kind::Proposal if row.proven => "proven",
+        Kind::Proposal => "unproven",
+    };
+    format!(
+        "{}  {}  {}  {}  {}  {}",
+        row.cluster,
+        row.state.as_str(),
+        row.kind.as_str(),
+        row.rule.as_deref().unwrap_or("-"),
+        proof,
+        row.repo
+    )
+}
+
+fn show_proposal(store: &Store, id: &str) -> Result<()> {
+    let Some(row) = store.proposal(id)? else {
+        anyhow::bail!("no proposal `{id}`; see {}", proposals::LIST_HINT);
+    };
+    println!("{}", proposal_line(&row));
+    if let Some(dir) = &row.dir {
+        println!("rule dir: {}", dir.display());
+    }
+    if let Some(rationale) = &row.rationale {
+        println!("rationale: {rationale}");
+    }
+    if let Some(note) = &row.note {
+        println!("proof: {note}");
+    }
+    println!("verdict: {}", row.verdict);
+    let occurrences: Vec<String> = row.occurrences.iter().map(i64::to_string).collect();
+    println!(
+        "cluster: {}  (oncebitten evidence show {})",
+        row.cluster, row.cluster
+    );
+    println!("occurrences: {}", occurrences.join(", "));
+    Ok(())
+}
+
+/// The proposals notice for the gate. It never fails the gate and never
+/// creates a store that does not exist yet.
+fn proposals_notice(inputs: &Inputs) -> Option<String> {
+    let path = store::events_db_path_for(&inputs.vars, Platform::current()).ok()?;
+    if !path.is_file() {
+        return None;
+    }
+    let repo = config::repo_root(&inputs.cwd)?;
+    let store = Store::open(&path).ok()?;
+    proposals::notice(&store, &repo).ok().flatten()
 }
 
 fn run_evidence(action: EvidenceAction) -> Result<()> {
@@ -490,6 +664,9 @@ fn run_gate(stage: GateStage) -> Result<()> {
             "warning: expired exception: {}",
             exceptions::describe(exception)
         );
+    }
+    if let Some(notice) = proposals_notice(&inputs) {
+        eprintln!("{notice}");
     }
     std::process::exit(report.exit_code(stage))
 }

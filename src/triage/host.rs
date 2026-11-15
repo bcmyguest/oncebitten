@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use crate::config::Host;
-use crate::triage::verdict::{self, Verdict, SCHEMA};
+use crate::triage::verdict::{self, Answer, Verdict, SCHEMA};
 
 const SCHEMA_FILE: &str = "schema.json";
 const ANSWER_FILE: &str = "answer.json";
@@ -152,6 +152,11 @@ fn opencode(model: Option<&str>, prompt: &str) -> Invocation {
 /// Reads the verdict from what the call printed or wrote. Anything else is an
 /// error, which the caller reports as "could not run".
 pub fn verdict_from(inv: &Invocation, captured: &Captured) -> Result<Verdict> {
+    answer_from(inv, captured).map(|answer| answer.verdict)
+}
+
+/// Reads the verdict and its validated draft from what the call produced.
+pub fn answer_from(inv: &Invocation, captured: &Captured) -> Result<Answer> {
     match inv.reader {
         Reader::ClaudeJson => claude_verdict(&captured.stdout),
         Reader::CodexFile => {
@@ -159,13 +164,13 @@ pub fn verdict_from(inv: &Invocation, captured: &Captured) -> Result<Verdict> {
                 .answer
                 .as_deref()
                 .context("codex wrote no answer file")?;
-            verdict::parse(answer)
+            verdict::parse_answer(answer)
         }
         Reader::OpenCodeJsonl => opencode_verdict(&captured.stdout),
     }
 }
 
-fn claude_verdict(stdout: &str) -> Result<Verdict> {
+fn claude_verdict(stdout: &str) -> Result<Answer> {
     let value: Value = serde_json::from_str(stdout).context("claude printed no JSON")?;
     let result = match &value {
         Value::Array(entries) => entries
@@ -182,11 +187,11 @@ fn claude_verdict(stdout: &str) -> Result<Verdict> {
     if structured.is_null() {
         bail!("claude result has no structured_output");
     }
-    verdict::parse(&structured.to_string())
+    verdict::parse_answer(&structured.to_string())
 }
 
 /// Each text part is tried as a verdict; the first that parses wins.
-fn opencode_verdict(stdout: &str) -> Result<Verdict> {
+fn opencode_verdict(stdout: &str) -> Result<Answer> {
     for line in stdout.lines() {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -198,8 +203,8 @@ fn opencode_verdict(stdout: &str) -> Result<Verdict> {
             .as_str()
             .or_else(|| event["text"].as_str());
         if let Some(text) = text {
-            if let Ok(verdict) = verdict::parse(&strip_fence(text)) {
-                return Ok(verdict);
+            if let Ok(answer) = verdict::parse_answer(&strip_fence(text)) {
+                return Ok(answer);
             }
         }
     }

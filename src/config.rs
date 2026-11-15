@@ -102,6 +102,9 @@ pub struct Triage {
     pub codex: Option<TriageTarget>,
     pub pi: Option<TriageTarget>,
     pub opencode: Option<TriageTarget>,
+    /// Start triage in the background when capture brings a cluster to its
+    /// threshold.
+    pub background: bool,
 }
 
 impl Default for Triage {
@@ -115,6 +118,7 @@ impl Default for Triage {
             codex: None,
             pi: None,
             opencode: None,
+            background: true,
         }
     }
 }

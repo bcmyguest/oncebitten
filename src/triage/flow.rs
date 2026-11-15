@@ -5,11 +5,11 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::config::{Host, Triage};
 use crate::evidence::Cluster;
-use crate::triage::host::{control_invocation, invocation, verdict_from};
+use crate::triage::host::{answer_from, control_invocation, invocation};
 use crate::triage::prompt::{build_prompt, Occurrence, PromptInput};
 use crate::triage::proof::{prove, requires_proof, workdir_sentinels};
 use crate::triage::run::Runner;
-use crate::triage::verdict::Verdict;
+use crate::triage::verdict::{Answer, Verdict};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -84,6 +84,17 @@ pub fn run(
     input: &PromptInput,
     timeout: Duration,
 ) -> Result<Verdict> {
+    run_answer(runner, host, agent, input, timeout).map(|answer| answer.verdict)
+}
+
+/// `run`, keeping the rule the host drafted beside its verdict.
+pub fn run_answer(
+    runner: &dyn Runner,
+    host: Host,
+    agent: &str,
+    input: &PromptInput,
+    timeout: Duration,
+) -> Result<Answer> {
     let workdir = Workdir::create()?;
     let dir = workdir.path();
     let prompt = build_prompt(input);
@@ -97,7 +108,7 @@ pub fn run(
             .run(&triage, dir, timeout)
             .map_err(|err| anyhow!("{err}"))?
     };
-    verdict_from(&triage, &captured).context("could not run: host output is not a verdict")
+    answer_from(&triage, &captured).context("could not run: host output is not a verdict")
 }
 
 #[cfg(test)]

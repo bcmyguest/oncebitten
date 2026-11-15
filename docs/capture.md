@@ -5,6 +5,7 @@
 - Database: `<data dir>/oncebitten/events.db`. The data dir is `$XDG_DATA_HOME` when absolute, else `~/.local/share` on Unix, else `%LOCALAPPDATA%` on Windows, falling back to `<home>\AppData\Local`.
 - Exits 0 on every path, prints nothing to stdout, writes one line to stderr on error.
 - `ONCEBITTEN_TRIAGE=1` makes it exit 0 without reading stdin or writing.
+- An event that brings a cluster to its threshold starts `oncebitten triage <id> --queue` detached, unless `triage.background = false`. Capture does not wait for it, and a failure to start it is one stderr line, not a failed hook. See [proposals.md](proposals.md#background-triage).
 - 100 captures finish in under 5 s (test `one_hundred_captures_finish_in_under_five_seconds`).
 - A hook payload with a `tool_use_id` is one event: a redelivery of the same id stores nothing. Without one, the event is deduplicated on its whole content. See [evidence.md](evidence.md#provenance-and-dedupe).
 

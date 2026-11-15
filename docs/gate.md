@@ -123,6 +123,10 @@ A retired rule never runs, so `baseline update` drops its entries. A finding a l
 
 `.oncebitten/exceptions.toml` lets a rule's findings through on named paths until a date; [lifecycle.md](lifecycle.md#exceptions) has the format. Both stages drop findings a live exception covers before the baseline applies and print `<n> violation(s) excepted by .oncebitten/exceptions.toml` to stderr. An expired exception covers nothing; the gate prints `warning: expired exception: <rule> on <paths> until <date>: <reason>` for each one. A file that does not parse exits 2.
 
+## Proposals notice
+
+Both stages print `<n> rule proposal(s) waiting: oncebitten proposals list` to stderr when triage queued proposals for this repo. The notice never changes the exit code. See [proposals.md](proposals.md#gate-notice).
+
 ## Exit codes
 
 | Exit | Meaning |

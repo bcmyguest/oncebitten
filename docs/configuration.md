@@ -25,8 +25,9 @@ The home directory is `HOME`. On Windows, which sets no `HOME` by default, it fa
 
 | Key | Env variable | Default | Effect |
 | --- | --- | --- | --- |
-| `triage.default` | `ONCEBITTEN_TRIAGE_DEFAULT` | `claude:haiku` | Host and agent for triage. Stored only. |
-| `triage.claude`, `triage.codex`, `triage.pi`, `triage.opencode` | `ONCEBITTEN_TRIAGE_CLAUDE`, `_CODEX`, `_PI`, `_OPENCODE` | unset | Triage target for that host. Stored only. The value must name the same host as the key. |
+| `triage.default` | `ONCEBITTEN_TRIAGE_DEFAULT` | `claude:haiku` | Host and agent for triage. |
+| `triage.claude`, `triage.codex`, `triage.pi`, `triage.opencode` | `ONCEBITTEN_TRIAGE_CLAUDE`, `_CODEX`, `_PI`, `_OPENCODE` | unset | Triage target for that host. The value must name the same host as the key. Background triage asks the capturing host through this target when set. |
+| `triage.background` | none (TOML only) | `true` | `capture` starts triage in the background when a cluster reaches its threshold. See [proposals.md](proposals.md#background-triage). |
 | `triggers.session` | `ONCEBITTEN_TRIGGERS_SESSION` | `user-correction`, `test-fail-then-pass`, `repeat-failure`, `revert` | Session signals that start triage. Stored only. Other values are rejected. |
 | `capture.correction_phrases` | none (TOML only) | the built-in list in `src/signal.rs` | Replaces the correction lexicon that `user-correction` matches. Must list at least one phrase. Blank phrases fail the load. |
 | `capture.extra_correction_phrases` | none (TOML only) | `[]` | Adds phrases to the lexicon in effect. Same validation as above. |
