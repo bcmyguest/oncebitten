@@ -19,6 +19,7 @@ use crate::lockfile;
 use crate::proof::Validity;
 use crate::rule::{Check, Status};
 use crate::rules::{self, Failure};
+use crate::signal::ALL_SIGNALS;
 use crate::store::{self, Probe};
 
 /// The first release with the `pre-push` stage name the gate hook uses.
@@ -38,6 +39,8 @@ const GATE_HOOK_IDS: [&str; 3] = [
     "oncebitten-gate-system",
     "oncebitten-gate-python",
 ];
+/// Tokens that precede the program name in `uvx oncebitten` or `cargo run --bin oncebitten`.
+const LAUNCHERS: [&str; 4] = ["uvx", "npx", "run", "--bin"];
 const OPENSHELL: &str = "openshell";
 const OPENSHELL_INSTALL: &str =
     "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh \
@@ -271,13 +274,13 @@ fn pre_commit_config(repo: &Path) -> Line {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return fail(check, format!("no {PRE_COMMIT_CONFIG}"), fix);
     };
-    match gate_hook_id(&text) {
+    match gate_hook(&text) {
         Some(id) => ok(check, format!("{id} in {PRE_COMMIT_CONFIG}")),
         None => fail(
             check,
             format!(
                 "{PRE_COMMIT_CONFIG} lists none of oncebitten-gate, oncebitten-gate-system \
-                 or oncebitten-gate-python"
+                 or oncebitten-gate-python, and no hook whose entry runs oncebitten gate"
             ),
             fix,
         ),
@@ -295,6 +298,49 @@ pub fn gate_hook_id(text: &str) -> Option<&'static str> {
             .strip_prefix("id:")?;
         let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
         GATE_HOOK_IDS.into_iter().find(|id| *id == value)
+    })
+}
+
+/// The id of the hook that runs the gate: a published id, or a hook whose
+/// `entry:` runs `oncebitten gate` (a local hook, `cargo run -- gate`, `uvx`).
+/// Read as text, as `gate_hook_id` is: no YAML crate is a dependency.
+pub fn gate_hook(text: &str) -> Option<String> {
+    if let Some(id) = gate_hook_id(text) {
+        return Some(id.to_string());
+    }
+    let mut current = "local hook".to_string();
+    for line in text.lines() {
+        let line = line.split(" #").next().unwrap_or_default().trim();
+        let line = line.trim_start_matches('-').trim_start();
+        if let Some(id) = line.strip_prefix("id:") {
+            current = unquote(id).to_string();
+        } else if let Some(entry) = line.strip_prefix("entry:") {
+            if entry_runs_gate(unquote(entry)) {
+                return Some(current);
+            }
+        }
+    }
+    None
+}
+
+fn unquote(value: &str) -> &str {
+    value.trim().trim_matches(|c| c == '"' || c == '\'')
+}
+
+/// True when the command runs the `oncebitten` program (first token, or after a
+/// launcher such as `uvx` or `--bin`) and its next argument, past any `--`, is `gate`.
+fn entry_runs_gate(entry: &str) -> bool {
+    let tokens: Vec<&str> = entry.split_whitespace().collect();
+    tokens.iter().enumerate().any(|(i, token)| {
+        let name = token.rsplit(['/', '\\']).next().unwrap_or_default();
+        let name = name.strip_suffix(".exe").unwrap_or(name);
+        let launched = i == 0 || LAUNCHERS.contains(&tokens[i - 1]);
+        name == "oncebitten"
+            && launched
+            && tokens[i + 1..]
+                .iter()
+                .find(|next| **next != "--")
+                .is_some_and(|next| *next == "gate")
     })
 }
 
@@ -485,10 +531,34 @@ fn capture_hooks(inputs: &Inputs, project: &Path) -> Vec<Line> {
             "set HOME",
         )];
     };
-    ALL_HOSTS
+    let mut lines = Vec::new();
+    for host in ALL_HOSTS {
+        lines.push(capture_hook(inputs, host, &home, project));
+        if host_installed(host, &home) {
+            lines.push(host_signals(host));
+        }
+    }
+    lines
+}
+
+fn host_installed(host: Host, home: &Path) -> bool {
+    let (program, dir) = host_markers(host, home);
+    find_on_path(program).is_some() || dir.is_dir()
+}
+
+/// The signals a host can produce, from `Host::capabilities`; the rest need
+/// events the host never reports.
+fn host_signals(host: Host) -> Line {
+    let can = host.capabilities().signals();
+    let cannot: Vec<&str> = ALL_SIGNALS
         .into_iter()
-        .map(|host| capture_hook(inputs, host, &home, project))
-        .collect()
+        .filter(|signal| !can.contains(signal))
+        .collect();
+    let mut message = format!("produces {}", can.join(", "));
+    if !cannot.is_empty() {
+        message.push_str(&format!("; cannot produce {}", cannot.join(", ")));
+    }
+    ok(format!("signals {}", host.name()), message)
 }
 
 fn capture_hook(inputs: &Inputs, host: Host, home: &Path, project: &Path) -> Line {

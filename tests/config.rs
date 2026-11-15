@@ -569,3 +569,29 @@ fn empty_or_blank_capture_phrases_are_rejected() {
     sandbox.write_user("[capture]\nextra_correction_phrases = [\"  \"]\n");
     assert!(load(&sandbox.inputs(&[])).is_err());
 }
+
+#[test]
+fn capture_test_commands_default_to_empty() {
+    let sandbox = Sandbox::new();
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    assert!(loaded.config.capture.test_commands.is_empty());
+}
+
+#[test]
+fn project_capture_test_commands_load_with_origin() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project("[capture]\ntest_commands = [\"make check\", \"just test\"]\n");
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    assert_eq!(
+        loaded.config.capture.test_commands,
+        ["make check", "just test"]
+    );
+    assert_eq!(loaded.origins["capture.test_commands"], Origin::Project);
+}
+
+#[test]
+fn blank_capture_test_commands_are_rejected() {
+    let sandbox = Sandbox::new();
+    sandbox.write_user("[capture]\ntest_commands = [\" \"]\n");
+    assert!(load(&sandbox.inputs(&[])).is_err());
+}

@@ -31,7 +31,7 @@ pub fn run_with<P: AsRef<str>>(
     ts: i64,
     lexicon: &[P],
 ) -> Result<Option<i64>> {
-    record(host, payload, db, ts, lexicon, None)
+    record(host, payload, db, ts, lexicon, &[], None)
 }
 
 /// `run_with`, and first deletes events older than `ttl_days` before `ts`.
@@ -41,9 +41,18 @@ pub fn run_expiring<P: AsRef<str>>(
     db: &Path,
     ts: i64,
     lexicon: &[P],
+    test_commands: &[String],
     ttl_days: u32,
 ) -> Result<Option<i64>> {
-    record(host, payload, db, ts, lexicon, Some(ttl_days))
+    record(
+        host,
+        payload,
+        db,
+        ts,
+        lexicon,
+        test_commands,
+        Some(ttl_days),
+    )
 }
 
 fn record<P: AsRef<str>>(
@@ -52,6 +61,7 @@ fn record<P: AsRef<str>>(
     db: &Path,
     ts: i64,
     lexicon: &[P],
+    test_commands: &[String],
     ttl_days: Option<u32>,
 ) -> Result<Option<i64>> {
     let host = Host::parse(host)?;
@@ -63,7 +73,7 @@ fn record<P: AsRef<str>>(
         store.expire(ts - i64::from(days) * DAY_MS)?;
     }
     let history = store.session_history(&event.host, &event.session_id, HISTORY_LIMIT)?;
-    let signals = signal::derive_with(&event, &history, lexicon);
+    let signals = signal::derive_configured(&event, &history, lexicon, test_commands);
     let capture = store::Capture {
         git_head: event.repo.as_deref().and_then(git_head),
         tool_use_id: tool_use_id(payload),
@@ -116,8 +126,9 @@ pub fn run_from_process(host: &str) -> Result<()> {
         .into_iter()
         .chain(loaded.config.capture.extra_correction_phrases)
         .collect();
+    let test_commands = loaded.config.capture.test_commands;
     let ttl_days = loaded.config.evidence.ttl_days;
-    let recorded = run_expiring(host, &payload, &db, ts, &lexicon, ttl_days)?;
+    let recorded = run_expiring(host, &payload, &db, ts, &lexicon, &test_commands, ttl_days)?;
     if let (Some(event_id), true) = (recorded, loaded.config.triage.background) {
         if let Err(error) = start_background_triage(&db, event_id, &loaded.config.triage) {
             eprintln!("oncebitten capture: background triage not started: {error:#}");

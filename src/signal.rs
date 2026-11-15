@@ -1,4 +1,4 @@
-use crate::host::is_command_tool;
+use crate::host::{is_command_tool, is_edit_tool};
 use crate::store::{NewEvent, StoredEvent};
 
 pub const KIND_PROMPT: &str = "prompt";
@@ -10,6 +10,15 @@ pub const REPEAT_FAILURE: &str = "repeat-failure";
 pub const TEST_FAIL_THEN_PASS: &str = "test-fail-then-pass";
 pub const USER_CORRECTION: &str = "user-correction";
 pub const REVERT: &str = "revert";
+
+/// Every signal capture can derive; a host produces the subset its events allow.
+pub const ALL_SIGNALS: [&str; 5] = [
+    USER_CORRECTION,
+    TOOL_FAILURE,
+    REPEAT_FAILURE,
+    TEST_FAIL_THEN_PASS,
+    REVERT,
+];
 
 pub const DEFAULT_CORRECTION_LEXICON: &[&str] = &[
     "no,",
@@ -78,7 +87,6 @@ const TEST_RUNNERS: &[&str] = &[
     "jest",
     "go test",
 ];
-const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signal {
@@ -108,6 +116,17 @@ pub fn derive_with<P: AsRef<str>>(
     history: &[StoredEvent],
     lexicon: &[P],
 ) -> Vec<Signal> {
+    derive_configured(event, history, lexicon, &[] as &[&str])
+}
+
+/// `derive_with`, and also treats commands containing any of `test_commands`
+/// as test runs, next to the built-in runners.
+pub fn derive_configured<P: AsRef<str>, R: AsRef<str>>(
+    event: &NewEvent,
+    history: &[StoredEvent],
+    lexicon: &[P],
+    test_commands: &[R],
+) -> Vec<Signal> {
     let mut signals = Vec::new();
     match event.kind.as_str() {
         KIND_PROMPT => {
@@ -122,7 +141,10 @@ pub fn derive_with<P: AsRef<str>>(
                 signals.push(signal(REPEAT_FAILURE, &event.summary));
             }
         }
-        KIND_TOOL_OK if is_test_run(&event.summary) && last_test_run_failed(history) => {
+        KIND_TOOL_OK
+            if is_test_run(&event.summary, test_commands)
+                && last_test_run_failed(history, test_commands) =>
+        {
             signals.push(signal(TEST_FAIL_THEN_PASS, &event.summary));
         }
         _ => {}
@@ -193,18 +215,21 @@ fn contains_phrase(text: &str, phrase: &str) -> bool {
     })
 }
 
-fn is_test_run(command: &str) -> bool {
+fn is_test_run<R: AsRef<str>>(command: &str, extra: &[R]) -> bool {
     let lowered = command.to_lowercase();
     TEST_RUNNERS
         .iter()
-        .any(|runner| contains_phrase(&lowered, runner))
+        .copied()
+        .chain(extra.iter().map(AsRef::as_ref))
+        .map(|runner| runner.trim().to_lowercase())
+        .any(|runner| !runner.is_empty() && contains_phrase(&lowered, &runner))
 }
 
-fn last_test_run_failed(history: &[StoredEvent]) -> bool {
+fn last_test_run_failed<R: AsRef<str>>(history: &[StoredEvent], extra: &[R]) -> bool {
     history
         .iter()
         .rev()
-        .find(|event| is_tool_event(event) && is_test_run(&event.summary))
+        .find(|event| is_tool_event(event) && is_test_run(&event.summary, extra))
         .is_some_and(|event| event.kind == KIND_TOOL_ERROR)
 }
 
@@ -234,11 +259,7 @@ fn touches_edited_file(command: &str, history: &[StoredEvent]) -> bool {
     let edited: Vec<&str> = history
         .iter()
         .filter(|past| past.kind == KIND_TOOL_OK)
-        .filter(|past| {
-            past.tool
-                .as_deref()
-                .is_some_and(|tool| EDIT_TOOLS.contains(&tool))
-        })
+        .filter(|past| past.tool.as_deref().is_some_and(is_edit_tool))
         .map(|past| past.summary.as_str())
         .collect();
     command.split_whitespace().any(|token| {
@@ -249,12 +270,12 @@ fn touches_edited_file(command: &str, history: &[StoredEvent]) -> bool {
     })
 }
 
-/// True when `whole` is `part` or ends with `/part`.
+/// True when `whole` is `part` or ends with `/part` or `\part`.
 fn is_path_suffix(whole: &str, part: &str) -> bool {
     whole == part
         || whole
             .strip_suffix(part)
-            .is_some_and(|rest| rest.ends_with('/'))
+            .is_some_and(|rest| rest.ends_with(['/', '\\']))
 }
 
 fn is_tool_event(event: &StoredEvent) -> bool {

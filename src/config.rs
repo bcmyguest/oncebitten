@@ -198,6 +198,8 @@ pub struct Rules {
 pub struct Capture {
     pub correction_phrases: Vec<String>,
     pub extra_correction_phrases: Vec<String>,
+    /// Command prefixes that count as test runs, next to the built-in runners.
+    pub test_commands: Vec<String>,
 }
 
 impl Default for Capture {
@@ -208,6 +210,7 @@ impl Default for Capture {
                 .map(|phrase| (*phrase).to_owned())
                 .collect(),
             extra_correction_phrases: Vec::new(),
+            test_commands: Vec::new(),
         }
     }
 }
@@ -256,6 +259,14 @@ impl Config {
             if phrase.trim().is_empty() {
                 bail!("capture correction phrases must not be blank");
             }
+        }
+        if self
+            .capture
+            .test_commands
+            .iter()
+            .any(|c| c.trim().is_empty())
+        {
+            bail!("capture.test_commands must not hold a blank command");
         }
         let per_host = [
             (Host::Claude, &self.triage.claude),

@@ -3,7 +3,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::signal::{KIND_PROMPT, KIND_TOOL_ERROR, KIND_TOOL_OK};
+use crate::signal::{
+    KIND_PROMPT, KIND_TOOL_ERROR, KIND_TOOL_OK, REPEAT_FAILURE, REVERT, TEST_FAIL_THEN_PASS,
+    TOOL_FAILURE, USER_CORRECTION,
+};
 use crate::steer::SteerEvent;
 use crate::store::NewEvent;
 
@@ -11,6 +14,9 @@ const GIT_MARKER: &str = ".git";
 /// Lowercase names of the shell tools: `Bash` (Claude Code, Codex), `Shell`
 /// (Cursor), `shell` (opencode), `bash` (pi, Copilot).
 pub const COMMAND_TOOLS: &[&str] = &["bash", "shell"];
+/// Lowercase names of the tools that change a file: `Edit`, `Write`, `MultiEdit`
+/// (Claude Code, Cursor) and `edit`, `write` (pi, Copilot, opencode).
+pub const EDIT_TOOLS: &[&str] = &["edit", "write", "multiedit"];
 const PATH_TOOLS: &[&str] = &["edit", "write", "multiedit", "read"];
 const SESSION_KEYS: &[&str] = &["session_id", "sessionId", "sessionID", "conversation_id"];
 const EVENT_KEYS: &[&str] = &["hook_event_name", "hookEventName"];
@@ -57,6 +63,21 @@ pub struct Capabilities {
     pub prompt: bool,
     /// The host reports a tool call together with its outcome.
     pub tool_outcome: bool,
+}
+
+impl Capabilities {
+    /// The signals a host can produce, derived from what it reports: prompts
+    /// feed `user-correction`; tool outcomes feed every tool-based signal.
+    pub fn signals(self) -> Vec<&'static str> {
+        let mut signals = Vec::new();
+        if self.prompt {
+            signals.push(USER_CORRECTION);
+        }
+        if self.tool_outcome {
+            signals.extend([TOOL_FAILURE, REPEAT_FAILURE, TEST_FAIL_THEN_PASS, REVERT]);
+        }
+        signals
+    }
 }
 
 pub const ALL_HOSTS: [Host; 6] = [
@@ -325,6 +346,10 @@ fn cwd(value: &Value) -> Option<String> {
 
 pub fn is_command_tool(tool: &str) -> bool {
     COMMAND_TOOLS.contains(&tool.to_ascii_lowercase().as_str())
+}
+
+pub fn is_edit_tool(tool: &str) -> bool {
+    EDIT_TOOLS.contains(&tool.to_ascii_lowercase().as_str())
 }
 
 fn tool_summary(value: &Value, tool: &str) -> String {
