@@ -7,13 +7,13 @@ use serde::Deserialize;
 const RULE_FILE: &str = "rule.toml";
 const CHECK_FILE: &str = "check.yml";
 const FIXTURES_DIR: &str = "fixtures";
+const GLOBS_ONLY_FOR_DIFF: &str = "when_changed and require_changed are only for engine = \"diff\"";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     Block,
     Steer,
-    Checklist,
 }
 
 impl Mode {
@@ -21,7 +21,6 @@ impl Mode {
         match self {
             Mode::Block => "block",
             Mode::Steer => "steer",
-            Mode::Checklist => "checklist",
         }
     }
 }
@@ -50,6 +49,8 @@ enum Engine {
     AstGrep,
     #[serde(rename = "native")]
     Native,
+    #[serde(rename = "diff")]
+    Diff,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +65,8 @@ struct RawRule {
     overrides: Option<String>,
     reason: Option<String>,
     command: Option<Vec<String>>,
+    when_changed: Option<Vec<String>>,
+    require_changed: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,8 +89,16 @@ pub struct Override {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Check {
-    AstGrep { file: PathBuf },
-    Native { command: Vec<String> },
+    AstGrep {
+        file: PathBuf,
+    },
+    Native {
+        command: Vec<String>,
+    },
+    Diff {
+        when_changed: Vec<String>,
+        require_changed: Vec<String>,
+    },
 }
 
 pub fn is_kebab_case(name: &str) -> bool {
@@ -161,10 +172,14 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
             Some(Override { target, reason })
         }
     };
+    let globs_given = raw.when_changed.is_some() || raw.require_changed.is_some();
     let check = match raw.engine {
         Engine::AstGrep => {
             if raw.command.is_some() {
                 return Err(invalid(file, "command is only for engine = \"native\""));
+            }
+            if globs_given {
+                return Err(invalid(file, GLOBS_ONLY_FOR_DIFF));
             }
             let check_file = dir.join(CHECK_FILE);
             if !check_file.is_file() {
@@ -172,15 +187,31 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
             }
             Check::AstGrep { file: check_file }
         }
-        Engine::Native => match raw.command {
-            Some(command) if !command.is_empty() => Check::Native { command },
-            _ => {
-                return Err(invalid(
-                    file,
-                    "engine = \"native\" needs a non-empty command",
-                ))
+        Engine::Native => {
+            if globs_given {
+                return Err(invalid(file, GLOBS_ONLY_FOR_DIFF));
             }
-        },
+            match raw.command {
+                Some(command) if !command.is_empty() => Check::Native { command },
+                _ => {
+                    return Err(invalid(
+                        file,
+                        "engine = \"native\" needs a non-empty command",
+                    ))
+                }
+            }
+        }
+        Engine::Diff => {
+            if raw.command.is_some() {
+                return Err(invalid(file, "command is only for engine = \"native\""));
+            }
+            let when_changed = non_empty_globs(file, "when_changed", raw.when_changed)?;
+            let require_changed = non_empty_globs(file, "require_changed", raw.require_changed)?;
+            Check::Diff {
+                when_changed,
+                require_changed,
+            }
+        }
     };
     check_fixtures(&dir.join(FIXTURES_DIR))?;
     Ok(Rule {
@@ -193,6 +224,16 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
         check,
         file: file.to_path_buf(),
     })
+}
+
+fn non_empty_globs(file: &Path, key: &str, globs: Option<Vec<String>>) -> Result<Vec<String>> {
+    match globs {
+        Some(globs) if !globs.is_empty() => Ok(globs),
+        _ => Err(invalid(
+            file,
+            format!("engine = \"diff\" needs a non-empty {key}"),
+        )),
+    }
 }
 
 fn check_fixtures(dir: &Path) -> Result<()> {

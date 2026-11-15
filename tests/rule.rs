@@ -44,12 +44,12 @@ fn ast_grep_rule_loads_with_its_fields() {
 
 #[test]
 fn native_rule_loads_with_its_command_and_language() {
-    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"checklist\"\n\
+    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"steer\"\n\
 status = \"active\"\nengine = \"native\"\nlanguage = \"rust\"\ncommand = [\"cargo\", \"clippy\"]\n";
     let (_root, dir) = rule_dir("no-unwrap", toml);
     let rule = load_rule(&dir).unwrap();
 
-    assert_eq!(rule.mode, Mode::Checklist);
+    assert_eq!(rule.mode, Mode::Steer);
     assert_eq!(rule.status, Status::Active);
     assert_eq!(rule.language.as_deref(), Some("rust"));
     assert_eq!(
@@ -210,4 +210,62 @@ fn fixtures_need_exactly_one_bad_and_one_fixed() {
     fs::write(dir.join("fixtures/bad.txt"), "x.unwrap()\n").unwrap();
     let message = error_of(&dir);
     assert!(message.contains("exactly one bad.*"), "{message}");
+}
+
+fn diff_rule_dir(toml: &str) -> (TempDir, PathBuf) {
+    let root = TempDir::new().unwrap();
+    let dir = root.path().join("keep-changelog");
+    fs::create_dir_all(dir.join("fixtures")).unwrap();
+    fs::write(dir.join("rule.toml"), toml).unwrap();
+    fs::write(dir.join("fixtures/bad.diff"), "--- a/src/lib.rs\n").unwrap();
+    fs::write(dir.join("fixtures/fixed.diff"), "--- a/CHANGELOG.md\n").unwrap();
+    (root, dir)
+}
+
+const DIFF_RULE: &str = "id = \"keep-changelog\"\ndescription = \"Touch the changelog.\"\n\
+mode = \"block\"\nstatus = \"active\"\nengine = \"diff\"\n\
+when_changed = [\"src/**/*.rs\"]\nrequire_changed = [\"CHANGELOG.md\"]\n";
+
+#[test]
+fn diff_rule_loads_with_its_globs_and_no_check_file() {
+    let (_root, dir) = diff_rule_dir(DIFF_RULE);
+    let rule = load_rule(&dir).unwrap();
+
+    assert_eq!(
+        rule.check,
+        Check::Diff {
+            when_changed: vec!["src/**/*.rs".to_owned()],
+            require_changed: vec!["CHANGELOG.md".to_owned()],
+        }
+    );
+}
+
+#[test]
+fn diff_rule_without_require_changed_is_rejected() {
+    let toml = DIFF_RULE.replace("require_changed = [\"CHANGELOG.md\"]\n", "");
+    let (_root, dir) = diff_rule_dir(&toml);
+    let message = error_of(&dir);
+
+    assert!(message.contains("require_changed"), "{message}");
+    assert!(message.contains("rule.toml"), "{message}");
+}
+
+#[test]
+fn when_changed_on_an_ast_grep_rule_is_rejected() {
+    let toml = format!("{AST_GREP_RULE}when_changed = [\"src/**\"]\n");
+    let (_root, dir) = rule_dir("no-unwrap", &toml);
+    let message = error_of(&dir);
+
+    assert!(message.contains("only for engine = \"diff\""), "{message}");
+}
+
+#[test]
+fn checklist_mode_is_rejected() {
+    let (_root, dir) = rule_dir(
+        "no-unwrap",
+        &AST_GREP_RULE.replace("\"block\"", "\"checklist\""),
+    );
+    let message = error_of(&dir);
+
+    assert!(message.contains("checklist"), "{message}");
 }
