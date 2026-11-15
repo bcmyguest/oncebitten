@@ -1,9 +1,7 @@
-use std::path::Path;
-
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use oncebitten::capture;
-use oncebitten::config::{self, Inputs};
+use oncebitten::config::{self, Inputs, Platform};
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
 
@@ -89,12 +87,9 @@ fn run_hooks(action: HooksAction) -> Result<()> {
         HooksAction::Uninstall { host, scope } => (false, host, scope),
     };
     let host = Host::parse(&host)?;
-    let home = inputs
-        .vars
-        .get("HOME")
-        .filter(|dir| Path::new(dir.as_str()).is_absolute())
-        .context("HOME is not an absolute path")?;
-    let path = hooks::settings_path(scope, Path::new(home), &inputs.cwd);
+    let home = config::home_dir(&inputs.vars, Platform::current())
+        .context("no absolute home directory in HOME, USERPROFILE or HOMEDRIVE+HOMEPATH")?;
+    let path = hooks::settings_path(scope, &home, &inputs.cwd);
     let changed = if install {
         hooks::install(host, &path)?
     } else {

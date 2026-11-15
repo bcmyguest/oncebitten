@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
-use crate::config::Platform;
+use crate::config::{home_dir, Platform};
 use crate::signal::Signal;
 
 const APP_DIR: &str = "oncebitten";
@@ -169,13 +169,10 @@ pub fn events_db_path_for(vars: &BTreeMap<String, String>, platform: Platform) -
                     .filter(|dir| platform.is_absolute(dir))
                     .context("neither XDG_DATA_HOME nor LOCALAPPDATA is an absolute path")?,
             ),
-            Platform::Unix => PathBuf::from(
-                vars.get("HOME")
-                    .filter(|dir| platform.is_absolute(dir))
-                    .context("neither XDG_DATA_HOME nor HOME is an absolute path")?,
-            )
-            .join(".local")
-            .join("share"),
+            Platform::Unix => home_dir(vars, platform)
+                .context("neither XDG_DATA_HOME nor HOME is an absolute path")?
+                .join(".local")
+                .join("share"),
         },
     };
     Ok(base.join(APP_DIR).join(DB_FILE))
