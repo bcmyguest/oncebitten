@@ -430,6 +430,28 @@ fn frozen_sync_clones_a_missing_source_at_the_locked_commit() {
 }
 
 #[test]
+fn frozen_sync_fetches_a_locked_commit_missing_from_an_old_clone() {
+    let fx = Fixture::new();
+    let (team, project) = project_with_team(&fx, None);
+    let inputs = fx.inputs(&project);
+    rules::sync(&inputs).unwrap();
+    let older = fx.head(&team);
+    fx.commit_rule(&team, "later");
+    let newer = fx.head(&team);
+    let clone = fx.clone_dir("team");
+    assert!(!has_commit(&fx, &clone, &newer));
+    let lock = fs::read_to_string(lock_path(&project))
+        .unwrap()
+        .replace(&older, &newer);
+    fs::write(lock_path(&project), &lock).unwrap();
+
+    rules::sync_frozen(&inputs).unwrap();
+
+    assert_eq!(fx.head(&clone), newer);
+    assert_eq!(fs::read_to_string(lock_path(&project)).unwrap(), lock);
+}
+
+#[test]
 fn frozen_sync_without_a_lockfile_could_not_run() {
     let fx = Fixture::new();
     let (_, project) = project_with_team(&fx, None);

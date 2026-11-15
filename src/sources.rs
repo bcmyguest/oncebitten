@@ -77,7 +77,8 @@ pub fn sync_source(
     Ok(commit)
 }
 
-/// Checks out `commit` without fetching. A missing clone is cloned first.
+/// Checks out `commit`. A missing clone is cloned first; a fetch runs only when
+/// the clone lacks `commit`.
 pub fn checkout_locked(
     vars: &BTreeMap<String, String>,
     root: &Path,
@@ -89,7 +90,24 @@ pub fn checkout_locked(
     if !is_cloned(&dir) {
         clone_source(vars, root, name, url)?;
     }
+    if git(
+        vars,
+        &dir,
+        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+    )
+    .is_err()
+    {
+        fetch_commit(vars, &dir, commit)?;
+    }
     git(vars, &dir, &["checkout", "--quiet", "--detach", commit])?;
+    Ok(())
+}
+
+/// Fetches `commit` by SHA, or all of `origin` when the server refuses fetch-by-SHA.
+fn fetch_commit(vars: &BTreeMap<String, String>, dir: &Path, commit: &str) -> Result<()> {
+    if git(vars, dir, &["fetch", "--quiet", "origin", commit]).is_err() {
+        git(vars, dir, &["fetch", "--quiet", "origin"])?;
+    }
     Ok(())
 }
 

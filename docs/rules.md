@@ -99,7 +99,7 @@ Git runs through the `git` binary.
 | Command | Does | Exit |
 |---|---|---|
 | `oncebitten rules sync` | Clone or fetch each source, check out `rev` or `origin/HEAD`, write `rules.lock` | 0 on success |
-| `oncebitten rules sync --frozen` | Clone any missing source, check out each locked commit; never fetches, never writes `rules.lock` | 0 on success; 2 when the lock is missing, a source has no entry, the lock names a source the config no longer has, or a locked commit cannot be checked out |
+| `oncebitten rules sync --frozen` | Clone any missing source, check out each locked commit, fetching one only when the clone lacks it; never writes `rules.lock` | 0 on success; 2 when the lock is missing, a source has no entry, the lock names a source the config no longer has, or a locked commit is unreachable after fetching |
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep rule; write `proof.json` when an OpenShell replay proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |

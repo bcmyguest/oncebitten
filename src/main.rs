@@ -150,7 +150,7 @@ enum HooksAction {
 enum RulesAction {
     /// Clone or fetch each source and write .oncebitten/rules.lock
     Sync {
-        /// Check out the commits in rules.lock without fetching; never writes the lock; exit 2 if it cannot
+        /// Check out the commits in rules.lock, fetching only a commit the clone lacks; never writes the lock; exit 2 if it cannot
         #[arg(long)]
         frozen: bool,
     },
