@@ -13,6 +13,8 @@ const DIFF_MARKER: &str = "diff --git ";
 const HUNK_MARKER: &str = "@@";
 const ADDED: char = '+';
 const REMOVED: char = '-';
+/// Characters that alone make an added line too trivial to count as a quote.
+const TRIVIAL_CHARS: &[char] = &['{', '}', '[', ']', '(', ')', ';', ','];
 
 /// The changed code a triage call sees: unified diff text from each occurrence's
 /// captured commit to the working tree, bounded by `triage.max_code_bytes`.
@@ -29,8 +31,10 @@ impl Code {
 
     /// Whether `bad` quotes the changed code: some run of consecutive lines of
     /// one hunk's post-image (its context and added lines, in order) appears
-    /// consecutively in `bad` and includes at least one added line. Line endings
-    /// are normalised to LF and trailing spaces are dropped on both sides.
+    /// consecutively in `bad` and includes at least one substantive added line.
+    /// A blank added line, or one of only braces, brackets, parentheses, `;`
+    /// and `,`, does not count. Line endings are normalised to LF and trailing
+    /// spaces are dropped on both sides.
     pub fn quoted_by(&self, bad: &str) -> bool {
         let bad = normalize(bad);
         self.post_images()
@@ -38,7 +42,7 @@ impl Code {
             .any(|hunk| quotes_a_change(hunk, &bad))
     }
 
-    /// The post-image of each diff hunk: `(added, text)` per line, with
+    /// The post-image of each diff hunk: `(substantive added, text)` per line, with
     /// removed lines left out. Context lines carry no prefix character in the
     /// text, so the first character is dropped only on `+` and ` ` lines.
     fn post_images(&self) -> Vec<Vec<(bool, String)>> {
@@ -58,7 +62,10 @@ impl Code {
                 in_header = false;
             } else if !in_header {
                 match line.chars().next() {
-                    Some(ADDED) => current.push((true, line[1..].to_string())),
+                    Some(ADDED) => {
+                        let text = line[1..].to_string();
+                        current.push((!is_trivial(&text), text));
+                    }
                     Some(REMOVED) | Some('\\') => {}
                     _ => current.push((false, line.get(1..).unwrap_or("").to_string())),
                 }
@@ -71,7 +78,13 @@ impl Code {
     }
 }
 
-/// Whether a run of `hunk` that includes an added line also appears
+/// Whether `line` holds nothing but whitespace and [`TRIVIAL_CHARS`].
+fn is_trivial(line: &str) -> bool {
+    line.chars()
+        .all(|c| c.is_whitespace() || TRIVIAL_CHARS.contains(&c))
+}
+
+/// Whether a run of `hunk` that includes a substantive added line also appears
 /// consecutively in `bad`.
 fn quotes_a_change(hunk: &[(bool, String)], bad: &[String]) -> bool {
     for start in 0..hunk.len() {

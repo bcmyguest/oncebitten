@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use oncebitten::config::{Host, Triage};
 use oncebitten::evidence::{Cluster, Occurrence, Source};
+use oncebitten::host::{normalize, Host as HookHost};
 use oncebitten::store::{Capture, NewEvent, Store, StoredEvent};
 use oncebitten::triage::code::collect;
 use oncebitten::triage::flow::{ask_cluster, prompt_input};
@@ -374,4 +375,58 @@ fn collect_matches_msys_and_mixed_case_edit_paths_on_windows() {
         "{}",
         code.diff
     );
+}
+
+/// A session that appended a blank line, a lone `}` and `fn real() {}` to
+/// `lib.rs`. Returns the temp root, the repo and the store with the edit recorded.
+fn trivial_session() -> (TempDir, PathBuf, Store, String) {
+    let (root, repo, head) = repo();
+    let store = Store::open_in_memory().unwrap();
+    record_edit(&store, &repo, "lib.rs", 1);
+    fs::write(repo.join("lib.rs"), "fn a() {}\n\n}\nfn real() {}\n").unwrap();
+    (root, repo, store, head)
+}
+
+#[test]
+fn blank_or_lone_brace_added_lines_are_not_a_quote_of_the_change() {
+    let (_root, repo, store, head) = trivial_session();
+    let code = collect(&store, &[occurrence(&repo, Some(&head), 1)], 16 * 1024).unwrap();
+    assert!(!code.quoted_by("fn a() {}\n\n"), "{}", code.diff);
+    assert!(!code.quoted_by("fn a() {}\n\n}\n"), "{}", code.diff);
+    assert!(!code.quoted_by("}\n"), "{}", code.diff);
+    assert!(code.quoted_by("}\nfn real() {}\n"), "{}", code.diff);
+}
+
+/// Records `payload` as the `claude` host normalises it, `cwd` set to `repo`.
+fn record_payload(store: &Store, repo: &Path, mut payload: serde_json::Value) {
+    payload["session_id"] = SESSION.into();
+    payload["hook_event_name"] = "PostToolUse".into();
+    payload["cwd"] = repo.display().to_string().into();
+    let mut event = normalize(HookHost::Claude, &payload.to_string(), 1)
+        .unwrap()
+        .unwrap();
+    event.host = "opencode".into();
+    store
+        .record_captured(&event, &[], &Capture::default())
+        .unwrap();
+}
+
+#[test]
+fn patch_tool_edits_contribute_every_file_the_patch_names() {
+    let patch = "*** Begin Patch\n*** Update File: lib.rs\n@@\n-fn a() {}\n+fn a() { x.unwrap(); }\n*** Update File: other.rs\n@@\n-fn keep() {}\n+fn keep() { y.unwrap(); }\n*** End Patch\n";
+    let payloads = [
+        serde_json::json!({"tool_name": "apply_patch", "tool_input": {"command": patch}}),
+        serde_json::json!({"tool_name": "apply_patch", "tool_input": {"input": patch}}),
+        serde_json::json!({"tool": "patch", "input": {"patchText": patch}}),
+    ];
+    for payload in payloads {
+        let (_root, repo, head) = repo();
+        let store = Store::open_in_memory().unwrap();
+        record_payload(&store, &repo, payload.clone());
+        fs::write(repo.join("lib.rs"), format!("{EDITED_LINE}\n")).unwrap();
+        fs::write(repo.join("other.rs"), "fn keep() { y.unwrap(); }\n").unwrap();
+        let code = collect(&store, &[occurrence(&repo, Some(&head), 1)], 16 * 1024).unwrap();
+        assert!(code.diff.contains("x.unwrap"), "{payload}: {}", code.diff);
+        assert!(code.diff.contains("y.unwrap"), "{payload}: {}", code.diff);
+    }
 }

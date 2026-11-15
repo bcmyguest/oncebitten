@@ -382,6 +382,7 @@ impl Store {
     }
 
     /// The paths the session's edit tools named, as the hook payloads gave them.
+    /// A patch tool's summary lists one path per line.
     pub fn session_edit_paths(&self, host: &str, session_id: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT tool, summary FROM events \
@@ -395,6 +396,13 @@ impl Store {
             let (tool, summary) = row?;
             if crate::host::is_edit_tool(&tool) {
                 paths.push(summary);
+            } else if crate::host::is_patch_tool(&tool) {
+                paths.extend(
+                    summary
+                        .lines()
+                        .filter(|line| *line != tool)
+                        .map(str::to_string),
+                );
             }
         }
         Ok(paths)
