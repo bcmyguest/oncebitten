@@ -7,12 +7,13 @@ use std::process::Command;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use oncebitten::triage::host::{Invocation, Reader};
+use oncebitten::config::Host;
+use oncebitten::triage::host::{invocation, Invocation, Reader};
 use oncebitten::triage::run::{self, RunError, Runner};
 use tempfile::TempDir;
 
 const DUMPER: &str = r#"
-use std::io::Write;
+use std::io::{Read, Write};
 fn main() {
     let mut out = Vec::new();
     for arg in std::env::args().skip(1) {
@@ -20,6 +21,9 @@ fn main() {
         out.push(0);
     }
     std::fs::File::create("args.bin").unwrap().write_all(&out).unwrap();
+    let mut input = Vec::new();
+    std::io::stdin().read_to_end(&mut input).unwrap();
+    std::fs::File::create("stdin.bin").unwrap().write_all(&input).unwrap();
 }
 "#;
 
@@ -29,7 +33,7 @@ fn inv(program: &Path, args: Vec<String>) -> Invocation {
         args,
         files: vec![],
         answer_file: None,
-        stdin_null: true,
+        stdin: None,
         streaming: false,
         reader: Reader::ClaudeJson,
     }
@@ -89,8 +93,11 @@ fn a_timeout_kills_the_grandchild_behind_a_cmd_wrapper() {
     assert!(!survived, "grandchild {pid} outlived the timeout");
 }
 
+/// The claude call, the one with the most quoted and empty arguments, run
+/// through a `.cmd` wrapper: the arguments survive Rust's batch-file check and
+/// cmd.exe, and the prompt reaches the host's stdin unchanged.
 #[test]
-fn a_realistic_prompt_reaches_a_cmd_wrapper_byte_for_byte() {
+fn a_realistic_call_reaches_a_cmd_wrapper_byte_for_byte() {
     let dir = TempDir::new().unwrap();
     let dumper = build_dumper(dir.path());
     let cmd = dir.path().join("fake-host.cmd");
@@ -100,25 +107,22 @@ fn a_realistic_prompt_reaches_a_cmd_wrapper_byte_for_byte() {
     )
     .unwrap();
     let prompt = "Line one\nLine two with \"quotes\" and 100% ^caret^\n& | < > && ||\r\nlast";
-    let schema = r#"{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}"#;
-    let args = vec![
-        "-p".to_string(),
-        prompt.to_string(),
-        "--json-schema".to_string(),
-        schema.to_string(),
-    ];
     let work = TempDir::new().unwrap();
+    let mut call = invocation(Host::Claude, "haiku", prompt, work.path()).unwrap();
+    call.program = cmd.to_string_lossy().into_owned();
     run::ProcessRunner
-        .run(
-            &inv(&cmd, args.clone()),
-            work.path(),
-            Duration::from_secs(60),
-        )
-        .expect("runner refused or failed the realistic arguments");
+        .run(&call, work.path(), Duration::from_secs(60))
+        .expect("runner refused or failed the realistic call");
     let got = fs::read(work.path().join("args.bin")).unwrap();
-    let expected: Vec<u8> = args.iter().flat_map(|a| a.bytes().chain([0])).collect();
+    let expected: Vec<u8> = call
+        .args
+        .iter()
+        .flat_map(|a| a.bytes().chain([0]))
+        .collect();
     assert_eq!(
         String::from_utf8_lossy(&got),
         String::from_utf8_lossy(&expected)
     );
+    let input = fs::read(work.path().join("stdin.bin")).unwrap();
+    assert_eq!(String::from_utf8_lossy(&input), prompt);
 }

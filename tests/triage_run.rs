@@ -30,7 +30,7 @@ fn a_runner_is_a_seam_for_tests() {
         args: vec![],
         files: vec![],
         answer_file: None,
-        stdin_null: true,
+        stdin: None,
         streaming: false,
         reader: Reader::CodexFile,
     };
@@ -48,7 +48,7 @@ fn a_missing_binary_is_reported_as_missing() {
         args: vec![],
         files: vec![],
         answer_file: None,
-        stdin_null: true,
+        stdin: None,
         streaming: false,
         reader: Reader::CodexFile,
     };
@@ -84,7 +84,7 @@ mod unix {
             args: vec![],
             files: vec![],
             answer_file: None,
-            stdin_null: true,
+            stdin: None,
             streaming,
             reader: Reader::ClaudeJson,
         }

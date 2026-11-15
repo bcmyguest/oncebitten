@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fs;
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -47,8 +47,8 @@ pub trait Runner {
     ) -> Result<Captured, RunError>;
 }
 
-/// Spawns the host with stdin closed, the triage switch set, and the given
-/// workdir as its current directory.
+/// Spawns the host with the triage switch set and the given workdir as its
+/// current directory. Stdin carries `Invocation::stdin`, then closes.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProcessRunner;
 
@@ -63,6 +63,9 @@ impl Runner for ProcessRunner {
             fs::write(path, contents).map_err(|e| RunError::Io(e.to_string()))?;
         }
         let mut child = spawn(inv, workdir)?;
+        if let (Some(pipe), Some(input)) = (child.stdin.take(), inv.stdin.clone()) {
+            feed(pipe, input);
+        }
         let stdout = Arc::new(Mutex::new(Vec::new()));
         if let Some(pipe) = child.stdout.take() {
             drain(pipe, Arc::clone(&stdout));
@@ -113,18 +116,32 @@ fn kill_tree(child: &mut Child) {
 
 fn spawn(inv: &Invocation, workdir: &Path) -> Result<Child, RunError> {
     let program = spawn_path(&inv.program);
+    let stdin = match inv.stdin {
+        Some(_) => Stdio::piped(),
+        None => Stdio::null(),
+    };
     let mut command = Command::new(program);
     command
         .args(&inv.args)
         .current_dir(workdir)
         .env(TRIAGE_ENV, "1")
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     command.spawn().map_err(|err| match err.kind() {
         ErrorKind::NotFound => RunError::Missing(inv.program.clone()),
         _ => RunError::Spawn(err.to_string()),
     })
+}
+
+/// Writes the input on its own thread, then closes the pipe. A host that
+/// writes a full stdout pipe before reading stdin would otherwise deadlock
+/// against the runner. A host that exits unread breaks the pipe; its output is
+/// still judged, so the write error is dropped.
+fn feed(mut pipe: impl Write + Send + 'static, input: String) {
+    thread::spawn(move || {
+        let _ = pipe.write_all(input.as_bytes());
+    });
 }
 
 /// Reads the pipe on its own thread so a full pipe cannot stall the host.
