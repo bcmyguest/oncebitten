@@ -25,7 +25,7 @@ Each signal maps to a class and a key. Signals with the same key form one cluste
 
 ## Provenance
 
-`evidence show <id>` prints, for each occurrence: timestamp (ms), host, session id, repo (or `-`), event id, its signals and the stored summary. The header lists the source and the distinct repos.
+`evidence show <id>` prints, for each occurrence: timestamp (ms), host, session id, repo (or `-`), event id, its signals, the stored summary and the event's `git_head` (or `-`). The header lists the source and the distinct repos.
 
 ## Rejection
 

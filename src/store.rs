@@ -77,6 +77,7 @@ pub struct StoredEvent {
     pub kind: String,
     pub tool: Option<String>,
     pub summary: String,
+    pub git_head: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,7 +181,7 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<StoredEvent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, ts, host, session_id, repo, kind, tool, summary FROM \
+            "SELECT id, ts, host, session_id, repo, kind, tool, summary, git_head FROM \
              (SELECT * FROM events WHERE host = ?1 AND session_id = ?2 ORDER BY id DESC LIMIT ?3) \
              ORDER BY id",
         )?;
@@ -193,7 +194,7 @@ impl Store {
     pub fn signals(&self) -> Result<Vec<SignalRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.kind, s.detail, e.id, e.ts, e.host, e.session_id, e.repo, e.kind, \
-             e.tool, e.summary FROM signals s JOIN events e ON e.id = s.event_id \
+             e.tool, e.summary, e.git_head FROM signals s JOIN events e ON e.id = s.event_id \
              ORDER BY e.id, s.id",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -277,6 +278,7 @@ fn stored_event(row: &rusqlite::Row, start: usize) -> rusqlite::Result<StoredEve
         kind: row.get(start + 5)?,
         tool: row.get(start + 6)?,
         summary: row.get(start + 7)?,
+        git_head: row.get(start + 8)?,
     })
 }
 
