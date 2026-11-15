@@ -674,3 +674,58 @@ fn event_repo_returns_the_repo_an_event_was_captured_in() {
     assert_eq!(store.event_repo(id).unwrap().as_deref(), Some("/work/app"));
     assert_eq!(store.event_repo(id + 1).unwrap(), None);
 }
+
+#[test]
+fn spawn_failed_outcome_is_spelled_with_a_hyphen() {
+    use oncebitten::store::TriageOutcome;
+    assert_eq!(TriageOutcome::SpawnFailed.as_str(), "spawn-failed");
+}
+
+#[test]
+fn concurrent_budget_claims_never_exceed_the_daily_cap() {
+    use std::sync::{Arc, Barrier};
+    const MAX: u32 = 3;
+    const RACERS: usize = 12;
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("events.db");
+    Store::open(&db).unwrap();
+    let barrier = Arc::new(Barrier::new(RACERS));
+    let handles: Vec<_> = (0..RACERS)
+        .map(|n| {
+            let db = db.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let store = Store::open(&db).unwrap();
+                barrier.wait();
+                store
+                    .claim_triage_run(&format!("c{n}"), Some("claude"), 100, 0, MAX)
+                    .unwrap()
+            })
+        })
+        .collect();
+    let claimed = handles
+        .into_iter()
+        .filter_map(|handle| handle.join().unwrap())
+        .count();
+    assert_eq!(claimed, MAX as usize);
+    assert_eq!(Store::open(&db).unwrap().triage_runs_since(0).unwrap(), 3);
+}
+
+#[test]
+fn a_claimed_run_that_fails_to_spawn_gives_its_budget_back() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    let id = store
+        .claim_triage_run("c1", Some("claude"), 100, 0, 1)
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.claim_triage_run("c2", None, 100, 0, 1).unwrap(), None);
+    store
+        .set_triage_outcome(id, TriageOutcome::SpawnFailed)
+        .unwrap();
+    assert_eq!(store.triage_runs_since(0).unwrap(), 0);
+    assert!(store
+        .claim_triage_run("c2", None, 100, 0, 1)
+        .unwrap()
+        .is_some());
+}

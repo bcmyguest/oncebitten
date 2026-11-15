@@ -6,7 +6,9 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{
+    params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
 use sha2::{Digest, Sha256};
 
 use crate::config::{home_dir, windows_app_dir, Platform};
@@ -172,7 +174,7 @@ impl TriageOutcome {
         match self {
             TriageOutcome::Started => "started",
             TriageOutcome::SkippedBudget => "skipped: budget",
-            TriageOutcome::SpawnFailed => "spawn failed",
+            TriageOutcome::SpawnFailed => "spawn-failed",
         }
     }
 }
@@ -681,6 +683,45 @@ impl Store {
         self.conn.execute(
             "INSERT INTO triage_runs (ts, cluster, host, outcome) VALUES (?1, ?2, ?3, ?4)",
             params![ts, cluster, host, outcome.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Records a `Started` run for `cluster` when fewer than `max` runs started at
+    /// or after `since` (ms), counting and inserting in one IMMEDIATE transaction
+    /// so concurrent captures cannot overspend. Returns the row id, or `None`
+    /// when the budget is spent.
+    pub fn claim_triage_run(
+        &self,
+        cluster: &str,
+        host: Option<&str>,
+        ts: i64,
+        since: i64,
+        max: u32,
+    ) -> Result<Option<i64>> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let spent: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM triage_runs WHERE outcome = ?1 AND ts >= ?2",
+            params![TriageOutcome::Started.as_str(), since],
+            |row| row.get(0),
+        )?;
+        if !within_budget(spent, max) {
+            return Ok(None);
+        }
+        tx.execute(
+            "INSERT INTO triage_runs (ts, cluster, host, outcome) VALUES (?1, ?2, ?3, ?4)",
+            params![ts, cluster, host, TriageOutcome::Started.as_str()],
+        )?;
+        let id = tx.last_insert_rowid();
+        tx.commit()?;
+        Ok(Some(id))
+    }
+
+    /// Rewrites the outcome of the `triage_runs` row `id`.
+    pub fn set_triage_outcome(&self, id: i64, outcome: TriageOutcome) -> Result<()> {
+        self.conn.execute(
+            "UPDATE triage_runs SET outcome = ?2 WHERE id = ?1",
+            params![id, outcome.as_str()],
         )?;
         Ok(())
     }

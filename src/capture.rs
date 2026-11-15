@@ -144,9 +144,10 @@ pub fn run_from_process(host: &str) -> Result<()> {
 }
 
 /// Starts one detached `oncebitten triage --queue` per cluster this event
-/// brought to its threshold, while the day's budget lasts. Each spawn records
-/// a `started` row here; a spawn past the budget records `skipped: budget`
-/// and starts nothing. Capture never waits for the child.
+/// brought to its threshold, while the day's budget lasts. Each spawn first
+/// claims a `started` row, counted and inserted atomically against the budget;
+/// a failed spawn rewrites it to `spawn-failed`. A spawn past the budget
+/// records `skipped: budget` and starts nothing. Capture never waits for the child.
 fn start_background_triage(
     db: &Path,
     event_id: i64,
@@ -176,8 +177,9 @@ fn start_background_triage(
         .collect();
     for item in due {
         let host_name = Some(item.host.as_str());
-        let spent = store.triage_runs_since(day)?;
-        if !store::within_budget(spent, triage.max_per_day) {
+        let Some(run) =
+            store.claim_triage_run(&item.cluster, host_name, now, day, triage.max_per_day)?
+        else {
             if !already_skipped.contains(&item.cluster) {
                 store.record_triage(
                     &item.cluster,
@@ -187,7 +189,7 @@ fn start_background_triage(
                 )?;
             }
             continue;
-        }
+        };
         let mut command = Command::new(&exe);
         command.args(["triage", &item.cluster, "--queue"]);
         let host = config::Host::parse(&item.host)
@@ -201,16 +203,8 @@ fn start_background_triage(
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         detach(&mut command);
-        match command.spawn() {
-            Ok(_) => {
-                store.record_triage(&item.cluster, host_name, now, store::TriageOutcome::Started)?
-            }
-            Err(_) => store.record_triage(
-                &item.cluster,
-                host_name,
-                now,
-                store::TriageOutcome::SpawnFailed,
-            )?,
+        if command.spawn().is_err() {
+            store.set_triage_outcome(run, store::TriageOutcome::SpawnFailed)?;
         }
     }
     Ok(())
