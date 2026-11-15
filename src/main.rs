@@ -691,13 +691,29 @@ fn run_hooks(action: HooksAction) -> Result<()> {
     let home = config::home_dir(&inputs.vars, Platform::current())
         .context("no absolute home directory in HOME, USERPROFILE or HOMEDRIVE+HOMEPATH")?;
     let path = hooks::install_target(host, scope, &home, &inputs.cwd, &inputs.vars)?;
-    let changed = if install {
-        hooks::install_exe(host, &path, &hooks::current_exe()?, Platform::current())?
+    let steer_path = hooks::steer_target(host, scope, &home, &inputs.cwd, &inputs.vars)?;
+    let (changed, steer_changed) = if install {
+        let exe = hooks::current_exe()?;
+        (
+            hooks::install_exe(host, &path, &exe, Platform::current())?,
+            hooks::install_steer_exe(host, &steer_path, &exe, Platform::current())?,
+        )
     } else {
-        hooks::uninstall(host, &path)?
+        (
+            hooks::uninstall(host, &path)?,
+            hooks::uninstall_steer(host, &steer_path)?,
+        )
     };
-    let state = if changed { "changed" } else { "unchanged" };
-    println!("{state}  {}", path.display());
+    let state = |changed: bool| if changed { "changed" } else { "unchanged" };
+    if steer_path == path {
+        println!("{}  {}", state(changed || steer_changed), path.display());
+    } else {
+        println!("{}  {}", state(changed), path.display());
+        println!("{}  {}", state(steer_changed), steer_path.display());
+    }
+    if let (true, Some(limits)) = (install, hooks::steer_limits(host)) {
+        println!("note: {limits}");
+    }
     Ok(())
 }
 
