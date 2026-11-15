@@ -13,6 +13,7 @@ use crate::replay::{replay_dir, Backend, Verdict};
 use crate::rule::{Check, Rule};
 
 pub const PROOF_FILE: &str = "proof.json";
+const RULE_FILE: &str = "rule.toml";
 pub const OPENSHELL: &str = "openshell";
 pub const LOCAL: &str = "local";
 pub const PROVEN: &str = "proven";
@@ -74,21 +75,40 @@ pub fn proof_path(dir: &Path) -> PathBuf {
 /// SHA-256 over every file under `dir` except the top-level `proof.json`, in
 /// sorted order of their `/`-separated relative paths. Each file adds its
 /// path, a NUL, its length as a little-endian u64, then its bytes with CRLF
-/// read as LF, so a Windows checkout hashes like a Unix one.
+/// read as LF, so a Windows checkout hashes like a Unix one. The top-level
+/// `rule.toml` hashes without its `status` key, so approving a proposed
+/// rule keeps its proof valid (see `status_free_bytes`).
 pub fn dir_hash(dir: &Path) -> Result<String> {
     let mut files = Vec::new();
     collect(dir, dir, &mut files)?;
     files.sort();
     let mut hasher = Sha256::new();
     for (relative, path) in &files {
-        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        let bytes = lf_only(&bytes);
+        let bytes = if relative == RULE_FILE {
+            status_free_bytes(path)?
+        } else {
+            let bytes =
+                std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+            lf_only(&bytes)
+        };
         hasher.update(relative.as_bytes());
         hasher.update([0]);
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(&bytes);
     }
     Ok(hex(&hasher.finalize()))
+}
+
+/// The `rule.toml` bytes that enter the hash: the parsed table without
+/// `status`, serialised canonically. Comments and layout do not reach the hash.
+fn status_free_bytes(path: &Path) -> Result<Vec<u8>> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let text = String::from_utf8(lf_only(&bytes))
+        .with_context(|| format!("{} is not UTF-8", path.display()))?;
+    let mut table: toml::Table =
+        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    table.remove("status");
+    Ok(toml::to_string(&table)?.into_bytes())
 }
 
 pub fn file_sha256(path: &Path) -> Result<String> {

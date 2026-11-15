@@ -75,6 +75,8 @@ The `native` engine runs over the whole repository whatever the range. A `diff` 
 
 The gate needs a valid `proof.json` (see [rules.md](rules.md#proofs)) for each gated `ast-grep` rule. Replay supports ast-grep rules only, so `native` and `diff` rules need no proof until replay supports them.
 
+The proof's `dir_sha256` covers every file in the rule directory except `proof.json`, with `rule.toml` parsed, its `status` key removed and the rest re-serialised canonically. So `status = "proposed"` becomes `"active"` without invalidating the proof. Any other change to `rule.toml`, comments and layout aside, makes the proof stale.
+
 A missing, stale or not-proven proof prints `<level>: <id>: <reason>` to stderr. `pr` prints `error` and exits 2 after running the rules. `pre-push` prints `warning` and exits as if the proof were valid.
 
 A shipped example from `rules.use_examples` is active, but its directory sits in the data directory, so CI has no proof for it and `gate pr` exits 2. Copy the example into `.oncebitten/rules/`, replay it and commit the proof.

@@ -332,3 +332,43 @@ fn cli_openshell_replay_writes_a_valid_proof() {
         proof::file_sha256(Path::new(&checker)).unwrap()
     );
 }
+
+fn edit_rule_toml(dir: &Path, from: &str, to: &str) {
+    let path = dir.join("rule.toml");
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains(from), "{text}");
+    fs::write(&path, text.replacen(from, to, 1)).unwrap();
+}
+
+#[test]
+fn approving_a_proposed_rule_keeps_its_proof_valid() {
+    let (_root, dir) = utcnow_dir();
+    let proposed = load_rule(&dir).unwrap();
+    proof::replay_rule(&proposed, &checker(), &LocalRunner, BackendKind::OpenShell);
+    assert_eq!(proof::validity(&proposed), Validity::Valid);
+
+    edit_rule_toml(&dir, "status = \"proposed\"", "status = \"active\"");
+
+    let approved = load_rule(&dir).unwrap();
+    assert_eq!(proof::validity(&approved), Validity::Valid);
+}
+
+#[test]
+fn changing_a_rule_field_other_than_status_makes_the_proof_stale() {
+    let (_root, dir) = utcnow_dir();
+    let rule = load_rule(&dir).unwrap();
+    proof::replay_rule(&rule, &checker(), &LocalRunner, BackendKind::OpenShell);
+
+    edit_rule_toml(
+        &dir,
+        "Use datetime.now(UTC)",
+        "Use datetime.now(timezone.utc)",
+    );
+
+    let edited = load_rule(&dir).unwrap();
+    assert!(
+        matches!(proof::validity(&edited), Validity::Stale(_)),
+        "{:?}",
+        proof::validity(&edited)
+    );
+}
