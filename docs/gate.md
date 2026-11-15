@@ -7,7 +7,7 @@
 | `oncebitten gate pre-push [--base <ref>]` | the pre-push hook | as `check` does; a source that is not cloned exits 2 | a warning on stderr; the gate continues |
 | `oncebitten gate pr --base <ref>` | CI, on a pull request | as `--ci`: `rules.lock` required, never fetches | exit 2 |
 
-The pre-push stage runs through the [pre-commit](https://pre-commit.com) framework; oncebitten installs no git hook of its own.
+The pre-push stage runs through the [pre-commit](https://pre-commit.com) framework; oncebitten installs no git hook of its own. [prek](https://github.com/j178/prek) 0.1.5 or later (`uv tool install prek`, then `prek install --hook-type pre-push`), `uvx prek install --hook-type pre-push` and `uvx pre-commit install --hook-type pre-push` (uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`) install the same hook; each blocked a violating push with `oncebitten-gate-system` and prek 0.5.0.
 
 ## Pre-push hook
 
