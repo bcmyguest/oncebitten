@@ -23,6 +23,13 @@
 - Triage findings queue in the evidence store and surface at pre-push/PR, not mid-session.
 - Git hooks ship as a `.pre-commit-hooks.yaml` entry; oncebitten writes no `.git/hooks` itself. The pre-commit framework is a hard requirement: README and install docs must say so up front.
 - Forges: GitHub (`gh`), GitLab (`glab`), Azure DevOps (`az repos`), behind one forge trait.
+- Existing violations: a committed baseline (`.oncebitten/baseline.json`) records violations present when a rule turns active; `check` and the gate fail only on violations not in the baseline.
+- PR evidence (screenshot, video, diagram) may live as an attachment in the PR description or a PR comment, read through the forge trait (gh, glab, az) at PR time; a committed file also satisfies a `diff` rule.
+- Correction lexicon: start broad and let triage filter; the list is configurable.
+- Privacy: the event store keeps a SHA-256 of the prompt plus the matched phrase, never full prompt text.
+- Triage writes the proposed rule and its fixtures in the same call.
+- opencode is accepted as a triage host without a hooks-off proof; docs say so.
+- pi support is verified against a locally installed pi.
 
 ## Gate guarantee
 Pre-push is fast feedback only (bypassable with --no-verify). The guarantee is a required CI check (branch protection) before human review. Proposed rules stay inactive until merged; approval covers one exact rule version at one scope. Without a sandbox a proposal ships marked unproven and inactive. Gate exit codes separate "rule fired" from "check could not run". Lessons git cannot observe (e.g. running sudo) become steer rules or agent PreToolUse hooks.
