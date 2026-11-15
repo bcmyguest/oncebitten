@@ -127,24 +127,45 @@ fn malformed_stdin_exits_zero() {
     assert!(out.stdout.is_empty());
 }
 
-#[test]
-fn one_hundred_captures_finish_within_budget() {
-    let home = TempDir::new().unwrap();
+/// Baseline for `one_hundred_captures_stay_near_process_spawn_cost`: the same
+/// binary doing nothing, so machine load and slow spawns hit both sides alike.
+fn timed_noop() -> Duration {
     let start = Instant::now();
+    let out = Command::new(BIN)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    start.elapsed()
+}
+
+fn median(mut samples: Vec<Duration>) -> Duration {
+    samples.sort();
+    samples[samples.len() / 2]
+}
+
+#[test]
+fn one_hundred_captures_stay_near_process_spawn_cost() {
+    let home = TempDir::new().unwrap();
+    let mut captures = Vec::new();
+    let mut baselines = Vec::new();
     for i in 0..100 {
+        baselines.push(timed_noop());
         let payload = prompt_payload("s1", &format!("prompt {i}"));
+        let start = Instant::now();
         let out = capture(home.path(), "claude", &payload, None);
+        captures.push(start.elapsed());
         assert!(out.status.success());
     }
-    let elapsed: Duration = start.elapsed();
     assert_eq!(count(&events_db(home.path()), "events"), 100);
-    // Shared CI runners spawn processes slowly; the 5 s budget applies locally.
-    let budget = if std::env::var_os("CI").is_some() {
-        15
-    } else {
-        5
-    };
-    assert!(elapsed < Duration::from_secs(budget), "took {elapsed:?}");
+    let (capture_median, baseline_median) = (median(captures), median(baselines));
+    eprintln!("median capture {capture_median:?}, median no-op spawn {baseline_median:?}");
+    let limit = baseline_median * 3 + Duration::from_millis(20);
+    assert!(
+        capture_median < limit,
+        "median capture {capture_median:?} exceeds {limit:?} (no-op spawn {baseline_median:?})"
+    );
 }
 
 #[test]
