@@ -10,6 +10,10 @@ oncebitten turns repeated agent mistakes into rules that git enforces. A rule is
 - `oncebitten baseline update`: replace `.oncebitten/baseline.json` with the current violations of active block rules in every tracked file (sorted JSON). Diff rules are not baselined; a native rule is baselined by id alone. Exit 0 written, 2 a rule could not run.
 - `oncebitten rules sync [--frozen]`: clone each source to the data directory and write `.oncebitten/rules.lock`. `--frozen` checks out the locked commits, fetching only a commit the clone lacks, and never writes the lock; exit 2 when it cannot. CI runs `--frozen` before `gate pr`.
 - `oncebitten rules list [--ci]`: print `id  mode  status  origin` per rule.
+- `oncebitten rules retire <id> --reason <text>`: set `status = "retired"` and `retired_reason` on a project rule. A retired rule never runs and needs no proof; `baseline update` drops its entries. A source rule exits 2: retire it in its rules repo or override it. Details: docs/lifecycle.md.
+- `oncebitten rules rollback <id>`: return an active project rule to `proposed`, keeping its files and proof; prints `git log` and `git restore --source <commit>` commands for the rule directory. Exit 2 when the rule is not an active project rule.
+- `oncebitten exception add <rule> --paths <glob>... --reason <text> --expires <YYYY-MM-DD>` and `oncebitten exception list`: manage `.oncebitten/exceptions.toml`. `check` and `gate` drop findings a live exception covers and print the count; an exception expires the day after `expires`, and `gate` warns about each expired one. All four keys are required; `paths = ["**"]` covers every path. An invalid file exits 2.
+- `oncebitten doctor [--gateway <endpoint>]`: read-only checks (config, pre-commit >= 3.2.0 and the gate hook, rules.lock, rules and proofs, exceptions, capture hooks per installed host, evidence store, OpenShell), one `ok|warn|fail  <check>: <message> (fix: ...)` line each. Exit 0 no fail, 1 any fail. Details: docs/doctor.md.
 - `oncebitten rules validate [--ci]`: load and resolve every rule.
 - `oncebitten triage <cluster-id> [--host <host>]`: ask the configured host (claude, codex or opencode; pi is unsupported) for a one-shot JSON verdict on an evidence cluster. Prints `{repeatable, user_correction, root_cause, proposed_fix_kind, generality}` to stdout. Runs in an empty temp dir with `ONCEBITTEN_TRIAGE=1`. Claude and codex must pass a hooks-off proof; opencode does not. Exit 0 verdict, 2 could not run. Details: docs/triage.md.
 - `oncebitten config show|path`: show merged configuration.
@@ -31,7 +35,7 @@ Precedence, highest first: project `.oncebitten/rules/<id>/`, then sources in co
   proof.json         # written by a proven OpenShell replay; not part of the hash
 ```
 
-`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check`), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
+`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check` and `gate`), `retired_reason` (optional, non-empty), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
 
 ## Engines
 

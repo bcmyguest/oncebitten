@@ -117,10 +117,16 @@ The file is pretty-printed JSON, entries sorted by `rule`, then `path`, then `sh
 
 A pull request can edit the baseline. Review a change to `baseline.json` like a change to the rules.
 
+A retired rule never runs, so `baseline update` drops its entries. A finding a live exception covers stays out of the baseline.
+
+## Exceptions
+
+`.oncebitten/exceptions.toml` lets a rule's findings through on named paths until a date; [lifecycle.md](lifecycle.md#exceptions) has the format. Both stages drop findings a live exception covers before the baseline applies and print `<n> violation(s) excepted by .oncebitten/exceptions.toml` to stderr. An expired exception covers nothing; the gate prints `warning: expired exception: <rule> on <paths> until <date>: <reason>` for each one. A file that does not parse exits 2.
+
 ## Exit codes
 
 | Exit | Meaning |
 |---|---|
 | 0 | no new violation; for `pr`, every gated ast-grep rule has a valid proof |
-| 1 | a gated rule fired on a violation the baseline does not list |
-| 2 | could not run: rules did not load, a git command failed, the baseline did not parse, a rule could not run, or (`pr` only) a proof is missing or stale. 2 wins over 1. |
+| 1 | a gated rule fired on a violation that neither the baseline nor a live exception covers |
+| 2 | could not run: rules did not load, a git command failed, the baseline or `exceptions.toml` did not parse, a rule could not run, or (`pr` only) a proof is missing or stale. 2 wins over 1. |
