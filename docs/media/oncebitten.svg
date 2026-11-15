@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1068" height="536" viewBox="0 0 1068 536" role="img" aria-labelledby="t d">
+<title id="t">oncebitten: caught, approved, enforced</title>
+<desc id="d">Three columns. Caught: a Claude correction, a Codex revert and a failing Cursor test each count as evidence. Rule: oncebitten proposes the strongest rule that fits, a check over an instruction over nothing, and you approve it. Enforced: git push, CI and pull requests stop on py-utcnow: use datetime.now(UTC).</desc>
+<rect x="1" y="1" width="1066" height="534" rx="16" fill="#eceff8" stroke="#e1e3ee" stroke-width="2"/>
+<path d="M36 3V533 M72 3V533 M108 3V533 M144 3V533 M180 3V533 M216 3V533 M252 3V533 M288 3V533 M324 3V533 M360 3V533 M396 3V533 M432 3V533 M468 3V533 M504 3V533 M540 3V533 M576 3V533 M612 3V533 M648 3V533 M684 3V533 M720 3V533 M756 3V533 M792 3V533 M828 3V533 M864 3V533 M900 3V533 M936 3V533 M972 3V533 M1008 3V533 M1044 3V533 M3 36H1065 M3 72H1065 M3 108H1065 M3 144H1065 M3 180H1065 M3 216H1065 M3 252H1065 M3 288H1065 M3 324H1065 M3 360H1065 M3 396H1065 M3 432H1065 M3 468H1065 M3 504H1065" stroke="#d6daec" stroke-width="1"/>
+<rect x="324.0" y="26" width="420" height="46" rx="23" fill="#e8eaf9" stroke="#4551a5" stroke-width="2"/>
+<text x="534.0" y="49" fill="#363b63" font-size="26" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" text-anchor="middle">Caught. Approved. Enforced.</text>
+<text x="16" y="98" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="2.4">CAUGHT</text>
+<text x="344" y="98" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="2.4">RULE</text>
+<text x="768" y="98" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="2.4">ENFORCED</text>
+<rect x="14" y="116" width="300" height="112" rx="8" fill="#fcfdfd" stroke="#d6daec" stroke-width="1.0"/>
+<circle cx="34" cy="138" r="6" fill="#e28030"/>
+<text x="48" y="138" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600">Claude</text>
+<text x="29" y="166" fill="#1a1c29" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">stamp = datetime.utcnow()</text>
+<rect x="46" y="182" width="256" height="34" rx="17" fill="#f6ead9" stroke="#b8875f" stroke-width="1.5"/>
+<text x="174.0" y="199" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">“use datetime.now(UTC)”</text>
+<rect x="14" y="240" width="300" height="88" rx="8" fill="#fcfdfd" stroke="#d6daec" stroke-width="1.0"/>
+<circle cx="34" cy="262" r="6" fill="#e28030"/>
+<text x="48" y="262" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600">Codex</text>
+<text x="29" y="290" fill="#1a1c29" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">git revert a1b2c3</text>
+<text x="29" y="312" fill="#555b72" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">utcnow → now(UTC)</text>
+<rect x="14" y="340" width="300" height="88" rx="8" fill="#fcfdfd" stroke="#d6daec" stroke-width="1.0"/>
+<circle cx="34" cy="362" r="6" fill="#e28030"/>
+<text x="48" y="362" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600">Cursor</text>
+<text x="300" y="362" fill="#555b72" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="end">pytest</text>
+<text x="29" y="390" fill="#a84834" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700">FAILED test_stamp_is_utc</text>
+<text x="29" y="412" fill="#2e7a54" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700">PASSED</text>
+<line x1="392" y1="178" x2="392" y2="366" stroke="#d6daec" stroke-width="3"/>
+<line x1="728" y1="178" x2="728" y2="366" stroke="#d6daec" stroke-width="3"/>
+<rect x="452" y="118" width="270" height="68" rx="8" fill="#f8f8fd" stroke="#4551a5" stroke-width="1.5"/>
+<text x="466" y="136" fill="#4551a5" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700">py-utcnow</text>
+<text x="466" y="160" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"><tspan fill="#555b72" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20">flags </tspan><tspan fill="#1a1c29" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">datetime.utcnow()</tspan></text>
+<rect x="382" y="178" width="356" height="64" rx="8" fill="#e8eaf9" stroke="#4551a5" stroke-width="2.5"/>
+<path d="M402 197 v-3 a5 5 0 0 1 10 0 v3" fill="none" stroke="#4551a5" stroke-width="2.4"/>
+<rect x="398" y="196" width="18" height="14" rx="3" fill="#4551a5"/>
+<rect x="406" y="200" width="2.4" height="6" rx="1.2" fill="#fcfdfd"/>
+<text x="426" y="198" fill="#4551a5" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="1.5">CHECK</text>
+<text x="398" y="224" fill="#1a1c29" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">ast-grep · linter · diff</text>
+<g opacity="0.5">
+<rect x="382" y="256" width="356" height="64" rx="8" fill="#fcfdfd" stroke="#555b72" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="398" y="276" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="1.5">INSTRUCTION</text>
+<text x="398" y="301" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">markdown, the agent may ignore it</text>
+</g>
+<text x="398" y="350" fill="#8c91a5" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"><tspan fill="#8c91a5" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="700">NOTHING</tspan><tspan fill="#8c91a5" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20">  it happens again</tspan></text>
+<path d="M388 350 H362 V210.0 H380" stroke="#4551a5" stroke-width="2.5" stroke-dasharray="2 6" stroke-linecap="round" fill="none"/>
+<polygon points="362,284 356.6,293 367.4,293" fill="#4551a5"/>
+<polygon points="362,246 356.6,255 367.4,255" fill="#4551a5"/>
+<polygon points="381,210 372,204.6 372,215.4" fill="#4551a5"/>
+<text x="384" y="384" fill="#2e7a54" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700">✓ approved by you</text>
+<text x="384" y="409" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"><tspan fill="#555b72" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20">proven: </tspan><tspan fill="#a84834" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20">fires on bad</tspan><tspan fill="#555b72" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20"> · </tspan><tspan fill="#2e7a54" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20">clean on fixed</tspan></text>
+<rect x="766" y="116" width="288" height="52" rx="8" fill="#f6ead9" stroke="#b8875f" stroke-width="1.5"/>
+<text x="780" y="142" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600">git push</text>
+<text x="1040" y="142" fill="#a84834" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700" text-anchor="end">✗ py-utcnow</text>
+<rect x="766" y="180" width="288" height="52" rx="8" fill="#f6ead9" stroke="#b8875f" stroke-width="1.5"/>
+<text x="780" y="206" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600">CI</text>
+<text x="1040" y="206" fill="#a84834" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700" text-anchor="end">✗ py-utcnow</text>
+<rect x="766" y="244" width="288" height="52" rx="8" fill="#f6ead9" stroke="#b8875f" stroke-width="1.5"/>
+<text x="780" y="270" fill="#1a1c29" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="600">pull request</text>
+<text x="1040" y="270" fill="#a84834" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700" text-anchor="end">✗ py-utcnow</text>
+<rect x="766" y="322" width="288" height="52" rx="8" fill="#e8eaf9" stroke="#4551a5" stroke-width="1.5"/>
+<text x="910.0" y="348" fill="#363b63" font-size="18" dominant-baseline="central" font-family="'JetBrains Mono', 'JetBrainsMono Nerd Font Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="700" text-anchor="middle">use datetime.now(UTC)</text>
+<line x1="318" y1="284" x2="332" y2="284" stroke="#4551a5" stroke-width="3"/>
+<polygon points="340,284 329,277.4 329,290.6" fill="#4551a5"/>
+<line x1="742" y1="210.0" x2="756" y2="210.0" stroke="#4551a5" stroke-width="3"/>
+<polygon points="764,210 753,203.4 753,216.6" fill="#4551a5"/>
+<text x="16" y="456" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">A correction, a revert,</text>
+<text x="16" y="481" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">a failing test: each one counts.</text>
+<text x="344" y="456" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">Proposes the strongest rule that fits.</text>
+<text x="344" y="481" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">You approve.</text>
+<text x="768" y="456" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">Every later violation</text>
+<text x="768" y="481" fill="#555b72" font-size="20" dominant-baseline="central" font-family="'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">stops at git.</text>
+</svg>
