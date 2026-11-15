@@ -6,6 +6,7 @@ pub mod hooks;
 pub mod host;
 pub mod lockfile;
 pub mod registry;
+pub mod replay;
 pub mod rule;
 pub mod rules;
 pub mod signal;
