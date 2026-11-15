@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,7 @@ const SCRIPT_MARKER: &str = "oncebitten-managed";
 const OPENCODE_TEMPLATE: &str = include_str!("../packaging/opencode/oncebitten.js");
 const PI_TEMPLATE: &str = include_str!("../packaging/pi/oncebitten.js");
 const COMMAND_PLACEHOLDER: &str = "__ONCEBITTEN_COMMAND__";
+const PI_AGENT_DIR_VAR: &str = "PI_CODING_AGENT_DIR";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shell {
@@ -69,6 +71,35 @@ pub fn target_path(host: Host, scope: Scope, home: &Path, project: &Path) -> Pat
             .join("oncebitten.js"),
         (Host::Pi, Scope::Project) => base.join(".pi").join("extensions").join("oncebitten.js"),
     }
+}
+
+/// `target_path`, except that a user-scope pi install follows
+/// `PI_CODING_AGENT_DIR` the way pi does: a non-empty value replaces
+/// `~/.pi/agent`, with a leading `~` or `~/` expanded to `home`.
+pub fn install_target(
+    host: Host,
+    scope: Scope,
+    home: &Path,
+    project: &Path,
+    vars: &BTreeMap<String, String>,
+) -> Result<PathBuf> {
+    let agent_dir = vars.get(PI_AGENT_DIR_VAR).filter(|value| !value.is_empty());
+    let (Host::Pi, Scope::User, Some(value)) = (host, scope, agent_dir) else {
+        return Ok(target_path(host, scope, home, project));
+    };
+    let dir = match value.as_str() {
+        "~" => home.to_path_buf(),
+        value => match value.strip_prefix("~/") {
+            Some(rest) => home.join(rest),
+            None => PathBuf::from(value),
+        },
+    };
+    if !dir.is_absolute() {
+        bail!(
+            "{PI_AGENT_DIR_VAR}=`{value}` is relative; pi resolves it against its own working directory, so set an absolute path"
+        );
+    }
+    Ok(dir.join("extensions").join("oncebitten.js"))
 }
 
 pub fn current_exe() -> Result<PathBuf> {
