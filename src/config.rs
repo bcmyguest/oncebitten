@@ -1,10 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::rule::is_kebab_case;
 
 const PROJECT_DIR: &str = ".oncebitten";
 const CONFIG_FILE: &str = "config.toml";
@@ -162,6 +164,7 @@ pub struct Sandbox {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
+    pub name: String,
     pub url: String,
     #[serde(default)]
     pub writable: bool,
@@ -206,6 +209,18 @@ impl Config {
         let writable = self.rules.sources.iter().filter(|s| s.writable).count();
         if writable > 1 {
             bail!("rules.sources: {writable} sources are writable; at most one may be");
+        }
+        let mut names = BTreeSet::new();
+        for source in &self.rules.sources {
+            if !is_kebab_case(&source.name) {
+                bail!(
+                    "rules.sources: source name `{}` must be lowercase kebab-case",
+                    source.name
+                );
+            }
+            if !names.insert(source.name.as_str()) {
+                bail!("rules.sources: duplicate source name `{}`", source.name);
+            }
         }
         Ok(())
     }

@@ -182,8 +182,8 @@ fn per_host_key_naming_another_host_is_rejected() {
 fn two_writable_sources_are_rejected() {
     let sandbox = Sandbox::new();
     sandbox.write_project(
-        "[[rules.sources]]\nurl = \"https://example.invalid/a.git\"\nwritable = true\n\n\
-         [[rules.sources]]\nurl = \"https://example.invalid/b.git\"\nwritable = true\n",
+        "[[rules.sources]]\nname = \"a\"\nurl = \"https://example.invalid/a.git\"\nwritable = true\n\n\
+         [[rules.sources]]\nname = \"b\"\nurl = \"https://example.invalid/b.git\"\nwritable = true\n",
     );
     let message = error_chain(load(&sandbox.inputs(&[])));
     assert!(message.contains("at most one may be"), "{message}");
@@ -193,14 +193,51 @@ fn two_writable_sources_are_rejected() {
 fn one_writable_source_among_read_only_sources_is_accepted() {
     let sandbox = Sandbox::new();
     sandbox.write_project(
-        "[[rules.sources]]\nurl = \"https://example.invalid/a.git\"\n\n\
-         [[rules.sources]]\nurl = \"https://example.invalid/b.git\"\nwritable = true\nrev = \"v1\"\n",
+        "[[rules.sources]]\nname = \"a\"\nurl = \"https://example.invalid/a.git\"\n\n\
+         [[rules.sources]]\nname = \"b\"\nurl = \"https://example.invalid/b.git\"\nwritable = true\nrev = \"v1\"\n",
     );
     let loaded = load(&sandbox.inputs(&[])).unwrap();
 
     assert_eq!(loaded.config.rules.sources.len(), 2);
     assert!(loaded.config.rules.sources[1].writable);
     assert_eq!(loaded.config.rules.sources[1].rev.as_deref(), Some("v1"));
+}
+
+#[test]
+fn source_without_name_is_rejected() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project("[[rules.sources]]\nurl = \"https://example.invalid/a.git\"\n");
+    let message = error_chain(load(&sandbox.inputs(&[])));
+
+    assert!(message.contains("missing field `name`"), "{message}");
+    assert!(message.contains(".oncebitten"), "{message}");
+}
+
+#[test]
+fn source_name_must_be_kebab_case() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project(
+        "[[rules.sources]]\nname = \"Team_Rules\"\nurl = \"https://example.invalid/a.git\"\n",
+    );
+    let message = error_chain(load(&sandbox.inputs(&[])));
+
+    assert!(message.contains("Team_Rules"), "{message}");
+    assert!(message.contains("kebab-case"), "{message}");
+}
+
+#[test]
+fn duplicate_source_names_are_rejected() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project(
+        "[[rules.sources]]\nname = \"team\"\nurl = \"https://example.invalid/a.git\"\n\n\
+         [[rules.sources]]\nname = \"team\"\nurl = \"https://example.invalid/b.git\"\n",
+    );
+    let message = error_chain(load(&sandbox.inputs(&[])));
+
+    assert!(
+        message.contains("duplicate source name `team`"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -353,10 +390,10 @@ fn unix_user_path_uses_home_and_ignores_appdata() {
 fn project_rules_sources_replace_the_whole_user_list() {
     let sandbox = Sandbox::new();
     sandbox.write_user(
-        "[[rules.sources]]\nurl = \"https://example.com/a.git\"\n\
-         [[rules.sources]]\nurl = \"https://example.com/b.git\"\n",
+        "[[rules.sources]]\nname = \"a\"\nurl = \"https://example.com/a.git\"\n\
+         [[rules.sources]]\nname = \"b\"\nurl = \"https://example.com/b.git\"\n",
     );
-    sandbox.write_project("[[rules.sources]]\nurl = \"https://example.com/c.git\"\n");
+    sandbox.write_project("[[rules.sources]]\nname = \"c\"\nurl = \"https://example.com/c.git\"\n");
     let loaded = load(&sandbox.inputs(&[])).unwrap();
 
     let urls: Vec<&str> = loaded

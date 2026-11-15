@@ -28,7 +28,7 @@ Unknown keys and invalid values fail the load. The error names the file, or the 
 | `triggers.session` | `ONCEBITTEN_TRIGGERS_SESSION` | `user-correction`, `test-fail-then-pass`, `repeat-failure`, `revert` | Session signals that start triage. Stored only. Other values are rejected. |
 | `triggers.gate` | `ONCEBITTEN_TRIGGERS_GATE` | `pre-push`, `pr-create` | Git points that run the gate. Stored only. Other values are rejected. |
 | `sandbox.runtime` | `ONCEBITTEN_SANDBOX_RUNTIME` | `openshell` | Replay sandbox. The only accepted value is `openshell`. Stored only. |
-| `rules.sources` | none (file only) | empty list | Rule repositories. Each entry has `url` (required), `writable` (default `false`) and `rev` (optional). At most one entry may set `writable = true`. Stored only. |
+| `rules.sources` | none (file only) | empty list | Rule repositories. Each entry has `name` (required; lowercase kebab-case, unique across entries), `url` (required), `writable` (default `false`) and `rev` (optional). At most one entry may set `writable = true`. Stored only. |
 
 A triage target has the form `<host>:<agent>`. The host is `claude`, `codex`, `pi` or `opencode`. The agent is any non-empty string.
 
@@ -42,6 +42,7 @@ default = "pi:default"
 gate = ["pr-create"]
 
 [[rules.sources]]
+name = "team"
 url = "https://github.com/example/team-rules.git"
 writable = true
 rev = "v1"
