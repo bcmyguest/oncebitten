@@ -240,6 +240,22 @@ pub fn current_baseline(inputs: &Inputs) -> Result<(PathBuf, Baseline), Failure>
     Ok((repo, baseline))
 }
 
+/// Writes the existing hits of one rule into the baseline, so an accepted
+/// rule does not fail the gate on code that predates it. Entries of other
+/// rules stay as they are.
+pub fn baseline_rule(inputs: &Inputs, rule_id: &str) -> Result<PathBuf, Failure> {
+    let (repo, current) = current_baseline(inputs)?;
+    let mut merged = baseline::read(&repo).map_err(Failure::CouldNotRun)?;
+    merged.entries.retain(|entry| entry.rule != rule_id);
+    merged.entries.extend(
+        current
+            .entries
+            .into_iter()
+            .filter(|entry| entry.rule == rule_id),
+    );
+    baseline::write(&repo, &merged).map_err(Failure::CouldNotRun)
+}
+
 /// The rules the gate enforces: active and in block mode.
 pub fn gated(rules: &[Resolved]) -> Vec<&Resolved> {
     rules

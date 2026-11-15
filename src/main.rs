@@ -475,6 +475,24 @@ fn open_store(inputs: &Inputs) -> Result<Store> {
     )?)
 }
 
+/// Accepts a proposal, then baselines the rule's existing hits. The rule is
+/// active once `accept` returns, so a failed baseline leaves it active.
+fn run_accept(store: &Store, inputs: &Inputs, id: &str) -> Result<()> {
+    let dir = proposals::accept(store, id)?;
+    let rule = oncebitten::rule::load_rule(&dir)?;
+    match gate::baseline_rule(inputs, &rule.id) {
+        Ok(path) => {
+            println!(
+                "accepted {id}: {} is active; existing hits baselined in {}",
+                dir.display(),
+                path.display()
+            );
+            Ok(())
+        }
+        Err(failure) => exit_could_not_run(failure),
+    }
+}
+
 fn run_proposals(action: ProposalsAction) -> Result<()> {
     let inputs = Inputs::from_process()?;
     let store = open_store(&inputs)?;
@@ -486,9 +504,7 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
             Ok(())
         }
         ProposalsAction::Show { id } => show_proposal(&store, &id),
-        ProposalsAction::Accept { id } => proposals::accept(&store, &id).map(|dir| {
-            println!("accepted {id}: {} is active", dir.display());
-        }),
+        ProposalsAction::Accept { id } => run_accept(&store, &inputs, &id),
         ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
         ProposalsAction::Reject { id, reason } => {
             proposals::reject(&store, &id, &reason, now_millis()?)
