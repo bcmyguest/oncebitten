@@ -3,7 +3,10 @@
 **oncebitten turns repeated agent mistakes into rules that git enforces.** When the same mistake shows up in two sessions, or you state a rule once, it proposes a check. You approve it, and the check then runs at pre-push and in CI.
 
 <p align="center">
-<img src="docs/media/oncebitten.gif" alt="Session A: the agent writes datetime.utcnow() and the user corrects it. Session B: the same mistake. oncebitten evidence list shows a cluster seen in 2 sessions. The user approves the proposed rule py-utcnow. oncebitten replay proves it in an OpenShell sandbox. git push is blocked: py-utcnow: src/app.py:2: use datetime.now(UTC)." width="720" />
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/media/oncebitten-dark.svg" />
+<img src="docs/media/oncebitten.svg" alt="Caught: a Claude correction, a Codex revert and a failing Cursor test each count as evidence. Rule: oncebitten proposes the strongest rule that fits (a check, then an instruction, then nothing) and you approve it. Enforced: git push, CI and pull requests stop on py-utcnow: use datetime.now(UTC)." width="720" />
+</picture>
 </p>
 
 Status: pre-alpha. Capture, evidence clustering, `check`, `replay` and the gate work; triage and rule proposals are in progress ([PLAN.md](PLAN.md)).
