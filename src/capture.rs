@@ -11,6 +11,7 @@ use crate::signal;
 use crate::store::{self, Store};
 
 const HISTORY_LIMIT: usize = 500;
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const TRIAGE_ENV: &str = "ONCEBITTEN_TRIAGE";
 /// Windows process creation flags that free the triage child from the hook's
 /// console and Ctrl+C group.
@@ -30,11 +31,37 @@ pub fn run_with<P: AsRef<str>>(
     ts: i64,
     lexicon: &[P],
 ) -> Result<Option<i64>> {
+    record(host, payload, db, ts, lexicon, None)
+}
+
+/// `run_with`, and first deletes events older than `ttl_days` before `ts`.
+pub fn run_expiring<P: AsRef<str>>(
+    host: &str,
+    payload: &str,
+    db: &Path,
+    ts: i64,
+    lexicon: &[P],
+    ttl_days: u32,
+) -> Result<Option<i64>> {
+    record(host, payload, db, ts, lexicon, Some(ttl_days))
+}
+
+fn record<P: AsRef<str>>(
+    host: &str,
+    payload: &str,
+    db: &Path,
+    ts: i64,
+    lexicon: &[P],
+    ttl_days: Option<u32>,
+) -> Result<Option<i64>> {
     let host = Host::parse(host)?;
     let Some(event) = host::normalize(host, payload, ts)? else {
         return Ok(None);
     };
     let store = Store::open(db)?;
+    if let Some(days) = ttl_days {
+        store.expire(ts - i64::from(days) * DAY_MS)?;
+    }
     let history = store.session_history(&event.host, &event.session_id, HISTORY_LIMIT)?;
     let signals = signal::derive_with(&event, &history, lexicon);
     let capture = store::Capture {
@@ -89,7 +116,8 @@ pub fn run_from_process(host: &str) -> Result<()> {
         .into_iter()
         .chain(loaded.config.capture.extra_correction_phrases)
         .collect();
-    let recorded = run_with(host, &payload, &db, ts, &lexicon)?;
+    let ttl_days = loaded.config.evidence.ttl_days;
+    let recorded = run_expiring(host, &payload, &db, ts, &lexicon, ttl_days)?;
     if let (Some(event_id), true) = (recorded, loaded.config.triage.background) {
         if let Err(error) = start_background_triage(&db, event_id, &loaded.config.triage) {
             eprintln!("oncebitten capture: background triage not started: {error:#}");
