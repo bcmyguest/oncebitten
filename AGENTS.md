@@ -39,6 +39,7 @@ Run all four before a commit. CI runs the same commands.
 - `tests/store.rs`, `tests/signal.rs`, `tests/host.rs`, `tests/hosts.rs`, `tests/capture.rs`, `tests/hooks.rs`, `tests/hooks_hosts.rs`, `tests/packaging.rs`, `tests/home.rs`: capture pipeline tests.
 - `packaging/`: plugin manifests, hook files and the opencode and pi scripts. `tests/fixtures/`: real host payloads, scrubbed.
 - `docs/gate.md`: gate stages, ranges, proofs, baseline, exit codes. Keep it in step with `src/gate.rs` and `src/baseline.rs`.
+- `.pre-commit-hooks.yaml`: the `oncebitten-gate` pre-commit hook. `templates/`: CI gate jobs (GitHub Actions, GitLab CI, Azure Pipelines). `tests/gate.rs` checks both call real commands.
 - `docs/capture.md`: signals, host support, hook install. Keep it in step with `src/signal.rs`, `src/host.rs` and `src/hooks.rs`.
 - `docs/research/`: written by other agents. Do not edit.
 

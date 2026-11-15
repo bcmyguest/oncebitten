@@ -1,0 +1,12 @@
+# Hooks this repository provides to the pre-commit framework.
+# `language: rust` makes pre-commit run `cargo install --bins --path .` on this
+# repository on first use, so users need no prebuilt binary. See docs/gate.md.
+- id: oncebitten-gate
+  name: oncebitten gate
+  description: Block a push that adds a violation of an active oncebitten block rule.
+  entry: oncebitten gate pre-push
+  language: rust
+  stages: [pre-push]
+  pass_filenames: false
+  always_run: true
+  minimum_pre_commit_version: "3.2.0"

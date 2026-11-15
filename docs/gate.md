@@ -7,6 +7,48 @@
 | `oncebitten gate pre-push [--base <ref>]` | the pre-push hook | as `check` does; a source that is not cloned exits 2 | a warning on stderr; the gate continues |
 | `oncebitten gate pr --base <ref>` | CI, on a pull request | as `--ci`: `rules.lock` required, never fetches | exit 2 |
 
+The pre-push stage runs through the [pre-commit](https://pre-commit.com) framework; oncebitten installs no git hook of its own.
+
+## Pre-push hook
+
+Add the hook to `.pre-commit-config.yaml` and install the pre-push hook type:
+
+```yaml
+repos:
+  - repo: https://github.com/bcmyguest/oncebitten
+    rev: <commit or tag>
+    hooks:
+      - id: oncebitten-gate
+```
+
+```sh
+pre-commit install --hook-type pre-push
+```
+
+The hook, in this repository's [`.pre-commit-hooks.yaml`](../.pre-commit-hooks.yaml), runs `oncebitten gate pre-push` once per push (`pass_filenames: false`, `always_run: true`, `stages: [pre-push]`). It needs pre-commit 3.2.0 or later, the first release with the `pre-push` stage name.
+
+It uses `language: rust`. On first use pre-commit clones this repository and runs `cargo install --bins --root <env> --path .` in it, which builds `oncebitten` and `oncebitten-checker` into a cached environment (source: `pre_commit/languages/rust.py`, read in pre-commit 4.6.0). It uses the `cargo` on `PATH`, or installs rustup when there is none. The build compiles tree-sitter grammars, so it needs a C compiler. `language: system` would instead run whatever `oncebitten` is on `PATH`: nothing to build, but each user must install a matching binary first, and this repository publishes no prebuilt binaries. `language: rust` works for anyone with a Rust toolchain or network access.
+
+Checked by running `pre-commit try-repo <this repo> oncebitten-gate --hook-stage pre-push --from-ref <a> --to-ref <b>` with pre-commit 4.6.0 on Linux.
+
+## CI
+
+`templates/` holds a gate job for three CI systems. Each checks out full history, installs oncebitten with `cargo install --locked --git https://github.com/bcmyguest/oncebitten oncebitten` and runs `oncebitten gate pr --base origin/<target branch>`.
+
+| File | Target branch from | Make it required |
+|---|---|---|
+| [`templates/github-actions.yml`](../templates/github-actions.yml) | `github.base_ref` | branch protection: require the check `oncebitten gate` |
+| [`templates/gitlab-ci.yml`](../templates/gitlab-ci.yml) | `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` | merge request setting "Pipelines must succeed" |
+| [`templates/azure-pipelines.yml`](../templates/azure-pipelines.yml) | `System.PullRequest.TargetBranch`, `refs/heads/` stripped | Azure Repos: build validation policy; GitHub: require the check |
+
+Pin the install with `--rev <commit>` so the gate does not change under you. The templates have not run on GitLab or Azure; `tests/gate.rs` checks only that each one calls `oncebitten gate pr --base`.
+
+`gate pr` needs `.oncebitten/rules.lock` committed, even with no sources: run `oncebitten rules sync` once and commit the file. A project with rule sources needs each clone at its locked commit before the gate runs. `rules sync` checks out `rev` or `origin/HEAD` and rewrites the lock, so pin `rev` to a commit for every source, run `oncebitten rules sync` before the gate, and fail the job on `git diff --exit-code .oncebitten/rules.lock`.
+
+The gate reads rules, proofs and the baseline from the pull request's own checkout, so a pull request can change what gates it. Review changes under `.oncebitten/` with that in mind.
+
+This repository runs the gate on its own pull requests: the `gate` job in `.github/workflows/ci.yml`, check name `oncebitten gate`.
+
 ## What it checks
 
 The gate runs every rule with `status = "active"` and `mode = "block"`. Steer rules, proposed rules and retired rules do not gate. It reuses the engines of `oncebitten check`, so a finding prints the same way: `<id>: <path>[:<line>]: <message>` on stdout.

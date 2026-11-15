@@ -1,0 +1,29 @@
+# oncebitten gate for Azure Pipelines. Copy to azure-pipelines.yml.
+# Azure Repos: add the pipeline as a build validation branch policy.
+# GitHub repos: the pr trigger below runs it; require the check in GitHub.
+trigger: none
+
+pr:
+  branches:
+    include:
+      - "*"
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    # The gate diffs against the merge-base with the target branch.
+    fetchDepth: 0
+  # Pin a commit with --rev <sha> for reproducible gates.
+  - bash: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+      echo "##vso[task.prependpath]$HOME/.cargo/bin"
+    displayName: Install Rust
+  - bash: cargo install --locked --git https://github.com/bcmyguest/oncebitten oncebitten
+    displayName: Install oncebitten
+  - bash: |
+      target="${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}"
+      git fetch origin "$target"
+      oncebitten gate pr --base "origin/$target"
+    displayName: oncebitten gate
