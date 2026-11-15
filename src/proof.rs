@@ -1,6 +1,7 @@
-//! Replay proofs. A rule directory that passed its replay in the OpenShell
-//! sandbox carries `proof.json`, which names the directory by a SHA-256 over
-//! every other file in it. The proof stands while that hash matches.
+//! Replay proofs. A rule directory that passed its replay (in the OpenShell
+//! sandbox, or with the matcher for a steer rule) carries `proof.json`, which
+//! names the directory by a SHA-256 over every other file in it. The proof
+//! stands while that hash matches.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +17,9 @@ pub const PROOF_FILE: &str = "proof.json";
 const RULE_FILE: &str = "rule.toml";
 pub const OPENSHELL: &str = "openshell";
 pub const LOCAL: &str = "local";
+/// Steer rules replay with the in-process matcher: it reads only the fixtures,
+/// so it needs no sandbox.
+pub const MATCHER: &str = "matcher";
 pub const PROVEN: &str = "proven";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,9 +155,13 @@ pub fn validity(rule: &Rule) -> Validity {
     if proof.result != PROVEN {
         return Validity::NotProven(format!("result is `{}`", proof.result));
     }
-    if proof.backend != OPENSHELL {
+    let backend = match rule.check {
+        Check::Steer(_) => MATCHER,
+        _ => OPENSHELL,
+    };
+    if proof.backend != backend {
         return Validity::NotProven(format!(
-            "backend is `{}`; only {OPENSHELL} replays count",
+            "backend is `{}`; only {backend} replays count",
             proof.backend
         ));
     }
@@ -179,6 +187,9 @@ pub fn replay_rule(
         verdict: Verdict::CouldNotRun(reason),
         written: None,
     };
+    if let Check::Steer(_) = rule.check {
+        return not_run("steer rules replay with replay_steer, not a sandbox".to_owned());
+    }
     if matches!(rule.check, Check::Native { .. }) {
         return not_run(
             "replay supports ast-grep and diff rules; native-linter rules are exempt until replay can run their toolchain"
@@ -209,13 +220,43 @@ pub fn replay_rule(
     }
 }
 
+/// Replays a steer rule with the matcher (see [`crate::steer::replay`]). A
+/// proven verdict writes `proof.json` naming `matcher`, the binary that holds
+/// the matcher; a rejected rule loses its proof.
+pub fn replay_steer(rule: &Rule, matcher: &Path) -> Replayed {
+    let Check::Steer(steer) = &rule.check else {
+        return Replayed {
+            verdict: Verdict::CouldNotRun(format!("{} is not a steer rule", rule.id)),
+            written: None,
+        };
+    };
+    let dir = rule_dir(rule);
+    let verdict = crate::steer::replay(dir, steer);
+    let written = match &verdict {
+        Verdict::Proven => record_with(rule, dir, matcher, MATCHER).map(Some),
+        Verdict::Rejected(_) => remove(dir).map(|()| None),
+        Verdict::CouldNotRun(_) => Ok(None),
+    };
+    match written {
+        Ok(written) => Replayed { verdict, written },
+        Err(error) => Replayed {
+            verdict: Verdict::CouldNotRun(format!("updating the proof: {error:#}")),
+            written: None,
+        },
+    }
+}
+
 fn record(rule: &Rule, dir: &Path, checker: &Path) -> Result<PathBuf> {
+    record_with(rule, dir, checker, OPENSHELL)
+}
+
+fn record_with(rule: &Rule, dir: &Path, checker: &Path, backend: &str) -> Result<PathBuf> {
     let proof = Proof {
         rule: rule.id.clone(),
         dir_sha256: dir_hash(dir)?,
         checker_version: env!("CARGO_PKG_VERSION").to_owned(),
         checker_sha256: file_sha256(checker)?,
-        backend: OPENSHELL.to_owned(),
+        backend: backend.to_owned(),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_secs())

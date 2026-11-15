@@ -27,6 +27,7 @@ ast-grep-language = { version = "0.51.2", default-features = false, features = [
 clap = { version = "4", features = ["derive"] }
 dunce = "1.0.5"
 globset = "0.4"
+regex = "1"
 include_dir = "0.7"
 jiff = { version = "0.2.45", default-features = false, features = ["std"] }
 rusqlite = { version = "0.42.0", features = ["bundled"] }

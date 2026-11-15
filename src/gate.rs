@@ -1,6 +1,7 @@
 //! `oncebitten gate`: the blocking check behind the pre-push hook and CI. It
 //! runs the active block rules on the paths a push or pull request changes,
-//! requires replay proofs, and lets baselined violations through.
+//! requires replay proofs (for active steer rules too), and lets baselined
+//! violations through.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -71,8 +72,8 @@ pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, 
     let exceptions = exceptions::read(&repo).map_err(Failure::CouldNotRun)?;
     let today = exceptions::today();
     let gated = gated(&rules);
-    let proofs = gated
-        .iter()
+    let proofs = proved(&rules)
+        .into_iter()
         .filter(|resolved| needs_proof(&resolved.rule.check))
         .filter_map(|resolved| match proof::validity(&resolved.rule) {
             Validity::Valid => None,
@@ -148,6 +149,19 @@ pub fn gated(rules: &[Resolved]) -> Vec<&Resolved> {
         .iter()
         .filter(|resolved| {
             resolved.rule.status == Status::Active && resolved.rule.mode == Mode::Block
+        })
+        .collect()
+}
+
+/// The rules whose proofs the gate checks: the gated rules plus the active
+/// steer rules, which the gate never runs but which act in every agent.
+pub fn proved(rules: &[Resolved]) -> Vec<&Resolved> {
+    rules
+        .iter()
+        .filter(|resolved| {
+            resolved.rule.status == Status::Active
+                && (resolved.rule.mode == Mode::Block
+                    || matches!(resolved.rule.check, Check::Steer(_)))
         })
         .collect()
 }

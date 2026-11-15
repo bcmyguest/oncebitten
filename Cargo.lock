@@ -671,6 +671,7 @@ dependencies = [
  "globset",
  "include_dir",
  "jiff",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

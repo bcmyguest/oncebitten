@@ -17,6 +17,7 @@ use oncebitten::lifecycle;
 use oncebitten::proof::{self, BackendKind};
 use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
+use oncebitten::rule::Check;
 use oncebitten::rules::{self, Failure};
 use oncebitten::store::{self, Store};
 use oncebitten::triage;
@@ -575,6 +576,14 @@ fn run_replay(
         eprintln!("error: no rule named `{id}`; see oncebitten rules list");
         std::process::exit(2)
     };
+    if matches!(resolved.rule.check, Check::Steer(_)) {
+        if local || gateway.is_some() {
+            eprintln!("{id}: steer rules replay with the matcher; ignoring --local and --gateway");
+        }
+        let exe = std::env::current_exe().context("locating the oncebitten binary")?;
+        let replayed = proof::replay_steer(&resolved.rule, &exe);
+        std::process::exit(report_replay(id, &replayed, "matcher"));
+    }
     let checker = match checker {
         Some(path) => path,
         None => default_checker()?,
@@ -585,14 +594,15 @@ fn run_replay(
         (Box::new(OpenShell::new(gateway)), BackendKind::OpenShell)
     };
     let replayed = proof::replay_rule(&resolved.rule, &checker, backend.as_ref(), kind);
-    let code = match &replayed.verdict {
+    std::process::exit(report_replay(id, &replayed, kind.as_str()))
+}
+
+fn report_replay(id: &str, replayed: &proof::Replayed, runner: &str) -> i32 {
+    match &replayed.verdict {
         Verdict::Proven => {
             match &replayed.written {
                 Some(path) => println!("{id}: proven; wrote {}", path.display()),
-                None => println!(
-                    "{id}: proven by the {} runner; no proof written",
-                    kind.as_str()
-                ),
+                None => println!("{id}: proven by the {runner} runner; no proof written"),
             }
             0
         }
@@ -604,8 +614,7 @@ fn run_replay(
             eprintln!("{id}: could not run: {reason}");
             2
         }
-    };
-    std::process::exit(code)
+    }
 }
 
 fn default_checker() -> Result<PathBuf> {

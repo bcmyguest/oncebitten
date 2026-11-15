@@ -8,10 +8,12 @@ const RULE_FILE: &str = "rule.toml";
 const CHECK_FILE: &str = "check.yml";
 const FIXTURES_DIR: &str = "fixtures";
 const GLOBS_ONLY_FOR_DIFF: &str = "when_changed and require_changed are only for engine = \"diff\"";
+const STEER_FIXTURE_EXTENSION: &str = "json";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
+    #[default]
     Block,
     Steer,
 }
@@ -51,6 +53,28 @@ enum Engine {
     Native,
     #[serde(rename = "diff")]
     Diff,
+    #[serde(rename = "steer")]
+    Steer,
+}
+
+/// What a steer rule does when its trigger matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Action {
+    /// Adds the message to the agent's context.
+    #[default]
+    Inform,
+    /// Refuses the tool call, with the message as the reason.
+    Deny,
+}
+
+impl Action {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Action::Inform => "inform",
+            Action::Deny => "deny",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +82,7 @@ enum Engine {
 struct RawRule {
     id: String,
     description: String,
+    #[serde(default)]
     mode: Mode,
     status: Status,
     engine: Engine,
@@ -70,6 +95,25 @@ struct RawRule {
     fired_output_contains: Option<String>,
     when_changed: Option<Vec<String>>,
     require_changed: Option<Vec<String>>,
+    steer: Option<RawSteer>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSteer {
+    #[serde(default)]
+    action: Action,
+    message: String,
+    trigger: RawTrigger,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTrigger {
+    tool: Option<String>,
+    command: Option<String>,
+    paths: Option<Vec<String>>,
+    prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +148,30 @@ pub enum Check {
         when_changed: Vec<String>,
         require_changed: Vec<String>,
     },
+    Steer(Steer),
+}
+
+/// A steer rule's `[steer]` table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Steer {
+    pub trigger: Trigger,
+    pub action: Action,
+    pub message: String,
+}
+
+/// What a steer rule matches in a normalized hook event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trigger {
+    /// A tool call whose name matches the glob (case-insensitive) and, when
+    /// given, whose command matches the regex.
+    Tool {
+        name: String,
+        command: Option<String>,
+    },
+    /// A tool call that edits or writes a file matching one of the globs.
+    Path { globs: Vec<String> },
+    /// A user prompt matching the regex.
+    Prompt { pattern: String },
 }
 
 /// Whether a fixture file name is `stem` plus one extension, such as `bad.py`.
@@ -252,6 +320,9 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
         ));
     }
     let globs_given = raw.when_changed.is_some() || raw.require_changed.is_some();
+    if raw.steer.is_some() && raw.engine != Engine::Steer {
+        return Err(invalid(file, "[steer] is only for engine = \"steer\""));
+    }
     let check = match raw.engine {
         Engine::AstGrep => {
             if raw.command.is_some() {
@@ -291,8 +362,26 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
                 require_changed,
             }
         }
+        Engine::Steer => {
+            if raw.mode != Mode::Steer {
+                return Err(invalid(file, "engine = \"steer\" needs mode = \"steer\""));
+            }
+            if raw.command.is_some() {
+                return Err(invalid(file, "command is only for engine = \"native\""));
+            }
+            if globs_given {
+                return Err(invalid(file, GLOBS_ONLY_FOR_DIFF));
+            }
+            let raw_steer = raw
+                .steer
+                .ok_or_else(|| invalid(file, "engine = \"steer\" needs a [steer] table"))?;
+            Check::Steer(build_steer(file, raw_steer)?)
+        }
     };
     check_fixtures(&dir.join(FIXTURES_DIR))?;
+    if matches!(check, Check::Steer(_)) {
+        check_steer_fixtures(&dir.join(FIXTURES_DIR))?;
+    }
     Ok(Rule {
         id: raw.id,
         description: raw.description,
@@ -305,6 +394,60 @@ fn build_rule(dir: &Path, file: &Path, raw: RawRule) -> Result<Rule> {
         fired_output_contains: raw.fired_output_contains,
         file: file.to_path_buf(),
     })
+}
+
+fn build_steer(file: &Path, raw: RawSteer) -> Result<Steer> {
+    if raw.message.trim().is_empty() {
+        return Err(invalid(file, "[steer] message is empty"));
+    }
+    let RawTrigger {
+        tool,
+        command,
+        paths,
+        prompt,
+    } = raw.trigger;
+    let trigger = match (tool, command, paths, prompt) {
+        (Some(name), command, None, None) => Trigger::Tool { name, command },
+        (None, None, Some(globs), None) if !globs.is_empty() => Trigger::Path { globs },
+        (None, None, Some(_), None) => {
+            return Err(invalid(file, "[steer.trigger] paths is empty"));
+        }
+        (None, None, None, Some(pattern)) => Trigger::Prompt { pattern },
+        (None, Some(_), None, None) => {
+            return Err(invalid(file, "[steer.trigger] command needs tool"));
+        }
+        _ => return Err(invalid(
+            file,
+            "[steer.trigger] needs exactly one of tool (with an optional command), paths or prompt",
+        )),
+    };
+    if raw.action == Action::Deny && !matches!(trigger, Trigger::Tool { .. }) {
+        return Err(invalid(
+            file,
+            "action = \"deny\" needs a tool trigger; path and prompt triggers can only inform",
+        ));
+    }
+    let steer = Steer {
+        trigger,
+        action: raw.action,
+        message: raw.message,
+    };
+    crate::steer::Matcher::new(&steer).map_err(|error| invalid(file, error))?;
+    Ok(steer)
+}
+
+/// Steer fixtures are recorded events, so both must be JSON.
+fn check_steer_fixtures(dir: &Path) -> Result<()> {
+    for stem in ["bad", "fixed"] {
+        let path = dir.join(format!("{stem}.{STEER_FIXTURE_EXTENSION}"));
+        if !path.is_file() {
+            return Err(invalid(
+                dir,
+                format!("a steer rule needs fixtures/{stem}.{STEER_FIXTURE_EXTENSION}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn non_empty_globs(file: &Path, key: &str, globs: Option<Vec<String>>) -> Result<Vec<String>> {
