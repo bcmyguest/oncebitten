@@ -41,7 +41,7 @@ pub enum Host {
 }
 
 impl Host {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Host::Claude => "claude",
             Host::Codex => "codex",
