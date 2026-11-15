@@ -226,6 +226,7 @@ pub fn record(
         target: None,
         commit: None,
         pr_url: None,
+        hits: None,
     };
     let Some(draft) = &answer.draft else {
         store.insert_proposal(&row)?;
