@@ -25,7 +25,24 @@ pub fn run_in(check_file: &Path, repo: &Path, rel_paths: &[String]) -> Outcome {
         .iter()
         .map(|rel| (repo.join(rel.split('/').collect::<PathBuf>()), rel.clone()))
         .collect();
-    scan(check_file, &paths)
+    // Report the repo-relative path, so output reads the same on every OS.
+    match scan(check_file, &paths) {
+        Outcome::Fired(findings) => Outcome::Fired(
+            findings
+                .into_iter()
+                .map(|mut finding| {
+                    finding.path = finding.path.map(|path| {
+                        paths
+                            .iter()
+                            .find(|(file, _)| *file == path)
+                            .map_or(path, |(_, rel)| PathBuf::from(rel))
+                    });
+                    finding
+                })
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Parses a check file. An empty file is an error: it defines no rule to run.
