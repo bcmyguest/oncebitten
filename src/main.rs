@@ -118,7 +118,11 @@ enum Command {
     /// Replay an ast-grep rule against its fixtures and corpus; exit 0 proven, 1 rejected, 2 could not run
     Replay {
         /// Qualified rule id, as `rules list` prints it
-        rule: String,
+        #[arg(required_unless_present = "stale", conflicts_with = "stale")]
+        rule: Option<String>,
+        /// Replay every project rule that is active or proposed and has a missing or stale proof
+        #[arg(long)]
+        stale: bool,
         /// The oncebitten-checker binary to bake into the sandbox image (default: next to oncebitten)
         #[arg(long)]
         checker: Option<PathBuf>,
@@ -308,10 +312,11 @@ fn main() -> Result<()> {
         } => run_baseline_update(),
         Command::Replay {
             rule,
+            stale,
             checker,
             gateway,
             local,
-        } => run_replay(&rule, checker, gateway, local),
+        } => run_replay(rule.as_deref(), stale, checker, gateway, local),
     }
 }
 
@@ -753,7 +758,8 @@ fn run_baseline_update() -> Result<()> {
 }
 
 fn run_replay(
-    id: &str,
+    id: Option<&str>,
+    stale: bool,
     checker: Option<PathBuf>,
     gateway: Option<String>,
     local: bool,
@@ -763,20 +769,36 @@ fn run_replay(
         Ok(rules) => rules,
         Err(failure) => exit_could_not_run(failure),
     };
+    if stale {
+        let code = replay_stale(&rules, checker.as_deref(), gateway, local)?;
+        std::process::exit(code)
+    }
+    let id = id.context("replay needs a rule id or --stale")?;
     let Some(resolved) = rules.iter().find(|resolved| resolved.id == id) else {
         eprintln!("error: no rule named `{id}`; see oncebitten rules list");
         std::process::exit(2)
     };
-    if matches!(resolved.rule.check, Check::Steer(_)) {
-        if local || gateway.is_some() {
-            eprintln!("{id}: steer rules replay with the matcher; ignoring --local and --gateway");
-        }
+    if matches!(resolved.rule.check, Check::Steer(_)) && (local || gateway.is_some()) {
+        eprintln!("{id}: steer rules replay with the matcher; ignoring --local and --gateway");
+    }
+    let (replayed, runner) = replay_resolved(&resolved.rule, checker.as_deref(), gateway, local)?;
+    std::process::exit(report_replay(id, &replayed, runner))
+}
+
+/// Replays one rule: a steer rule with the matcher, any other in the sandbox
+/// (or on the host with `local`).
+fn replay_resolved(
+    rule: &Rule,
+    checker: Option<&Path>,
+    gateway: Option<String>,
+    local: bool,
+) -> Result<(proof::Replayed, &'static str)> {
+    if matches!(rule.check, Check::Steer(_)) {
         let exe = std::env::current_exe().context("locating the oncebitten binary")?;
-        let replayed = proof::replay_steer(&resolved.rule, &exe);
-        std::process::exit(report_replay(id, &replayed, "matcher"));
+        return Ok((proof::replay_steer(rule, &exe), proof::MATCHER));
     }
     let checker = match checker {
-        Some(path) => path,
+        Some(path) => path.to_path_buf(),
         None => default_checker()?,
     };
     let (backend, kind): (Box<dyn Backend>, BackendKind) = if local {
@@ -784,8 +806,37 @@ fn run_replay(
     } else {
         (Box::new(OpenShell::new(gateway)), BackendKind::OpenShell)
     };
-    let replayed = proof::replay_rule(&resolved.rule, &checker, backend.as_ref(), kind);
-    std::process::exit(report_replay(id, &replayed, kind.as_str()))
+    Ok((
+        proof::replay_rule(rule, &checker, backend.as_ref(), kind),
+        kind.as_str(),
+    ))
+}
+
+/// Exit code of `replay --stale`: 2 if any rule could not run, else 1 if any
+/// was rejected, else 0.
+fn replay_stale(
+    rules: &[oncebitten::registry::Resolved],
+    checker: Option<&Path>,
+    gateway: Option<String>,
+    local: bool,
+) -> Result<i32> {
+    let mut code = 0;
+    for resolved in proof::needing_replay(rules) {
+        let (replayed, _) = replay_resolved(&resolved.rule, checker, gateway.clone(), local)?;
+        let id = &resolved.id;
+        match &replayed.verdict {
+            Verdict::Proven => println!("{id}: proven"),
+            Verdict::Rejected(reason) => {
+                println!("{id}: rejected: {reason}");
+                code = code.max(1);
+            }
+            Verdict::CouldNotRun(reason) => {
+                println!("{id}: could not run: {reason}");
+                code = 2;
+            }
+        }
+    }
+    Ok(code)
 }
 
 fn report_replay(id: &str, replayed: &proof::Replayed, runner: &str) -> i32 {

@@ -421,3 +421,71 @@ fn cli_openshell_diff_replay_writes_a_valid_proof() {
     let rule = load_rule(&repo.rule_dir("arch-diagram")).unwrap();
     assert_eq!(proof::validity(&rule), Validity::Valid);
 }
+
+#[test]
+fn cli_replay_stale_proves_every_rule_needing_a_proof() {
+    let repo = Repo::new();
+    repo.add_example("no-sudo", "active");
+    repo.add_example("py-utcnow", "proposed");
+    repo.add_example("py-no-print", "retired");
+
+    let output = repo.run(&["replay", "--stale", "--local", "--checker", CHECKER], &[]);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    let out = stdout(&output);
+    assert!(out.contains("no-sudo: proven\n"), "{out}");
+    assert!(out.contains("py-utcnow: proven\n"), "{out}");
+    assert!(!out.contains("py-no-print"), "{out}");
+    let rule = load_rule(&repo.rule_dir("no-sudo")).unwrap();
+    assert_eq!(proof::validity(&rule), Validity::Valid);
+
+    // The steer proof now stands; only the local-replayed rule is still stale.
+    let again = repo.run(&["replay", "--stale", "--local", "--checker", CHECKER], &[]);
+    let out = stdout(&again);
+    assert!(!out.contains("no-sudo"), "{out}");
+    assert!(out.contains("py-utcnow: proven"), "{out}");
+}
+
+#[test]
+fn cli_replay_stale_exits_1_on_a_rejection_and_0_when_nothing_is_stale() {
+    let repo = Repo::new();
+    repo.add_example("py-utcnow", "proposed");
+    repo.write(
+        ".oncebitten/rules/py-utcnow/check.yml",
+        "id: never\nlanguage: python\nrule:\n  pattern: nothing_matches_this()\n",
+    );
+    let output = repo.run(&["replay", "--stale", "--local", "--checker", CHECKER], &[]);
+    assert_eq!(code(&output), 1, "{}", both(&output));
+    assert!(
+        stdout(&output).contains("py-utcnow: rejected: "),
+        "{}",
+        both(&output)
+    );
+
+    let empty = Repo::new();
+    let output = empty.run(&["replay", "--stale", "--local"], &[]);
+    assert_eq!(code(&output), 0, "{}", both(&output));
+}
+
+#[test]
+fn cli_replay_stale_exits_2_when_a_rule_could_not_run() {
+    let repo = Repo::new();
+    repo.add_example("py-utcnow", "proposed");
+    let output = repo.run(
+        &[
+            "replay",
+            "--stale",
+            "--checker",
+            CHECKER,
+            "--gateway",
+            "http://127.0.0.1:1",
+        ],
+        &[],
+    );
+    assert_eq!(code(&output), 2, "{}", both(&output));
+    assert!(
+        stdout(&output).contains("py-utcnow: could not run: "),
+        "{}",
+        both(&output)
+    );
+}
