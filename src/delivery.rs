@@ -9,11 +9,12 @@ use anyhow::{bail, Context, Result};
 
 use crate::config::{self, Inputs, Platform};
 use crate::forge::{self, Forge, NewPr};
+use crate::hits;
 use crate::proof::{self, Replayed, Validity};
 use crate::proposals;
 use crate::rule::{self, Rule};
 use crate::sources;
-use crate::store::{DeliveryRow, Kind, State, Store};
+use crate::store::{DeliveryRow, HitsRow, Kind, State, Store};
 
 const BRANCH_PREFIX: &str = "oncebitten/propose-";
 const WRITABLE_KEY: &str = "rules.sources[].writable";
@@ -96,6 +97,7 @@ pub fn deliver(
         cluster: row.cluster.clone(),
         rationale: row.rationale.clone().unwrap_or_default(),
         proof: proof.clone(),
+        hits: row.hits.clone(),
     };
     let committed = match choose(inputs, to, &repo, &config, forge_for)? {
         Chosen::Pr(pr_url) => {
@@ -185,6 +187,7 @@ struct Message {
     cluster: String,
     rationale: String,
     proof: Proof,
+    hits: Option<HitsRow>,
 }
 
 impl Message {
@@ -198,6 +201,10 @@ impl Message {
             body.push_str(&format!("Rationale: {}\n", self.rationale));
         }
         body.push_str(&format!("Proof: {}\n", self.proof.text()));
+        if let Some(hits) = &self.hits {
+            body.push_str(&format!("Hits: {}\n", hits::summary_text(hits)));
+            body.push_str("existing hits will be baselined\n");
+        }
         body
     }
 }

@@ -16,7 +16,7 @@ use oncebitten::proposals::{self, Recorded};
 use oncebitten::replay::{LocalRunner, Verdict};
 use oncebitten::rule::{self, Rule, Status};
 use oncebitten::signal;
-use oncebitten::store::{NewEvent, Store};
+use oncebitten::store::{HitsRow, NewEvent, Store};
 use oncebitten::triage::verdict::{self as triage_verdict, Answer};
 use tempfile::TempDir;
 
@@ -543,4 +543,39 @@ fn cli_deliver_of_an_unknown_proposal_exits_2() {
         "{}",
         common::both(&output)
     );
+}
+
+#[test]
+fn the_pr_body_states_the_existing_hits() {
+    let world = World::new(true);
+    let cluster = world.propose();
+    world
+        .store
+        .set_proposal_hits(
+            &cluster.id,
+            &HitsRow {
+                count: 2,
+                files: 1,
+                samples: vec!["src/lib.rs:3: x.unwrap()".to_owned()],
+            },
+        )
+        .unwrap();
+    let fake = FakeForge::new("gh");
+    fake.set("reply", "https://github.com/o/rules/pull/4\n");
+
+    world
+        .deliver(&cluster.id, Some(Target::RulesRepo), true, &never, &fake)
+        .unwrap();
+
+    let calls = fake.calls();
+    assert!(
+        calls[0]
+            .iter()
+            .any(|arg| arg.contains("Hits: 2 hits in 1 file")),
+        "{:?}",
+        calls[0]
+    );
+    assert!(calls[0]
+        .iter()
+        .any(|arg| arg.contains("existing hits will be baselined")));
 }
