@@ -46,6 +46,7 @@ fn past(events: Vec<NewEvent>) -> Vec<StoredEvent> {
             kind: e.kind,
             tool: e.tool,
             summary: e.summary,
+            git_head: None,
         })
         .collect()
 }

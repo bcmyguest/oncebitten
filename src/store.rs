@@ -13,7 +13,7 @@ use crate::signal::{self, Signal, DEFAULT_CORRECTION_LEXICON, KIND_PROMPT, USER_
 const APP_DIR: &str = "oncebitten";
 const DB_FILE: &str = "events.db";
 pub const SUMMARY_LIMIT: usize = 2000;
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const PROMPT_DIGEST_PREFIX: &str = "sha256:";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SCHEMA: &str = "
@@ -26,7 +26,8 @@ CREATE TABLE events (
     kind TEXT NOT NULL,
     tool TEXT,
     summary TEXT NOT NULL,
-    payload_hash TEXT NOT NULL UNIQUE
+    payload_hash TEXT NOT NULL UNIQUE,
+    git_head TEXT
 );
 CREATE INDEX events_session ON events (host, session_id, id);
 CREATE TABLE signals (
@@ -46,6 +47,14 @@ CREATE TABLE IF NOT EXISTS rejections (
     reason TEXT NOT NULL
 );
 ";
+
+/// Provenance the host payload supplies beside the event itself.
+/// `tool_use_id` is the host's id for one tool call; redelivery repeats it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Capture {
+    pub git_head: Option<String>,
+    pub tool_use_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewEvent {
@@ -68,6 +77,7 @@ pub struct StoredEvent {
     pub kind: String,
     pub tool: Option<String>,
     pub summary: String,
+    pub git_head: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +120,17 @@ impl Store {
     }
 
     pub fn record(&self, event: &NewEvent, signals: &[Signal]) -> Result<Option<i64>> {
+        self.record_captured(event, signals, &Capture::default())
+    }
+
+    /// Stores the event and its signals. A duplicate event (same dedupe key,
+    /// see `dedupe_key`) stores nothing and returns `None`.
+    pub fn record_captured(
+        &self,
+        event: &NewEvent,
+        signals: &[Signal],
+        capture: &Capture,
+    ) -> Result<Option<i64>> {
         let event = NewEvent {
             summary: stored_summary(event),
             ..event.clone()
@@ -117,8 +138,8 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         let inserted = tx.execute(
             "INSERT OR IGNORE INTO events \
-             (ts, host, session_id, repo, kind, tool, summary, payload_hash) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (ts, host, session_id, repo, kind, tool, summary, payload_hash, git_head) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 event.ts,
                 event.host,
@@ -127,7 +148,8 @@ impl Store {
                 event.kind,
                 event.tool,
                 event.summary,
-                payload_hash(&event)
+                dedupe_key(&event, capture.tool_use_id.as_deref()),
+                capture.git_head
             ],
         )?;
         if inserted == 0 {
@@ -159,7 +181,7 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<StoredEvent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, ts, host, session_id, repo, kind, tool, summary FROM \
+            "SELECT id, ts, host, session_id, repo, kind, tool, summary, git_head FROM \
              (SELECT * FROM events WHERE host = ?1 AND session_id = ?2 ORDER BY id DESC LIMIT ?3) \
              ORDER BY id",
         )?;
@@ -172,7 +194,7 @@ impl Store {
     pub fn signals(&self) -> Result<Vec<SignalRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.kind, s.detail, e.id, e.ts, e.host, e.session_id, e.repo, e.kind, \
-             e.tool, e.summary FROM signals s JOIN events e ON e.id = s.event_id \
+             e.tool, e.summary, e.git_head FROM signals s JOIN events e ON e.id = s.event_id \
              ORDER BY e.id, s.id",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -256,7 +278,21 @@ fn stored_event(row: &rusqlite::Row, start: usize) -> rusqlite::Result<StoredEve
         kind: row.get(start + 5)?,
         tool: row.get(start + 6)?,
         summary: row.get(start + 7)?,
+        git_head: row.get(start + 8)?,
     })
+}
+
+/// Adds `events.git_head` to schema 1 to 3 databases. Skips the `ALTER` when
+/// the column exists, so a retried migration does not fail.
+fn add_git_head_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(events)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    if !columns.iter().any(|name| name == "git_head") {
+        conn.execute_batch("ALTER TABLE events ADD COLUMN git_head TEXT")?;
+    }
+    Ok(())
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
@@ -272,6 +308,7 @@ fn migrate(conn: &Connection) -> Result<()> {
             redact_prompts(conn)?;
             purge_freed_pages(conn)?;
             conn.execute_batch(REJECTIONS)?;
+            add_git_head_column(conn)?;
             // Set last: if the purge fails, the next open redoes both steps,
             // and `redact_prompts` skips rows it already digested.
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -279,6 +316,12 @@ fn migrate(conn: &Connection) -> Result<()> {
         }
         2 => {
             conn.execute_batch(REJECTIONS)?;
+            add_git_head_column(conn)?;
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            Ok(())
+        }
+        3 => {
+            add_git_head_column(conn)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             Ok(())
         }
@@ -352,6 +395,30 @@ fn purge_freed_pages(conn: &Connection) -> Result<()> {
         0 => Ok(()),
         _ => bail!("cannot truncate the events database WAL: another connection holds it"),
     })
+}
+
+/// The dedupe key, stored in `events.payload_hash` under a UNIQUE constraint.
+///
+/// - A host tool-use id keys the event by (host, session, kind, tool use id).
+///   A redelivered hook carries the same id, whatever its capture time.
+/// - Otherwise the key hashes the whole event: ts, host, session, repo, kind,
+///   tool and summary. Two prompts or commands at different times differ by ts.
+///
+/// `git_head` is not part of either key.
+fn dedupe_key(event: &NewEvent, tool_use_id: Option<&str>) -> String {
+    match tool_use_id {
+        Some(id) => {
+            let canonical = serde_json::json!({
+                "host": event.host,
+                "session_id": event.session_id,
+                "kind": event.kind,
+                "tool_use_id": id,
+            })
+            .to_string();
+            format!("tool-use:{}", hex_sha256(canonical.as_bytes()))
+        }
+        None => payload_hash(event),
+    }
 }
 
 fn payload_hash(event: &NewEvent) -> String {

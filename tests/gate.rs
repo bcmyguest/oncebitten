@@ -350,6 +350,19 @@ when_changed = ["src/**"]
 require_changed = ["docs/diagram.md"]
 "#,
     );
+    repo.write(
+        ".oncebitten/rules/diagram/fixtures/bad.diff",
+        "src/app.py\n",
+    );
+    repo.write(
+        ".oncebitten/rules/diagram/fixtures/fixed.diff",
+        "src/app.py\ndocs/diagram.md\n",
+    );
+    repo.write(
+        ".oncebitten/rules/diagram/corpus/unrelated.diff",
+        "README.md\n",
+    );
+    prove(&repo, "diagram");
     repo.write("src/app.py", "x = 9\n");
     write_baseline(&repo, serde_json::json!([{ "rule": "diagram" }]));
     repo.commit_all("diff");
@@ -358,6 +371,33 @@ require_changed = ["docs/diagram.md"]
 
     assert_eq!(code(&output), 1, "{}", both(&output));
     assert!(stdout(&output).contains("diagram:"), "{}", both(&output));
+}
+
+#[test]
+fn diff_rule_without_a_proof_exits_2_at_pr() {
+    let repo = gated_repo();
+    repo.add_rule(
+        "diagram",
+        r#"id = "diagram"
+description = "update the diagram with the API"
+mode = "block"
+status = "active"
+engine = "diff"
+when_changed = ["src/**"]
+require_changed = ["docs/diagram.md"]
+"#,
+    );
+    repo.write("src/app.py", "x = 9\n");
+    repo.commit_all("diff");
+
+    let output = pr(&repo);
+
+    assert_eq!(code(&output), 2, "{}", both(&output));
+    assert!(
+        both(&output).contains("diagram: no replay proof"),
+        "{}",
+        both(&output)
+    );
 }
 
 #[test]
