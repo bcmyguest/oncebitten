@@ -1,6 +1,5 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -58,30 +57,20 @@ pub fn prompt_input(cluster: &Cluster) -> PromptInput {
     }
 }
 
-/// A fresh empty directory that is removed when dropped.
-struct Workdir(PathBuf);
+/// A fresh empty directory, unique per call, removed when dropped.
+struct Workdir(tempfile::TempDir);
 
 impl Workdir {
     fn create() -> Result<Self> {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("system clock is before the unix epoch")?
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("oncebitten-triage-{}-{nanos}", std::process::id()));
-        fs::create_dir(&path)
-            .with_context(|| format!("cannot create triage workdir {}", path.display()))?;
-        Ok(Workdir(path))
+        tempfile::Builder::new()
+            .prefix("oncebitten-triage-")
+            .tempdir()
+            .map(Workdir)
+            .context("cannot create triage workdir")
     }
 
     fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Workdir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        self.0.path()
     }
 }
 
@@ -109,4 +98,28 @@ pub fn run(
             .map_err(|err| anyhow!("{err}"))?
     };
     verdict_from(&triage, &captured).context("could not run: host output is not a verdict")
+}
+
+#[cfg(test)]
+mod workdir_tests {
+    use super::Workdir;
+
+    /// Concurrent triage calls in one process must never share a workdir.
+    /// A pid-plus-clock name collided on macOS, whose clock ticks in
+    /// microseconds.
+    #[test]
+    fn concurrent_workdirs_are_distinct_and_exist() {
+        let dirs: Vec<Workdir> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..64).map(|_| s.spawn(Workdir::create)).collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap().unwrap())
+                .collect()
+        });
+        let mut paths: Vec<_> = dirs.iter().map(|d| d.path().to_path_buf()).collect();
+        assert!(paths.iter().all(|p| p.is_dir()));
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), 64);
+    }
 }
