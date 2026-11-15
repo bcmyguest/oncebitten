@@ -8,6 +8,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::rule::is_fixture_named;
+
 pub mod openshell;
 
 pub const RULE_FILE: &str = "check.yml";
@@ -192,7 +194,11 @@ impl ReplaySpec {
 fn single_named(dir: &Path, stem: &str) -> Result<PathBuf, String> {
     let found: Vec<PathBuf> = files_in(dir)?
         .into_iter()
-        .filter(|path| path.file_stem().and_then(|s| s.to_str()) == Some(stem))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| is_fixture_named(name, stem))
+        })
         .collect();
     match found.as_slice() {
         [one] => Ok(one.clone()),

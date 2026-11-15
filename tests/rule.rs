@@ -352,3 +352,12 @@ fired_output_contains = \"\"\n";
         "{message}"
     );
 }
+
+#[test]
+fn bad_fixture_name_must_be_bad_plus_one_extension() {
+    let (_root, dir) = rule_dir("no-unwrap", AST_GREP_RULE);
+    fs::remove_file(dir.join("fixtures/bad.rs")).unwrap();
+    fs::write(dir.join("fixtures/bad.test.rs"), "x.unwrap()\n").unwrap();
+    let message = error_of(&dir);
+    assert!(message.contains("exactly one bad.*"), "{message}");
+}

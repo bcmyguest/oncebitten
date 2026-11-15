@@ -105,6 +105,12 @@ pub enum Check {
     },
 }
 
+/// Whether a fixture file name is `stem` plus one extension, such as `bad.py`.
+/// `bad.test.py` is not a `bad` fixture. Rule validation and replay share it.
+pub fn is_fixture_named(file_name: &str, stem: &str) -> bool {
+    Path::new(file_name).file_stem().and_then(|s| s.to_str()) == Some(stem)
+}
+
 pub fn is_kebab_case(name: &str) -> bool {
     !name.is_empty()
         && name.split('-').all(|part| {
@@ -281,10 +287,13 @@ fn check_fixtures(dir: &Path) -> Result<()> {
                 .collect::<std::io::Result<Vec<String>>>()
         })
         .with_context(|| format!("reading {}", dir.display()))?;
-    let bad = names.iter().filter(|name| name.starts_with("bad.")).count();
+    let bad = names
+        .iter()
+        .filter(|name| is_fixture_named(name, "bad"))
+        .count();
     let fixed = names
         .iter()
-        .filter(|name| name.starts_with("fixed."))
+        .filter(|name| is_fixture_named(name, "fixed"))
         .count();
     if names.len() != 2 || bad != 1 || fixed != 1 {
         return Err(invalid(
