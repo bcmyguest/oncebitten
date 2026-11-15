@@ -27,7 +27,7 @@
 ## Privacy
 
 - A prompt is stored as `sha256:<hex>` of its text, in `events.summary`. The text itself is not stored. The `user-correction` detail holds only the matched phrases.
-- Schema 2 (`PRAGMA user_version = 2`) migrated schema 1 databases; schema 3 adds the `rejections` table (see [evidence.md](evidence.md)). On first open, each stored prompt becomes its digest, and each `user-correction` detail is rebuilt from the default lexicon. A phrase that appears only in a custom list is not recovered from old rows.
+- Schema 2 (`PRAGMA user_version = 2`) migrated schema 1 databases; schema 3 adds the `rejections` table (see [evidence.md](evidence.md)); schema 4 (`PRAGMA user_version = 4`) adds `events.git_head`. Opening a schema 0 to 3 database migrates it. On first open, each stored prompt becomes its digest, and each `user-correction` detail is rebuilt from the default lexicon. A phrase that appears only in a custom list is not recovered from old rows.
 - The migration overwrites the old rows, then runs `VACUUM` and a `wal_checkpoint(TRUNCATE)`, so no old prompt text stays in freed pages or the WAL. It sets the schema version only after both succeed; if one fails, the next open retries and skips rows already digested.
 - Tool summaries (the Bash command or the file path, cut to 2000 characters) are not redacted. The agent writes them from its tool input. A command can still contain text the user typed, for example a pasted value in `echo`. Redacting them would drop the command that the `repeat-failure`, `test-fail-then-pass` and `revert` signals need.
 

@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::path::Path;
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -30,7 +31,25 @@ pub fn run_with<P: AsRef<str>>(
     let store = Store::open(db)?;
     let history = store.session_history(&event.host, &event.session_id, HISTORY_LIMIT)?;
     let signals = signal::derive_with(&event, &history, lexicon);
-    store.record(&event, &signals)
+    let head = event.repo.as_deref().and_then(git_head);
+    store.record_with_head(&event, &signals, head.as_deref())
+}
+
+/// The commit `HEAD` names in `repo`, from `git rev-parse`. `None` when git is
+/// missing or the repo has no commit yet. Capture never fails on it.
+fn git_head(repo: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--verify", "-q", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let head = String::from_utf8(output.stdout).ok()?;
+    let head = head.trim();
+    (!head.is_empty()).then(|| head.to_string())
 }
 
 pub fn run_from_process(host: &str) -> Result<()> {

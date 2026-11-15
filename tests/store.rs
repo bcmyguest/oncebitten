@@ -93,7 +93,7 @@ fn open_creates_schema_and_wal_mode() {
     let mode: String = conn
         .query_row("PRAGMA journal_mode", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(mode, "wal");
 }
 
@@ -287,7 +287,7 @@ fn migration_blanks_prompt_text_from_schema_one() {
     let tool: String = conn
         .query_row("SELECT summary FROM events WHERE id = 2", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(prompt, digest("Please never touch my keys"));
     assert_eq!(detail, "never");
     assert_eq!(tool, "cargo test");
@@ -369,6 +369,43 @@ fn rerunning_the_migration_keeps_digested_rows() {
     assert_eq!(detail, "never");
 }
 
+fn column_names(path: &std::path::Path, table: &str) -> Vec<String> {
+    let conn = raw(path);
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .unwrap();
+    stmt.query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+}
+
+#[test]
+fn recorded_event_stores_its_git_head() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    store
+        .record_with_head(&event("s1", "x", 1), &[], Some("abc123"))
+        .unwrap();
+    let head: Option<String> = raw(&path)
+        .query_row("SELECT git_head FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(head.as_deref(), Some("abc123"));
+}
+
+#[test]
+fn record_without_a_head_stores_null() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    store.record(&event("s1", "x", 1), &[]).unwrap();
+    let head: Option<String> = raw(&path)
+        .query_row("SELECT git_head FROM events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(head, None);
+}
+
 #[test]
 fn migration_from_schema_two_adds_rejections_and_keeps_rows() {
     let dir = TempDir::new().unwrap();
@@ -389,5 +426,33 @@ fn migration_from_schema_two_adds_rejections_and_keeps_rows() {
     let version: i64 = raw(&path)
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
+}
+
+#[test]
+fn schema_two_database_gains_git_head_column_on_open() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    {
+        let conn = raw(&path);
+        conn.execute_batch(SCHEMA_ONE).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    store
+        .record_with_head(&event("s1", "x", 1), &[], Some("def456"))
+        .unwrap();
+    assert!(column_names(&path, "events").contains(&"git_head".to_string()));
+    let version: i64 = raw(&path)
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 4);
+}
+
+#[test]
+fn reopening_does_not_fail_on_existing_git_head_column() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    drop(Store::open(&path).unwrap());
+    assert!(Store::open(&path).is_ok());
 }

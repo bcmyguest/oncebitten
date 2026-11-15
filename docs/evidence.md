@@ -44,4 +44,4 @@ Status is `candidate`, `below-threshold` or `rejected`. Clusters print most sess
 
 ## Storage
 
-Clusters are computed on read from `events` and `signals`; only rejections are stored. Schema 3 (`PRAGMA user_version = 3`) adds the `rejections` table; opening a schema 1 or 2 database migrates it.
+Clusters are computed on read from `events` and `signals`; only rejections are stored. Schema 3 (`PRAGMA user_version = 3`) adds the `rejections` table. Schema 4 (`PRAGMA user_version = 4`) adds `events.git_head`; opening a schema 0 to 3 database migrates it.

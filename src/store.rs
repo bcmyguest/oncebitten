@@ -13,7 +13,7 @@ use crate::signal::{self, Signal, DEFAULT_CORRECTION_LEXICON, KIND_PROMPT, USER_
 const APP_DIR: &str = "oncebitten";
 const DB_FILE: &str = "events.db";
 pub const SUMMARY_LIMIT: usize = 2000;
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const PROMPT_DIGEST_PREFIX: &str = "sha256:";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SCHEMA: &str = "
@@ -26,7 +26,8 @@ CREATE TABLE events (
     kind TEXT NOT NULL,
     tool TEXT,
     summary TEXT NOT NULL,
-    payload_hash TEXT NOT NULL UNIQUE
+    payload_hash TEXT NOT NULL UNIQUE,
+    git_head TEXT
 );
 CREATE INDEX events_session ON events (host, session_id, id);
 CREATE TABLE signals (
@@ -110,6 +111,18 @@ impl Store {
     }
 
     pub fn record(&self, event: &NewEvent, signals: &[Signal]) -> Result<Option<i64>> {
+        self.record_with_head(event, signals, None)
+    }
+
+    /// Stores the event and its signals. `git_head` is the commit checked out
+    /// in the event's repo when the event was captured. A duplicate event
+    /// (same dedupe key, see `payload_hash`) stores nothing and returns `None`.
+    pub fn record_with_head(
+        &self,
+        event: &NewEvent,
+        signals: &[Signal],
+        git_head: Option<&str>,
+    ) -> Result<Option<i64>> {
         let event = NewEvent {
             summary: stored_summary(event),
             ..event.clone()
@@ -117,8 +130,8 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         let inserted = tx.execute(
             "INSERT OR IGNORE INTO events \
-             (ts, host, session_id, repo, kind, tool, summary, payload_hash) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (ts, host, session_id, repo, kind, tool, summary, payload_hash, git_head) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 event.ts,
                 event.host,
@@ -127,7 +140,8 @@ impl Store {
                 event.kind,
                 event.tool,
                 event.summary,
-                payload_hash(&event)
+                payload_hash(&event),
+                git_head
             ],
         )?;
         if inserted == 0 {
@@ -259,6 +273,19 @@ fn stored_event(row: &rusqlite::Row, start: usize) -> rusqlite::Result<StoredEve
     })
 }
 
+/// Adds `events.git_head` to schema 1 to 3 databases. Skips the `ALTER` when
+/// the column exists, so a retried migration does not fail.
+fn add_git_head_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(events)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    if !columns.iter().any(|name| name == "git_head") {
+        conn.execute_batch("ALTER TABLE events ADD COLUMN git_head TEXT")?;
+    }
+    Ok(())
+}
+
 fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     match version {
@@ -272,6 +299,7 @@ fn migrate(conn: &Connection) -> Result<()> {
             redact_prompts(conn)?;
             purge_freed_pages(conn)?;
             conn.execute_batch(REJECTIONS)?;
+            add_git_head_column(conn)?;
             // Set last: if the purge fails, the next open redoes both steps,
             // and `redact_prompts` skips rows it already digested.
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -279,6 +307,12 @@ fn migrate(conn: &Connection) -> Result<()> {
         }
         2 => {
             conn.execute_batch(REJECTIONS)?;
+            add_git_head_column(conn)?;
+            conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            Ok(())
+        }
+        3 => {
+            add_git_head_column(conn)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             Ok(())
         }
