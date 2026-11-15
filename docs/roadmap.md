@@ -8,8 +8,8 @@ Status as of 2026-11-15:
 | --- | --- | --- |
 | M1 | 0-1 | Done |
 | M2 | 2-5 | Done |
-| M3 | 6-9 | Steps 6-7 done; step 8 in progress; step 9a done on branch, 9b not started |
-| M4 | 10-11 | Not started |
+| M3 | 6-9 | Done |
+| M4 | 10-11 | Done |
 
 "Done" means merged to `main`. "In progress" means work on a branch that is not merged yet.
 
@@ -35,12 +35,12 @@ Status as of 2026-11-15:
 | --- | --- | --- |
 | 6. Signal capture | Hooks for Claude Code, Codex, Cursor, opencode and pi that record signals locally, with no model calls. See [Signal capture](capture.md). | Done |
 | 7. Evidence | A store that clusters signals, with provenance, deduplication, independent occurrence counts and memory of rejected clusters. See [Evidence](evidence.md). | Done |
-| 8. Triage | A headless call to an agent host reviews the evidence and returns JSON, with its hooks off, a timeout and bounded context. oncebitten refuses a host that fails the hooks-off proof; opencode is exempt from that proof. | In progress |
-| 9. Proposals | A proposed rule arrives as a commit in the current pull request or as a pull request to the rules repository. A proof gone stale replays again. 9a: triage drafts the rule, proposals queue unproven or proven with provenance, `oncebitten proposals`, gate notice, background triage ([Proposals](proposals.md)). 9b: forge delivery and stale-proof replay. | 9a done on branch, 9b not started |
+| 8. Triage | A headless call to an agent host reviews the evidence and returns JSON, with its hooks off, a timeout and bounded context. oncebitten refuses a host that fails the hooks-off proof; opencode is exempt from that proof. | Done (PR #9) |
+| 9. Proposals | A proposed rule arrives as a commit in the current pull request or as a pull request to the rules repository. A proof gone stale replays again. 9a: triage drafts the rule, proposals queue unproven or proven with provenance, `oncebitten proposals`, gate notice, background triage ([Proposals](proposals.md)). 9b: forge delivery, `replay --stale` and PR attachments as diff-rule evidence. | Done (PRs #14 and this one) |
 
 ## M4: steps 10-11
 
 | Step | What it delivers | Status |
 | --- | --- | --- |
-| 10. Steer mode | Steer rules and their proofs, and routing for lessons git cannot see. | Not started |
-| 11. Lifecycle | Rule exceptions with a reason and an expiry date, retirement, rollback and `oncebitten doctor`. | Not started |
+| 10. Steer mode | Steer rules and their proofs, and routing for lessons git cannot see. | Done (PR #13) |
+| 11. Lifecycle | Rule exceptions with a reason and an expiry date, retirement, rollback and `oncebitten doctor`. | Done (PR #12) |

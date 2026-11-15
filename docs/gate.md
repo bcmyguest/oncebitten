@@ -119,6 +119,12 @@ A pull request can edit the baseline. Review a change to `baseline.json` like a 
 
 A retired rule never runs, so `baseline update` drops its entries. A finding a live exception covers stays out of the baseline.
 
+## PR attachments
+
+`gate pr` only. When a `diff` rule's `when_changed` matched but `require_changed` did not, the gate reads the description and comments of the open pull request for the current branch through the forge (`gh`, `glab` or `az repos`; see [configuration.md](configuration.md)). The rule passes when the text holds an attachment link whose extension matches a `require_changed` glob (`docs/screenshots/*.png` accepts a `.png` link; `*.{png,jpg}` accepts either). Link forms: a markdown image or link, a bare URL ending in the extension, and an HTML `<img src=...>`. A GitHub `user-attachments/assets/<uuid>` URL has no extension; inside a markdown image or `<img>` it counts as an image and matches the globs `png`, `jpg`, `jpeg`, `gif`, `webp` and `svg`. A glob with no literal extension, such as `docs/**`, accepts no link.
+
+With no forge, no open pull request or a forge failure, the rule fires on the diff alone and the gate prints one `warning:` line to stderr. This never exits 2. `gate pre-push` never calls the forge. Azure DevOps: only the description is read (see `src/forge.rs`).
+
 ## Exceptions
 
 `.oncebitten/exceptions.toml` lets a rule's findings through on named paths until a date; [lifecycle.md](lifecycle.md#exceptions) has the format. Both stages drop findings a live exception covers before the baseline applies and print `<n> violation(s) excepted by .oncebitten/exceptions.toml` to stderr. An expired exception covers nothing; the gate prints `warning: expired exception: <rule> on <paths> until <date>: <reason>` for each one. A file that does not parse exits 2.
