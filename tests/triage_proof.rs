@@ -85,6 +85,7 @@ fn run_prove(runner: &dyn Runner, work: &Path, list: &[Sentinel]) -> Result<(), 
         Duration::from_secs(5),
         list,
     )
+    .map(|_| ())
 }
 
 #[test]

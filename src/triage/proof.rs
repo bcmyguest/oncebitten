@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::config::Host;
-use crate::triage::host::Invocation;
+use crate::triage::host::{Captured, Invocation};
 use crate::triage::run::{RunError, Runner};
 
 /// One sentinel hook: a settings file the host reads hooks from, and the
@@ -56,33 +56,53 @@ pub fn requires_proof(host: Host) -> bool {
     !matches!(host, Host::Opencode)
 }
 
+/// Every settings scope the host reads hooks from. `home` is `None` when the
+/// user scope cannot be sandboxed (the real HOME), so only workdir scopes count.
+fn scopes(host: Host, home: Option<&Path>, workdir: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut scopes = Vec::new();
+    match host {
+        Host::Claude => {
+            if let Some(home) = home {
+                scopes.push((
+                    "claude user settings",
+                    home.join(".claude").join("settings.json"),
+                ));
+            }
+            scopes.push((
+                "claude project settings",
+                workdir.join(".claude").join("settings.json"),
+            ));
+            scopes.push((
+                "claude local settings",
+                workdir.join(".claude").join("settings.local.json"),
+            ));
+        }
+        Host::Codex => {
+            if let Some(home) = home {
+                scopes.push(("codex user hooks", home.join(".codex").join("hooks.json")));
+            }
+            scopes.push((
+                "codex project hooks",
+                workdir.join(".codex").join("hooks.json"),
+            ));
+        }
+        _ => {}
+    }
+    scopes
+}
+
 /// Every settings scope the host reads hooks from, under `home` and `workdir`.
 /// Markers go in `markers`, one file per scope.
 pub fn sentinels(host: Host, home: &Path, workdir: &Path, markers: &Path) -> Vec<Sentinel> {
-    let scopes: Vec<(&'static str, PathBuf)> = match host {
-        Host::Claude => vec![
-            (
-                "claude user settings",
-                home.join(".claude").join("settings.json"),
-            ),
-            (
-                "claude project settings",
-                workdir.join(".claude").join("settings.json"),
-            ),
-            (
-                "claude local settings",
-                workdir.join(".claude").join("settings.local.json"),
-            ),
-        ],
-        Host::Codex => vec![
-            ("codex user hooks", home.join(".codex").join("hooks.json")),
-            (
-                "codex project hooks",
-                workdir.join(".codex").join("hooks.json"),
-            ),
-        ],
-        _ => Vec::new(),
-    };
+    with_markers(scopes(host, Some(home), workdir), markers)
+}
+
+/// The workdir scopes only. Used with the real HOME, which the proof must not write.
+pub fn workdir_sentinels(host: Host, workdir: &Path, markers: &Path) -> Vec<Sentinel> {
+    with_markers(scopes(host, None, workdir), markers)
+}
+
+fn with_markers(scopes: Vec<(&'static str, PathBuf)>, markers: &Path) -> Vec<Sentinel> {
     scopes
         .into_iter()
         .enumerate()
@@ -141,7 +161,8 @@ fn clear(sentinels: &[Sentinel]) -> io::Result<()> {
 
 /// Runs the hooks-on control, then the hooks-off triage call, in `workdir`.
 /// Every sentinel must fire in the control and none may fire in the triage
-/// call. Installs the sentinels first, so `home` and `workdir` must be temp dirs.
+/// call. Returns the triage call's output on success. Installs the sentinels
+/// first, so the sentinels must live under temp dirs.
 pub fn prove(
     runner: &dyn Runner,
     control: &Invocation,
@@ -149,7 +170,7 @@ pub fn prove(
     workdir: &Path,
     timeout: Duration,
     sentinels: &[Sentinel],
-) -> Result<(), ProofError> {
+) -> Result<Captured, ProofError> {
     install(sentinels).map_err(ProofError::Io)?;
     clear(sentinels).map_err(ProofError::Io)?;
     runner
@@ -165,13 +186,12 @@ pub fn prove(
         return Err(ProofError::Silent(silent));
     }
     clear(sentinels).map_err(ProofError::Io)?;
-    runner
+    let captured = runner
         .run(triage, workdir, timeout)
         .map_err(ProofError::Run)?;
     let leaked = fired(sentinels);
-    if leaked.is_empty() {
-        Ok(())
-    } else {
-        Err(ProofError::Fired(leaked))
+    if !leaked.is_empty() {
+        return Err(ProofError::Fired(leaked));
     }
+    Ok(captured)
 }
