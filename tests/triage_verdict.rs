@@ -14,6 +14,7 @@ fn parses_a_complete_verdict() {
             root_cause: "ran python3 -c instead of the notebook".into(),
             proposed_fix_kind: FixKind::AgentWorkflow,
             generality: Generality::Project,
+            mistake_class: None,
         }
     );
 }
@@ -132,4 +133,34 @@ fn prompt_is_capped_and_lists_only_the_first_occurrences() {
     assert!(prompt.contains("[truncated]"));
     assert_eq!(prompt, build_prompt(&input), "prompt must be deterministic");
     assert!(prompt.contains("sessions: 50"));
+}
+#[test]
+fn mistake_class_is_an_optional_slug() {
+    let with = VALID.replacen('{', r#"{"mistake_class":"unwrap-in-library","#, 1);
+    assert_eq!(
+        verdict::parse(&with).unwrap().mistake_class.as_deref(),
+        Some("unwrap-in-library")
+    );
+    for absent in [
+        VALID.replacen('{', r#"{"mistake_class":null,"#, 1),
+        VALID.replacen('{', r#"{"mistake_class":"","#, 1),
+    ] {
+        assert_eq!(verdict::parse(&absent).unwrap().mistake_class, None);
+    }
+    let long = "a".repeat(65);
+    for bad in ["Unwrap", "unwrap use", "-unwrap", long.as_str()] {
+        let text = VALID.replacen('{', &format!(r#"{{"mistake_class":"{bad}","#), 1);
+        assert!(verdict::parse(&text).is_err(), "accepted {bad}");
+    }
+}
+
+#[test]
+fn schema_declares_mistake_class_nullable_and_not_required() {
+    let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+    assert_eq!(
+        schema["properties"]["mistake_class"]["type"],
+        serde_json::json!(["string", "null"])
+    );
+    let required = schema["required"].as_array().unwrap();
+    assert!(!required.iter().any(|key| key == "mistake_class"));
 }
