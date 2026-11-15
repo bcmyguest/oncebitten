@@ -1,0 +1,254 @@
+use std::path::{Component, Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::engine::{astgrep, diff};
+use crate::rule::{self, is_fixture_named, is_kebab_case, Mode, Status};
+
+pub const MAX_ID_CHARS: usize = 64;
+pub const MAX_TEXT_CHARS: usize = 1000;
+pub const MAX_FILE_BYTES: usize = 64 * 1024;
+pub const MAX_CORPUS_FILES: usize = 10;
+const RULE_FILE: &str = "rule.toml";
+const CHECK_FILE: &str = "check.yml";
+const FIXTURES_DIR: &str = "fixtures";
+const CORPUS_DIR: &str = "corpus";
+
+/// The rule a triage call drafts beside its verdict. Every optional key may be
+/// absent or `null`; the schema lists them all so strict hosts accept it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Draft {
+    pub id: String,
+    pub description: String,
+    pub mode: Mode,
+    pub engine: Engine,
+    #[serde(default)]
+    pub language: Option<String>,
+    /// The ast-grep `check.yml` text.
+    #[serde(default)]
+    pub check: Option<String>,
+    #[serde(default)]
+    pub command: Option<Vec<String>>,
+    #[serde(default)]
+    pub fired_exit_codes: Option<Vec<i32>>,
+    #[serde(default)]
+    pub fired_output_contains: Option<String>,
+    #[serde(default)]
+    pub when_changed: Option<Vec<String>>,
+    #[serde(default)]
+    pub require_changed: Option<Vec<String>>,
+    pub bad: DraftFile,
+    pub fixed: DraftFile,
+    #[serde(default)]
+    pub corpus: Option<Vec<DraftFile>>,
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DraftFile {
+    pub name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Engine {
+    #[serde(rename = "ast-grep")]
+    AstGrep,
+    #[serde(rename = "diff")]
+    Diff,
+    #[serde(rename = "native")]
+    Native,
+}
+
+/// `rule.toml` as a proposal writes it. Field order matches docs/rules.md.
+#[derive(Serialize)]
+struct RuleToml<'a> {
+    id: &'a str,
+    description: &'a str,
+    mode: &'a str,
+    status: &'a str,
+    engine: Engine,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fired_exit_codes: Option<&'a [i32]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fired_output_contains: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    when_changed: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    require_changed: Option<&'a [String]>,
+}
+
+impl Draft {
+    /// Checks the draft as strictly as a hand-written rule: it must load with
+    /// `rule::load_rule`, its check file must compile and its globs must parse.
+    pub fn validate(&self) -> Result<()> {
+        if !is_kebab_case(&self.id) || self.id.chars().count() > MAX_ID_CHARS {
+            bail!(
+                "draft id `{}` must be lowercase kebab-case of at most {MAX_ID_CHARS} characters",
+                self.id
+            );
+        }
+        bounded_text("description", &self.description)?;
+        bounded_text("rationale", &self.rationale)?;
+        self.check_engine_keys()?;
+        check_file_name(&self.bad, Some("bad"))?;
+        check_file_name(&self.fixed, Some("fixed"))?;
+        let corpus = self.corpus.as_deref().unwrap_or_default();
+        if corpus.len() > MAX_CORPUS_FILES {
+            bail!("draft corpus lists more than {MAX_CORPUS_FILES} files");
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for file in corpus {
+            check_file_name(file, None)?;
+            if !names.insert(file.name.as_str()) {
+                bail!("draft corpus names `{}` twice", file.name);
+            }
+        }
+        let scratch = tempfile::Builder::new()
+            .prefix("oncebitten-draft-")
+            .tempdir()
+            .context("cannot create a scratch directory for the draft")?;
+        let dir = self.write(scratch.path())?;
+        let loaded = rule::load_rule(&dir).context("the drafted rule does not load")?;
+        if loaded.status != Status::Proposed {
+            bail!("a drafted rule must be proposed");
+        }
+        Ok(())
+    }
+
+    /// Writes the rule directory `<parent>/<id>` with `status = "proposed"`.
+    /// Fails when the directory exists, so a proposal never replaces a rule.
+    pub fn write(&self, parent: &Path) -> Result<PathBuf> {
+        let dir = parent.join(&self.id);
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+        std::fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let rule = RuleToml {
+            id: &self.id,
+            description: self.description.trim(),
+            mode: self.mode.as_str(),
+            status: Status::Proposed.as_str(),
+            engine: self.engine,
+            language: self.language.as_deref(),
+            command: self.command.as_deref(),
+            fired_exit_codes: self.fired_exit_codes.as_deref(),
+            fired_output_contains: self.fired_output_contains.as_deref(),
+            when_changed: self.when_changed.as_deref(),
+            require_changed: self.require_changed.as_deref(),
+        };
+        write_file(&dir.join(RULE_FILE), &toml::to_string(&rule)?)?;
+        if let Some(check) = &self.check {
+            write_file(&dir.join(CHECK_FILE), check)?;
+        }
+        let fixtures = dir.join(FIXTURES_DIR);
+        std::fs::create_dir(&fixtures)
+            .with_context(|| format!("creating {}", fixtures.display()))?;
+        write_file(&fixtures.join(&self.bad.name), &self.bad.content)?;
+        write_file(&fixtures.join(&self.fixed.name), &self.fixed.content)?;
+        let corpus = self.corpus.as_deref().unwrap_or_default();
+        if !corpus.is_empty() {
+            let corpus_dir = dir.join(CORPUS_DIR);
+            std::fs::create_dir(&corpus_dir)
+                .with_context(|| format!("creating {}", corpus_dir.display()))?;
+            for file in corpus {
+                write_file(&corpus_dir.join(&file.name), &file.content)?;
+            }
+        }
+        Ok(dir)
+    }
+
+    fn check_engine_keys(&self) -> Result<()> {
+        let globs = self.when_changed.is_some() || self.require_changed.is_some();
+        let native_keys = self.command.is_some()
+            || self.fired_exit_codes.is_some()
+            || self.fired_output_contains.is_some();
+        match self.engine {
+            Engine::AstGrep => {
+                if globs || native_keys {
+                    bail!("an ast-grep draft takes only `check`");
+                }
+                let Some(check) = &self.check else {
+                    bail!("an ast-grep draft needs `check`, the check.yml text");
+                };
+                bounded_file("check", check)?;
+                let rules = astgrep::parse_rules(check, CHECK_FILE).map_err(anyhow::Error::msg)?;
+                astgrep::collection(rules, CHECK_FILE).map_err(anyhow::Error::msg)?;
+            }
+            Engine::Diff => {
+                if self.check.is_some() || native_keys {
+                    bail!("a diff draft takes only `when_changed` and `require_changed`");
+                }
+                for (key, patterns) in [
+                    ("when_changed", &self.when_changed),
+                    ("require_changed", &self.require_changed),
+                ] {
+                    let Some(patterns) = patterns.as_deref().filter(|p| !p.is_empty()) else {
+                        bail!("a diff draft needs a non-empty `{key}`");
+                    };
+                    diff::check_globs(patterns).map_err(anyhow::Error::msg)?;
+                }
+            }
+            Engine::Native => {
+                if self.check.is_some() || globs {
+                    bail!("a native draft takes only `command` and its fired keys");
+                }
+                match self.command.as_deref() {
+                    Some([program, ..]) if !program.trim().is_empty() => {}
+                    _ => bail!("a native draft needs a non-empty `command`"),
+                }
+                match self.fired_exit_codes.as_deref() {
+                    Some(codes) if !codes.is_empty() && !codes.contains(&0) => {}
+                    _ => bail!("a native draft needs non-zero `fired_exit_codes`"),
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn bounded_text(key: &str, text: &str) -> Result<()> {
+    if text.trim().is_empty() {
+        bail!("draft {key} is empty");
+    }
+    if text.chars().count() > MAX_TEXT_CHARS {
+        bail!("draft {key} exceeds {MAX_TEXT_CHARS} characters");
+    }
+    Ok(())
+}
+
+fn bounded_file(key: &str, content: &str) -> Result<()> {
+    if content.len() > MAX_FILE_BYTES {
+        bail!("draft {key} exceeds {MAX_FILE_BYTES} bytes");
+    }
+    Ok(())
+}
+
+/// A draft file name is one plain path component; fixtures carry their stem.
+fn check_file_name(file: &DraftFile, stem: Option<&str>) -> Result<()> {
+    let name = file.name.as_str();
+    let mut components = Path::new(name).components();
+    let plain = matches!(components.next(), Some(Component::Normal(_)))
+        && components.next().is_none()
+        && !name.contains(['/', '\\', ':'])
+        && !name.starts_with('.');
+    if !plain {
+        bail!("draft file name `{name}` must be a plain file name");
+    }
+    if let Some(stem) = stem {
+        if !is_fixture_named(name, stem) || Path::new(name).extension().is_none() {
+            bail!("draft fixture `{name}` must be named {stem}.<ext>");
+        }
+    }
+    bounded_file(name, &file.content)
+}
+
+fn write_file(path: &Path, content: &str) -> Result<()> {
+    std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))
+}

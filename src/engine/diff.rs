@@ -35,6 +35,11 @@ pub fn run(when_changed: &[String], require_changed: &[String], changed: &[Strin
     }])
 }
 
+/// Checks that every pattern compiles the way `run` compiles it.
+pub fn check_globs(patterns: &[String]) -> Result<(), String> {
+    glob_set(patterns).map(|_| ())
+}
+
 fn glob_set(patterns: &[String]) -> Result<GlobSet, String> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
