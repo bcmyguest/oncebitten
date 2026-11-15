@@ -14,7 +14,7 @@ use super::{Backend, RawRun, ReplaySpec};
 
 pub const DEFAULT_BASE_IMAGE: &str = "nvcr.io/nvidia/base/ubuntu:24.04";
 pub const CHECKER_IN_SANDBOX: &str = "/opt/oncebitten/checker";
-pub const RULE_IN_SANDBOX: &str = "/rule/check.yml";
+pub const RULE_DIR_IN_SANDBOX: &str = "/rule";
 pub const CORPUS_IN_SANDBOX: &str = "/corpus";
 
 const POLICY: &str = "version: 1
@@ -76,7 +76,7 @@ impl Backend for OpenShell {
         let result = build_image(&self.docker, &image, &context).and_then(|()| {
             self.create_sandbox(&sandbox, &image, &work.path().join("policy.yaml"))?;
             (0..files.len())
-                .map(|index| self.exec_checker(&sandbox, index, &files[index]))
+                .map(|index| self.exec_checker(&sandbox, spec, index, &files[index]))
                 .collect::<Result<Vec<RawRun>, String>>()
         });
 
@@ -120,23 +120,31 @@ impl OpenShell {
         }
     }
 
-    fn exec_checker(&self, sandbox: &str, index: usize, file: &Path) -> Result<RawRun, String> {
+    fn exec_checker(
+        &self,
+        sandbox: &str,
+        spec: &ReplaySpec,
+        index: usize,
+        file: &Path,
+    ) -> Result<RawRun, String> {
         let name = file
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let target = format!("{CORPUS_IN_SANDBOX}/{index}-{name}");
+        let rule = format!("{RULE_DIR_IN_SANDBOX}/{}", spec.rule_name());
+        let mut args = vec![
+            "sandbox",
+            "exec",
+            "--no-tty",
+            sandbox,
+            "--",
+            CHECKER_IN_SANDBOX,
+        ];
+        args.extend_from_slice(spec.kind.checker_args());
+        args.extend([rule.as_str(), target.as_str()]);
         let output = self
-            .command(&[
-                "sandbox",
-                "exec",
-                "--no-tty",
-                sandbox,
-                "--",
-                CHECKER_IN_SANDBOX,
-                RULE_IN_SANDBOX,
-                &target,
-            ])
+            .command(&args)
             .output()
             .map_err(|error| format!("sandbox exec: starting {}: {error}", self.binary))?;
         Ok(RawRun {
@@ -161,7 +169,7 @@ fn build_context(
     std::fs::create_dir_all(context.join("rule")).map_err(io)?;
     std::fs::create_dir_all(context.join("corpus")).map_err(io)?;
     std::fs::copy(&spec.checker, context.join("checker")).map_err(io)?;
-    std::fs::copy(&spec.rule, context.join("rule/check.yml")).map_err(io)?;
+    std::fs::copy(&spec.rule, context.join("rule").join(spec.rule_name())).map_err(io)?;
     for (index, file) in files.iter().enumerate() {
         let name = file
             .file_name()

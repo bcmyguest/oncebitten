@@ -1,18 +1,22 @@
-//! Replays an ast-grep rule against its fixtures inside a sandbox.
+//! Replays an ast-grep or diff rule against its fixtures inside a sandbox.
 //!
 //! A rule is proven when the checker reports `fired` for `fixtures/bad.*`, and
 //! `clean` for `fixtures/fixed.*` and every file in `corpus/`. Exit codes are
 //! evidence only: a result counts when the JSON line, the target path and exit
 //! code 0 agree.
+//!
+//! A diff rule's fixtures are lists of changed paths, one per line. The checker
+//! reads them in `diff` mode, so the same replay runs for both engines.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::rule::is_fixture_named;
+use crate::rule::{is_fixture_named, read_diff_rule};
 
 pub mod openshell;
 
 pub const RULE_FILE: &str = "check.yml";
+pub const DIFF_RULE_FILE: &str = "rule.toml";
 pub const FIXTURES_DIR: &str = "fixtures";
 pub const CORPUS_DIR: &str = "corpus";
 
@@ -23,14 +27,42 @@ pub enum Verdict {
     CouldNotRun(String),
 }
 
+/// Which checker mode a replay runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckKind {
+    AstGrep,
+    Diff,
+}
+
+impl CheckKind {
+    /// The arguments that select the checker mode, before the rule and the target.
+    pub fn checker_args(self) -> &'static [&'static str] {
+        match self {
+            CheckKind::AstGrep => &[],
+            CheckKind::Diff => &["diff"],
+        }
+    }
+}
+
 /// The files one replay checks, all on the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplaySpec {
+    pub kind: CheckKind,
     pub rule: PathBuf,
     pub checker: PathBuf,
     pub bad: PathBuf,
     pub fixed: PathBuf,
     pub corpus: Vec<PathBuf>,
+}
+
+impl ReplaySpec {
+    /// The rule file's name, `check.yml` or `rule.toml`. The sandbox keeps it.
+    pub fn rule_name(&self) -> String {
+        self.rule
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
 }
 
 /// One checker invocation as the backend observed it.
@@ -57,6 +89,7 @@ impl Backend for LocalRunner {
             .iter()
             .map(|file| {
                 let output = Command::new(&spec.checker)
+                    .args(spec.kind.checker_args())
                     .arg(&spec.rule)
                     .arg(file)
                     .output()
@@ -165,9 +198,14 @@ pub fn replay_dir(rule_dir: &Path, checker: &Path, backend: &dyn Backend) -> Ver
 }
 
 impl ReplaySpec {
-    /// Finds `check.yml`, `fixtures/bad.*`, `fixtures/fixed.*` and `corpus/*`.
+    /// Finds the rule file, `fixtures/bad.*`, `fixtures/fixed.*` and `corpus/*`.
+    /// A `rule.toml` that declares `engine = "diff"` selects the diff checker;
+    /// otherwise the rule file is `check.yml`.
     pub fn from_rule_dir(rule_dir: &Path, checker: &Path) -> Result<Self, String> {
-        let rule = rule_dir.join(RULE_FILE);
+        let (kind, rule) = match diff_rule_file(rule_dir)? {
+            Some(file) => (CheckKind::Diff, file),
+            None => (CheckKind::AstGrep, rule_dir.join(RULE_FILE)),
+        };
         if !rule.is_file() {
             return Err(format!("missing input: {} not found", rule.display()));
         }
@@ -182,12 +220,26 @@ impl ReplaySpec {
             ));
         }
         Ok(Self {
+            kind,
             rule,
             checker: checker.to_path_buf(),
             bad,
             fixed,
             corpus,
         })
+    }
+}
+
+/// The `rule.toml` of a diff rule directory, or `None` for any other engine.
+fn diff_rule_file(rule_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let file = rule_dir.join(DIFF_RULE_FILE);
+    if !file.is_file() {
+        return Ok(None);
+    }
+    match read_diff_rule(&file) {
+        Ok(Some(_)) => Ok(Some(file)),
+        Ok(None) => Ok(None),
+        Err(error) => Err(format!("{error:#}")),
     }
 }
 

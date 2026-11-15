@@ -167,7 +167,7 @@ pub fn validity(rule: &Rule) -> Validity {
     }
 }
 
-/// Replays an ast-grep rule. A proven verdict from the OpenShell backend writes
+/// Replays an ast-grep or diff rule. A proven verdict from the OpenShell backend writes
 /// `proof.json`; a local run only reports. A rejected rule loses its proof.
 pub fn replay_rule(
     rule: &Rule,
@@ -179,8 +179,11 @@ pub fn replay_rule(
         verdict: Verdict::CouldNotRun(reason),
         written: None,
     };
-    if !matches!(rule.check, Check::AstGrep { .. }) {
-        return not_run("replay supports ast-grep rules only".to_owned());
+    if matches!(rule.check, Check::Native { .. }) {
+        return not_run(
+            "replay supports ast-grep and diff rules; native-linter rules are exempt until replay can run their toolchain"
+                .to_owned(),
+        );
     }
     let dir = rule_dir(rule);
     let verdict = replay_dir(dir, checker, backend);

@@ -130,6 +130,42 @@ pub fn load_rule(dir: &Path) -> Result<Rule> {
     build_rule(dir, &file, raw)
 }
 
+/// The parts of a diff rule that replay and the checker evaluate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffRule {
+    pub id: String,
+    pub when_changed: Vec<String>,
+    pub require_changed: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct DiffHead {
+    id: String,
+    engine: String,
+    #[serde(default)]
+    when_changed: Vec<String>,
+    #[serde(default)]
+    require_changed: Vec<String>,
+}
+
+/// Reads `file` as a diff rule. Returns `None` when it declares another engine.
+/// Skips the directory-name and layout checks of `load_rule`, so a copy of
+/// `rule.toml` in a sandbox directory reads the same.
+pub fn read_diff_rule(file: &Path) -> Result<Option<DiffRule>> {
+    let text =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let head: DiffHead =
+        toml::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+    if head.engine != "diff" {
+        return Ok(None);
+    }
+    Ok(Some(DiffRule {
+        id: head.id,
+        when_changed: head.when_changed,
+        require_changed: head.require_changed,
+    }))
+}
+
 fn invalid(file: &Path, message: impl Display) -> anyhow::Error {
     anyhow!("{}: {message}", file.display())
 }

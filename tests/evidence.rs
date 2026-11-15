@@ -250,6 +250,7 @@ fn evidence_cli_lists_shows_and_rejects() {
     let shown = stdout(&run(home.path(), &["evidence", "show", &id]));
     assert!(shown.contains("repos: /a, /b"));
     assert!(shown.contains("1  claude  s1  /a  event 1  tool-failure  make lint"));
+    assert!(shown.contains("head -"));
 
     stdout(&run(
         home.path(),

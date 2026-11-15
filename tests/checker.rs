@@ -130,3 +130,28 @@ fn glob_scoped_rule_is_matched_against_the_target_path_in_the_checker() {
 
     assert_eq!(one_json_line(&output)["status"], "clean");
 }
+
+#[test]
+fn diff_mode_fires_on_a_changed_path_list_with_exit_0() {
+    let rule = example("arch-diagram/rule.toml");
+    let bad = example("arch-diagram/fixtures/bad.diff");
+    let output = run_checker(&["diff", &rule, &bad]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let report = one_json_line(&output);
+    assert_eq!(report["status"], "fired");
+    assert_eq!(report["file"], bad);
+    assert_eq!(report["matches"][0]["rule"], "arch-diagram");
+}
+
+#[test]
+fn diff_mode_fixed_list_is_clean_with_exit_0() {
+    let rule = example("arch-diagram/rule.toml");
+    let fixed = example("arch-diagram/fixtures/fixed.diff");
+    let output = run_checker(&["diff", &rule, &fixed]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let report = one_json_line(&output);
+    assert_eq!(report["status"], "clean");
+    assert_eq!(report["matches"], serde_json::json!([]));
+}
