@@ -273,6 +273,21 @@ mod cli {
     }
 
     #[test]
+    fn a_missing_proof_of_an_active_steer_rule_fails() {
+        let repo = healthy();
+        repo.add_example("no-sudo", "active");
+        repo.commit_all("steer");
+
+        let output = doctor(&repo);
+
+        assert_eq!(code(&output), 1, "{}", both(&output));
+        let out = stdout(&output);
+        let proof = line(&out, "proof no-sudo");
+        assert!(proof.starts_with("fail"), "{out}");
+        assert!(proof.contains("no replay proof"), "{out}");
+    }
+
+    #[test]
     fn an_invalid_rule_fails() {
         let repo = healthy();
         fs::write(
