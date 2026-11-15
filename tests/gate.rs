@@ -68,10 +68,8 @@ fn pr_fails_on_a_new_violation() {
     let output = pr(&repo);
 
     assert_eq!(code(&output), 1, "{}", both(&output));
-    let expected = PathBuf::from("src").join("app.py");
     assert!(
-        stdout(&output).contains("py-utcnow:")
-            && stdout(&output).contains(&expected.display().to_string()),
+        stdout(&output).contains("py-utcnow:") && stdout(&output).contains("src/app.py"),
         "{}",
         both(&output)
     );
