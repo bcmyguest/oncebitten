@@ -47,22 +47,31 @@ pub fn bound(text: &str, max: usize) -> String {
     format!("{}{TRUNCATED}", &text[..end])
 }
 
-const INSTRUCTIONS: &str = "You classify one recurring mistake made by a coding agent \
+/// The fixed instructions every prompt opens with.
+pub const INSTRUCTIONS: &str = "You classify one recurring mistake made by a coding agent \
 and, when git could catch it, draft the rule that does. \
 Answer with the JSON object the schema requires and nothing else. \
 Fields: repeatable (the mistake is likely to recur), user_correction (a user corrected the agent), \
 root_cause (one sentence), proposed_fix_kind (harness, agent-workflow, lint, test, test-practice, \
 invariant or none), generality (general, project or one-off), draft. \
-Set draft to null unless a check on the changed files would catch the mistake; \
+Set draft to null unless a check on the changed files, or a steer on the agent's commands, would catch the mistake; \
 it must be null when repeatable is false, generality is one-off or proposed_fix_kind is none. \
 A draft has: id (lowercase kebab-case), description, mode (block or steer), \
-engine (ast-grep, diff or native), language, check, command, fired_exit_codes, \
+engine (ast-grep, diff, native or steer), language, check, command, fired_exit_codes, \
 fired_output_contains, when_changed, require_changed, bad, fixed, corpus, rationale. \
 ast-grep: check is the full ast-grep rule YAML (id, language, rule, message, severity) and language names it. \
 diff: when_changed and require_changed are glob lists; a change matching when_changed \
 must also change a path matching require_changed. \
 native: command is an argv list run in the repo root and fired_exit_codes lists its non-zero exit codes \
-that mean the rule fired. Keys the engine does not use are null. \
+that mean the rule fired. \
+steer: catches a shell command the agent runs and needs mode steer; check, command, language, \
+fired_exit_codes, fired_output_contains, when_changed and require_changed are null. \
+Its bad and fixed contents are recorded tool events, one JSON object each, named bad.json and fixed.json, for example \
+bad {\"event\": \"tool\", \"tool\": \"Bash\", \"command\": \"git push --force origin main\"} and \
+fixed {\"event\": \"tool\", \"tool\": \"Bash\", \"command\": \"git push origin main\"}. \
+oncebitten replaces bad with the cluster's latest recorded command and the corpus with the repo's \
+other successful commands, and triggers on the program plus its first flag or subcommand. \
+Keys the engine does not use are null. \
 bad and fixed are fixture files {name, content}: name is bad.<ext> or fixed.<ext>, \
 bad is a minimal example the check must flag and fixed the corrected version it must pass; \
 for diff, the content lists changed paths, one per line. \
