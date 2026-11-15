@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::env;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
@@ -18,7 +20,11 @@ pub fn run_matching(
     let Some((program, args)) = command.split_first() else {
         return Outcome::CouldNotRun("native command is empty".to_owned());
     };
-    let output = match Command::new(program).args(args).current_dir(cwd).output() {
+    let output = match Command::new(spawn_path(program))
+        .args(args)
+        .current_dir(cwd)
+        .output()
+    {
         Ok(output) => output,
         Err(error) => return Outcome::CouldNotRun(format!("{program}: {error}")),
     };
@@ -40,6 +46,50 @@ pub fn run_matching(
         Some(code) => Outcome::CouldNotRun(format!("{program} exited with {code}")),
         None => Outcome::CouldNotRun(format!("{program} was terminated by a signal")),
     }
+}
+
+/// Finds `program` in `dirs` by trying each extension in `pathext`, in order.
+/// A name that already has an extension is tried as given first. An
+/// extensionless name is never tried bare, so a POSIX shell script beside a
+/// `.cmd` shim does not win on Windows.
+pub fn resolve_in(program: &str, dirs: &[PathBuf], pathext: &[String]) -> Option<PathBuf> {
+    let has_extension = Path::new(program).extension().is_some();
+    for dir in dirs {
+        if has_extension {
+            let exact = dir.join(program);
+            if exact.is_file() {
+                return Some(exact);
+            }
+        }
+        for ext in pathext {
+            let candidate = dir.join(format!("{program}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// The program to spawn. On Windows, PATHEXT resolves shims such as `npx.cmd`,
+/// which `CreateProcess` does not find by bare name. Elsewhere the name passes through.
+fn spawn_path(program: &str) -> OsString {
+    if !cfg!(windows) {
+        return OsString::from(program);
+    }
+    let dirs: Vec<PathBuf> = env::var_os("PATH")
+        .map(|path| env::split_paths(&path).collect())
+        .unwrap_or_default();
+    let pathext: Vec<String> = match env::var("PATHEXT") {
+        Ok(value) => value
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Err(_) => [".COM", ".EXE", ".BAT", ".CMD"].map(String::from).to_vec(),
+    };
+    resolve_in(program, &dirs, &pathext)
+        .map_or_else(|| OsString::from(program), PathBuf::into_os_string)
 }
 
 fn finding(message: String) -> Finding {
