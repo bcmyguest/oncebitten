@@ -14,6 +14,7 @@ use crate::signal;
 pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
 use crate::store::{Outcome, Store};
 use crate::triage::draft::Draft;
+use crate::triage::prompt::context_block;
 use crate::triage::verdict::Answer;
 
 pub const LIST_HINT: &str = "oncebitten proposals list";
@@ -276,6 +277,25 @@ pub fn possible_duplicate(
         })
         .collect();
     Ok(first_match(&Candidate { id, class, text }, &others))
+}
+
+/// The context block for the triage prompt: loaded rule ids with descriptions,
+/// and past rejection reasons. Both lists are bounded by `context_block`. A rule
+/// that fails to load is left out, so a broken rule never blocks triage.
+pub fn triage_context(store: &Store, inputs: &Inputs) -> Result<String> {
+    let rules: Vec<(String, String)> = match rules::load_skipping_broken(inputs) {
+        Ok((resolved, _)) => resolved
+            .into_iter()
+            .map(|entry| (entry.id, entry.rule.description))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    let rejections: Vec<String> = store
+        .rejections()?
+        .into_iter()
+        .map(|rejection| rejection.reason)
+        .collect();
+    Ok(context_block(&rules, &rejections))
 }
 
 /// Lines that show a proposal's duplicate marks in `list`, `show` and PR bodies.

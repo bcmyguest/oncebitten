@@ -401,14 +401,15 @@ fn triage_setup(host: Option<&str>) -> Result<TriageSetup> {
     })
 }
 
-fn ask(setup: &TriageSetup, cluster: &Cluster) -> Result<Answer> {
-    triage::flow::ask_cluster(
+fn ask(setup: &TriageSetup, cluster: &Cluster, context: &str) -> Result<Answer> {
+    triage::flow::ask_cluster_with_context(
         &triage::run::ProcessRunner,
         setup.host,
         &setup.agent,
         &setup.store,
         cluster,
         &setup.triage,
+        context,
         triage::flow::DEFAULT_TIMEOUT,
     )
 }
@@ -439,7 +440,8 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
         now,
         store::TriageOutcome::Started,
     )?;
-    let answer = ask(&setup, cluster)?;
+    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let answer = ask(&setup, cluster, &context)?;
     println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
@@ -470,7 +472,8 @@ fn triage_queued(id: &str, host: Option<&str>) -> Result<()> {
     let setup = triage_setup(host)?;
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
-    let ask = |cluster: &Cluster| ask(&setup, cluster);
+    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let ask = |cluster: &Cluster| ask(&setup, cluster, &context);
     proposals::triage_queued(&setup.store, &setup.inputs, id, &ask, &prove, now_millis()?)?;
     Ok(())
 }

@@ -156,3 +156,17 @@ fn rejecting_as_a_duplicate_links_and_rejects() {
     );
     assert!(proposals::reject_duplicate(&store, "c1", "missing", 3).is_err());
 }
+
+#[test]
+fn triage_context_carries_past_rejection_reasons() {
+    let store = Store::open_in_memory().unwrap();
+    store.reject("c0", 1, "duplicate of unwrap-rule").unwrap();
+    let cwd = tempfile::TempDir::new().unwrap();
+    let inputs = oncebitten::config::Inputs {
+        cwd: cwd.path().to_path_buf(),
+        vars: std::collections::BTreeMap::new(),
+    };
+    let context = proposals::triage_context(&store, &inputs).unwrap();
+    assert!(context.contains("rejected proposals:"), "{context}");
+    assert!(context.contains("duplicate of unwrap-rule"), "{context}");
+}

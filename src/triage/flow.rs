@@ -9,7 +9,7 @@ use crate::store::Store;
 use crate::triage::code::{self, Code};
 use crate::triage::draft::Engine;
 use crate::triage::host::{answer_from, control_invocation, invocation};
-use crate::triage::prompt::{build_prompt_with_code, Occurrence, PromptInput};
+use crate::triage::prompt::{build_prompt_full, Occurrence, PromptInput};
 use crate::triage::proof::{prove, requires_proof, workdir_sentinels};
 use crate::triage::run::Runner;
 use crate::triage::verdict::{Answer, Verdict};
@@ -102,12 +102,35 @@ pub fn ask_cluster(
     triage: &Triage,
     timeout: Duration,
 ) -> Result<Answer> {
+    ask_cluster_with_context(runner, host, agent, store, cluster, triage, "", timeout)
+}
+
+/// `ask_cluster` with a context block of existing rules and past rejections.
+#[allow(clippy::too_many_arguments)]
+pub fn ask_cluster_with_context(
+    runner: &dyn Runner,
+    host: Host,
+    agent: &str,
+    store: &Store,
+    cluster: &Cluster,
+    triage: &Triage,
+    context: &str,
+    timeout: Duration,
+) -> Result<Answer> {
     let code = if triage.send_code {
         code::collect(store, &cluster.occurrences, triage.max_code_bytes)?
     } else {
         Code::default()
     };
-    let answer = run_answer_with_code(runner, host, agent, &prompt_input(cluster), &code, timeout)?;
+    let answer = run_answer_full(
+        runner,
+        host,
+        agent,
+        &prompt_input(cluster),
+        context,
+        &code,
+        timeout,
+    )?;
     if let Some(draft) = &answer.draft {
         if !code.is_empty() && draft.engine != Engine::Diff && !code.quoted_by(&draft.bad.content) {
             bail!(
@@ -126,7 +149,7 @@ pub fn run_answer(
     input: &PromptInput,
     timeout: Duration,
 ) -> Result<Answer> {
-    run_answer_with_code(runner, host, agent, input, &Code::default(), timeout)
+    run_answer_with_context(runner, host, agent, input, "", timeout)
 }
 
 /// `run_answer` with the changed code appended to the prompt.
@@ -138,9 +161,43 @@ pub fn run_answer_with_code(
     code: &Code,
     timeout: Duration,
 ) -> Result<Answer> {
+    run_answer_full(runner, host, agent, input, "", code, timeout)
+}
+
+/// `run_answer` with a context block (existing rules, past rejections) placed
+/// before the cluster details. An empty `context` adds nothing.
+pub fn run_answer_with_context(
+    runner: &dyn Runner,
+    host: Host,
+    agent: &str,
+    input: &PromptInput,
+    context: &str,
+    timeout: Duration,
+) -> Result<Answer> {
+    run_answer_full(
+        runner,
+        host,
+        agent,
+        input,
+        context,
+        &Code::default(),
+        timeout,
+    )
+}
+
+/// `run_answer` with both a context block and the changed code.
+fn run_answer_full(
+    runner: &dyn Runner,
+    host: Host,
+    agent: &str,
+    input: &PromptInput,
+    context: &str,
+    code: &Code,
+    timeout: Duration,
+) -> Result<Answer> {
     let workdir = Workdir::create()?;
     let dir = workdir.path();
-    let prompt = build_prompt_with_code(input, &code.diff);
+    let prompt = build_prompt_full(input, context, &code.diff);
     let triage = invocation(host, agent, &prompt, dir)?;
     let captured = if requires_proof(host) {
         let sentinels = workdir_sentinels(host, dir, &dir.join("markers"));
