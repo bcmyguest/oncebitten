@@ -68,7 +68,7 @@ pre-commit install --hook-type pre-push
 oncebitten rules sync             # writes .oncebitten/rules.lock; commit it
 ```
 
-CI templates for GitHub Actions, GitLab CI and Azure Pipelines: [templates/](templates/).
+CI templates for GitHub Actions, GitLab CI and Azure Pipelines: [templates/](templates/). In CI, run `oncebitten rules sync --frozen` before the gate.
 
 ## License
 

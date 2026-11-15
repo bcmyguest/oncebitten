@@ -45,7 +45,7 @@ Checked by running `pre-commit try-repo <this repo> oncebitten-gate --hook-stage
 
 Pin the install with `--rev <commit>` so the gate does not change under you. The templates have not run on GitLab or Azure; `tests/gate.rs` checks only that each one calls `oncebitten gate pr --base`.
 
-`gate pr` needs `.oncebitten/rules.lock` committed, even with no sources: run `oncebitten rules sync` once and commit the file. A project with rule sources needs each clone at its locked commit before the gate runs. `rules sync` checks out `rev` or `origin/HEAD` and rewrites the lock, so pin `rev` to a commit for every source, run `oncebitten rules sync` before the gate, and fail the job on `git diff --exit-code .oncebitten/rules.lock`.
+`gate pr` needs `.oncebitten/rules.lock` committed, even with no sources: run `oncebitten rules sync` once and commit the file. A project with rule sources needs each clone at its locked commit before the gate runs: run `oncebitten rules sync --frozen` before `gate pr`. It checks out the locked commits without fetching, never writes the lock, and exits 2 when it cannot. Plain `rules sync` moves the lock to `rev` or `origin/HEAD`, so CI does not run it.
 
 The gate reads rules, proofs and the baseline from the pull request's own checkout, so a pull request can change what gates it. Review changes under `.oncebitten/` with that in mind.
 
