@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::signal::{KIND_PROMPT, KIND_TOOL_ERROR, KIND_TOOL_OK};
+use crate::steer::SteerEvent;
 use crate::store::NewEvent;
 
 const GIT_MARKER: &str = ".git";
@@ -15,6 +16,27 @@ const CWD_KEYS: &[&str] = &["cwd", "directory"];
 const TOOL_KEYS: &[&str] = &["tool_name", "toolName", "tool"];
 const INPUT_KEYS: &[&str] = &["tool_input", "toolInput", "toolArgs", "input"];
 const PATH_KEYS: &[&str] = &["file_path", "filePath", "path"];
+/// Keys that name the file an edit or write tool touches. Codex `apply_patch`
+/// and opencode `patch` carry patch text instead; see [`PATCH_KEYS`].
+const EDIT_PATH_KEYS: &[&str] = &["file_path", "filePath", "path", "notebook_path"];
+const PATCH_KEYS: &[&str] = &["patchText", "patch", "input"];
+const PATCH_TOOLS: &[&str] = &["apply_patch", "patch"];
+const PATCH_HEADERS: &[&str] = &[
+    "*** Add File: ",
+    "*** Update File: ",
+    "*** Delete File: ",
+    "*** Move to: ",
+];
+/// Tools that only read: their paths never trigger a steer path rule.
+const READ_TOOLS: &[&str] = &["read", "view", "glob", "grep", "ls", "list"];
+const PRE_TOOL_EVENTS: &[&str] = &["pretooluse", "tool_call", "tool.execute.before"];
+const PROMPT_EVENTS: &[&str] = &[
+    "userpromptsubmit",
+    "userpromptsubmitted",
+    "beforesubmitprompt",
+    "before_agent_start",
+    "prompt",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Host {
@@ -135,13 +157,7 @@ fn classify(value: &Value) -> Option<Outcome> {
         .map(|name| name.to_ascii_lowercase())
         .as_deref()
     {
-        Some(
-            "userpromptsubmit"
-            | "userpromptsubmitted"
-            | "beforesubmitprompt"
-            | "before_agent_start"
-            | "prompt",
-        ) => Some(Outcome::Prompt),
+        Some(name) if PROMPT_EVENTS.contains(&name) => Some(Outcome::Prompt),
         Some("posttooluse" | "tool_result" | "tool.execute.after") => Some(if tool_failed {
             Outcome::ToolError
         } else {
@@ -165,6 +181,118 @@ fn classify(value: &Value) -> Option<Outcome> {
             Some(Outcome::Prompt)
         }
         None => None,
+    }
+}
+
+/// A hook payload as steer rules see it, plus the directory the agent works in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerInput {
+    pub event: SteerEvent,
+    pub cwd: Option<String>,
+}
+
+/// Maps a pre-tool or prompt hook payload onto a steer event. Every other
+/// event (post-tool, session start, stop) maps to `None`.
+pub fn normalize_steer(payload: &str) -> Result<Option<SteerInput>> {
+    let value: Value = serde_json::from_str(payload).context("hook payload is not JSON")?;
+    let event_name = first_string(&value, EVENT_KEYS).map(|name| name.to_ascii_lowercase());
+    let is_tool = match event_name.as_deref() {
+        Some(name) => PRE_TOOL_EVENTS.contains(&name),
+        // Copilot's native payloads carry no event name: a tool name without a
+        // result is its preToolUse.
+        None => value["toolName"].is_string() && value["toolResult"].is_null(),
+    };
+    let is_prompt = match event_name.as_deref() {
+        Some(name) => PROMPT_EVENTS.contains(&name),
+        None => !is_tool && value["initialPrompt"].is_null() && prompt_text(&value).is_some(),
+    };
+    let cwd = cwd(&value);
+    let event = if is_tool {
+        let tool = first_string(&value, TOOL_KEYS).context("hook payload has no tool name")?;
+        let input = tool_input(&value);
+        let command = input["command"].as_str().map(str::to_string);
+        let paths = edited_paths(&tool, &input)
+            .into_iter()
+            .map(|path| repo_relative(&path, cwd.as_deref()))
+            .collect();
+        SteerEvent::Tool {
+            tool,
+            command,
+            paths,
+        }
+    } else if is_prompt {
+        let prompt = prompt_text(&value).context("hook payload has no prompt text")?;
+        SteerEvent::Prompt { prompt }
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(SteerInput { event, cwd }))
+}
+
+/// The tool's input object. Copilot's camelCase payload sends it as a JSON
+/// string in `toolArgs`.
+fn tool_input(value: &Value) -> Value {
+    for key in INPUT_KEYS {
+        match &value[*key] {
+            Value::Object(_) => return value[*key].clone(),
+            Value::String(text) => {
+                if let Ok(parsed @ Value::Object(_)) = serde_json::from_str::<Value>(text) {
+                    return parsed;
+                }
+            }
+            _ => {}
+        }
+    }
+    Value::Null
+}
+
+/// The files an edit or write tool touches, as the payload names them.
+fn edited_paths(tool: &str, input: &Value) -> Vec<String> {
+    let lower = tool.to_ascii_lowercase();
+    if READ_TOOLS.contains(&lower.as_str()) {
+        return Vec::new();
+    }
+    if PATCH_TOOLS.contains(&lower.as_str()) {
+        let text = PATCH_KEYS
+            .iter()
+            .chain(["command"].iter())
+            .find_map(|key| input[*key].as_str())
+            .unwrap_or_default();
+        return text
+            .lines()
+            .filter_map(|line| {
+                PATCH_HEADERS
+                    .iter()
+                    .find_map(|header| line.strip_prefix(header))
+            })
+            .map(|path| path.trim().to_string())
+            .collect();
+    }
+    EDIT_PATH_KEYS
+        .iter()
+        .find_map(|key| input[*key].as_str())
+        .map(|path| vec![path.to_string()])
+        .unwrap_or_default()
+}
+
+/// `path` relative to the repository holding `cwd`, `/`-separated. A path
+/// outside the repository stays as given, with `/` separators.
+fn repo_relative(path: &str, cwd: Option<&str>) -> String {
+    let given = Path::new(path);
+    let absolute = match cwd {
+        Some(cwd) if given.is_relative() => Path::new(cwd).join(given),
+        _ => given.to_path_buf(),
+    };
+    let relative = cwd
+        .and_then(find_repo)
+        .and_then(|repo| absolute.strip_prefix(&repo).ok().map(Path::to_path_buf));
+    match relative {
+        Some(relative) => relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/"),
+        None => path.replace('\\', "/"),
     }
 }
 

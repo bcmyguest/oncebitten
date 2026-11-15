@@ -2,18 +2,25 @@
 //! normalized hook event (a tool call or a user prompt) and either adds its
 //! message to the agent's context or refuses the tool call.
 
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
+use anyhow::{bail, Context, Result};
 use globset::{GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 
+use crate::config::Inputs;
+use crate::host::{self, Host};
 use crate::replay::{Verdict, CORPUS_DIR, FIXTURES_DIR};
-use crate::rule::{Steer, Trigger};
+use crate::rule::{Action, Check, Status, Steer, Trigger};
+use crate::rules::{self, Failure};
 
 const BAD_FIXTURE: &str = "bad.json";
 const FIXED_FIXTURE: &str = "fixed.json";
 const FIXTURE_EXTENSION: &str = "json";
+const TRIAGE_ENV: &str = "ONCEBITTEN_TRIAGE";
 
 /// A hook event as steer rules see it. Fixtures hold this shape as JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,4 +177,148 @@ fn corpus(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
 
 fn regex(pattern: &str) -> Result<Regex, String> {
     Regex::new(pattern).map_err(|error| format!("regex `{pattern}`: {error}"))
+}
+
+/// What the active steer rules make of one event.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Decision {
+    /// `<rule id>: <message>` for each matching deny rule.
+    pub deny: Vec<String>,
+    /// `<rule id>: <message>` for each matching inform rule.
+    pub inform: Vec<String>,
+}
+
+impl Decision {
+    pub fn is_empty(&self) -> bool {
+        self.deny.is_empty() && self.inform.is_empty()
+    }
+}
+
+/// Matches `event` against `rules` (id and steer table). A deny rule on a
+/// prompt event cannot load, so deny lines only come from tool events.
+pub fn decide<'a>(
+    event: &SteerEvent,
+    rules: impl IntoIterator<Item = (&'a str, &'a Steer)>,
+) -> Decision {
+    let mut decision = Decision::default();
+    for (id, steer) in rules {
+        let Ok(matcher) = Matcher::new(steer) else {
+            continue;
+        };
+        if !matcher.matches(event) {
+            continue;
+        }
+        let line = format!("oncebitten {id}: {}", steer.message.trim());
+        match steer.action {
+            Action::Deny => decision.deny.push(line),
+            Action::Inform => decision.inform.push(line),
+        }
+    }
+    decision
+}
+
+/// The hook output `host` reads, or `None` when there is nothing to say or
+/// the host has no way to say it (see docs/steer.md for each host).
+pub fn render(host: Host, event: &SteerEvent, decision: &Decision) -> Option<String> {
+    if decision.is_empty() {
+        return None;
+    }
+    let deny = (!decision.deny.is_empty()).then(|| decision.deny.join("\n"));
+    let inform = (!decision.inform.is_empty()).then(|| decision.inform.join("\n"));
+    let is_tool = matches!(event, SteerEvent::Tool { .. });
+    let value = match host {
+        Host::Claude | Host::Codex => {
+            let mut output = Map::new();
+            let event_name = if is_tool {
+                "PreToolUse"
+            } else {
+                "UserPromptSubmit"
+            };
+            output.insert("hookEventName".into(), json!(event_name));
+            if let (true, Some(reason)) = (is_tool, &deny) {
+                output.insert("permissionDecision".into(), json!("deny"));
+                output.insert("permissionDecisionReason".into(), json!(reason));
+            }
+            if let Some(context) = &inform {
+                output.insert("additionalContext".into(), json!(context));
+            }
+            if output.len() == 1 {
+                return None;
+            }
+            json!({ "hookSpecificOutput": output })
+        }
+        Host::Cursor => {
+            let reason = deny.filter(|_| is_tool)?;
+            json!({ "permission": "deny", "user_message": reason, "agent_message": reason })
+        }
+        Host::Copilot => {
+            let reason = deny.filter(|_| is_tool)?;
+            json!({ "permissionDecision": "deny", "permissionDecisionReason": reason })
+        }
+        // The plugin scripts in packaging/<host>/oncebitten-steer.js read this
+        // shape and act through the host's plugin API.
+        Host::OpenCode | Host::Pi => {
+            let mut output = Map::new();
+            if let (true, Some(reason)) = (is_tool, &deny) {
+                output.insert("deny".into(), json!(reason));
+            }
+            if let Some(context) = &inform {
+                output.insert("context".into(), json!(context));
+            }
+            if output.is_empty() {
+                return None;
+            }
+            Value::Object(output)
+        }
+    };
+    Some(value.to_string())
+}
+
+/// Runs the steer hook for one payload: normalizes it, loads the active steer
+/// rules for the agent's working directory and renders the host's output.
+pub fn run(host: Host, payload: &str, inputs: &Inputs) -> Result<Option<String>> {
+    let Some(input) = host::normalize_steer(payload)? else {
+        return Ok(None);
+    };
+    let mut inputs = inputs.clone();
+    if let Some(dir) = input.cwd.as_deref().map(PathBuf::from) {
+        if dir.is_dir() {
+            inputs.cwd = dir;
+        }
+    }
+    let rules = match rules::load(&inputs, false) {
+        Ok(rules) => rules,
+        Err(Failure::Invalid(errors)) => {
+            let errors: Vec<String> = errors.iter().map(|error| format!("{error:#}")).collect();
+            bail!("invalid rules: {}", errors.join("; "))
+        }
+        Err(Failure::CouldNotRun(error)) => return Err(error),
+    };
+    let active = rules
+        .iter()
+        .filter_map(|resolved| match &resolved.rule.check {
+            Check::Steer(steer) if resolved.rule.status == Status::Active => {
+                Some((resolved.id.as_str(), steer))
+            }
+            _ => None,
+        });
+    let decision = decide(&input.event, active);
+    Ok(render(host, &input.event, &decision))
+}
+
+/// `oncebitten steer --host <host>`: reads the payload from stdin and prints
+/// the host's output. Fails open: an error goes to stderr and the call exits 0
+/// with no output, so the agent carries on unsteered.
+pub fn run_from_process(host: &str) -> Result<()> {
+    let mut payload = String::new();
+    let read = std::io::stdin().read_to_string(&mut payload);
+    if std::env::var(TRIAGE_ENV).as_deref() == Ok("1") {
+        return Ok(());
+    }
+    read.context("cannot read hook payload from stdin")?;
+    let host = Host::parse(host)?;
+    if let Some(output) = run(host, &payload, &Inputs::from_process()?)? {
+        println!("{output}");
+    }
+    Ok(())
 }

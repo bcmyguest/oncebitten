@@ -19,6 +19,7 @@ use oncebitten::replay::openshell::OpenShell;
 use oncebitten::replay::{Backend, LocalRunner, Verdict};
 use oncebitten::rule::Check;
 use oncebitten::rules::{self, Failure};
+use oncebitten::steer;
 use oncebitten::store::{self, Store};
 use oncebitten::triage;
 
@@ -37,6 +38,13 @@ struct Cli {
 enum Command {
     /// Record an agent hook payload from stdin (always exits 0)
     Capture {
+        /// Agent host that sent the payload
+        #[arg(long)]
+        host: String,
+    },
+    /// Match an agent hook payload from stdin against the active steer rules and
+    /// print the host's guidance or deny decision (always exits 0)
+    Steer {
         /// Agent host that sent the payload
         #[arg(long)]
         host: String,
@@ -243,6 +251,12 @@ fn main() -> Result<()> {
         Command::Capture { host } => {
             if let Err(err) = capture::run_from_process(&host) {
                 eprintln!("oncebitten capture: {err:#}");
+            }
+            Ok(())
+        }
+        Command::Steer { host } => {
+            if let Err(err) = steer::run_from_process(&host) {
+                eprintln!("oncebitten steer: {err:#}");
             }
             Ok(())
         }
