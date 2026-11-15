@@ -13,14 +13,17 @@ const USER_ATTACHMENTS: &str = "/user-attachments/assets/";
 
 /// `![alt](url)` and `[text](url)`; group 1 is `!` for an image, group 2 the URL.
 static MARKDOWN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(!?)\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"]*")?\s*\)"#).unwrap()
+    Regex::new(r#"(!?)\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"]*")?\s*\)"#)
+        .expect("MARKDOWN is a literal pattern that compiles")
 });
 /// `<img ... src="url" ...>` with either quote style; group 1 or 2 is the URL.
 static HTML_IMG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap()
+    Regex::new(r#"(?is)<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')"#)
+        .expect("HTML_IMG is a literal pattern that compiles")
 });
-static BARE_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"https?://[^\s<>"'()\[\]]+"#).unwrap());
+static BARE_URL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"https?://[^\s<>"'()\[\]]+"#).expect("BARE_URL is a literal pattern that compiles")
+});
 
 /// How a link appeared in the text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +81,7 @@ fn links(text: &str) -> Vec<(String, Form)> {
     let mut out = Vec::new();
     let mut covered: Vec<(usize, usize)> = Vec::new();
     for caps in MARKDOWN.captures_iter(text) {
-        let whole = caps.get(0).unwrap();
+        let whole = caps.get(0).expect("group 0 is the whole match");
         covered.push((whole.start(), whole.end()));
         let form = if &caps[1] == "!" {
             Form::Image
@@ -88,9 +91,13 @@ fn links(text: &str) -> Vec<(String, Form)> {
         out.push((caps[2].to_owned(), form));
     }
     for caps in HTML_IMG.captures_iter(text) {
-        let whole = caps.get(0).unwrap();
+        let whole = caps.get(0).expect("group 0 is the whole match");
         covered.push((whole.start(), whole.end()));
-        let url = caps.get(1).or_else(|| caps.get(2)).unwrap().as_str();
+        let url = caps
+            .get(1)
+            .or_else(|| caps.get(2))
+            .expect("HTML_IMG matches one of groups 1 and 2")
+            .as_str();
         out.push((url.trim().to_owned(), Form::Image));
     }
     for found in BARE_URL.find_iter(text) {
