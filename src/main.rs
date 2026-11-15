@@ -507,8 +507,10 @@ fn run_exception(action: ExceptionAction) -> Result<()> {
                 eprintln!("error: no rule named `{rule}`; see oncebitten rules list");
                 std::process::exit(2)
             }
-            let exception = Exception::new(&rule, &paths, &reason, &expires)?;
-            let path = exceptions::add(&repo, &exception)?;
+            let exception = Exception::new(&rule, &paths, &reason, &expires)
+                .unwrap_or_else(|error| exit_could_not_run(Failure::CouldNotRun(error)));
+            let path = exceptions::add(&repo, &exception)
+                .unwrap_or_else(|error| exit_could_not_run(Failure::CouldNotRun(error)));
             println!(
                 "added {} to {}",
                 exceptions::describe(&exception),

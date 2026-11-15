@@ -401,13 +401,21 @@ fn add_refuses_an_empty_reason_or_missing_paths() {
     for args in [
         vec!["--paths", "src/**", "--reason", " ", "--expires", FUTURE],
         vec!["--reason", "r", "--expires", FUTURE],
+        vec![
+            "--paths",
+            "src/**",
+            "--reason",
+            "r",
+            "--expires",
+            "31/12/2099",
+        ],
     ] {
         let mut full = vec!["exception", "add", "py-utcnow"];
         full.extend(args);
 
         let output = repo.run(&full, &[]);
 
-        assert_ne!(code(&output), 0, "{}", both(&output));
+        assert_eq!(code(&output), 2, "{}", both(&output));
         assert!(!repo.project().join(".oncebitten/exceptions.toml").exists());
     }
 }
