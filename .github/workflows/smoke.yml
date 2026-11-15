@@ -1,0 +1,76 @@
+name: Smoke
+
+# Runs scripts/fresh-project.sh on Linux, macOS and Windows: installs oncebitten
+# into a fresh git repository through uv (PyPI wheel) and npm, then runs
+# --version, hooks install, a repeated capture, evidence list, check and
+# gate pre-push.
+#   source: artifacts  installs the wheel and npm tarballs built in this run
+#                      (build.yml uploaded them; called by build.yml)
+#   source: published  installs <version> from PyPI and npm: run it after a
+#                      release (release.yml calls it) or by hand from the Actions tab
+on:
+  workflow_call:
+    inputs:
+      source:
+        type: string
+        required: true
+      version:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Install from artifacts of this run, or the published packages"
+        type: choice
+        options: [published]
+        default: published
+      version:
+        description: "Version on PyPI and npm, such as 0.1.0"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke ${{ inputs.source }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Download this run's artifacts
+        if: inputs.source == 'artifacts'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "{wheel-${{ matrix.target }},npm-packages}"
+          path: art
+          merge-multiple: true
+      - name: Fresh project from artifacts
+        if: inputs.source == 'artifacts'
+        run: scripts/fresh-project.sh artifacts art
+      - name: Fresh project from PyPI and npm
+        if: inputs.source == 'published'
+        env:
+          VERSION: ${{ inputs.version }}
+        # A registry can lag a publish by a few minutes: retry for up to 10.
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if scripts/fresh-project.sh published "$VERSION"; then exit 0; fi
+            echo "attempt $attempt failed; retrying in 60 s"
+            sleep 60
+          done
+          exit 1

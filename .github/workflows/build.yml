@@ -1,0 +1,112 @@
+name: Build
+
+# Builds the binaries once per target and derives every artifact from that
+# build: the release tarballs, the PyPI wheels (maturin, bindings = "bin") and
+# the npm packages. release.yml calls this; it also runs on pull requests that
+# touch packaging so a broken wheel or npm package shows up before a release.
+# Only the `oncebitten` and `oncebitten-checker` binaries are built and shipped.
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "pyproject.toml"
+      - "packaging/npm/**"
+      - "packaging/pypi/**"
+      - "scripts/**"
+      - ".github/workflows/build.yml"
+      - ".github/workflows/smoke.yml"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, compat: "manylinux2014 musllinux_1_2" }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, compat: "manylinux2014 musllinux_1_2" }
+          - { target: x86_64-apple-darwin, os: macos-latest, compat: "" }
+          - { target: aarch64-apple-darwin, os: macos-latest, compat: "" }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, compat: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        run: cargo build --release --locked --bin oncebitten --bin oncebitten-checker --target ${{ matrix.target }}
+      - name: Package tarball
+        shell: bash
+        run: |
+          exe=""
+          case "${{ matrix.target }}" in *windows*) exe=.exe ;; esac
+          name="oncebitten-${{ matrix.target }}.tar.gz"
+          mkdir dist
+          tar -czf "dist/$name" -C "target/${{ matrix.target }}/release" "oncebitten$exe" "oncebitten-checker$exe"
+          cd dist
+          if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"; else shasum -a 256 "$name" > "$name.sha256"; fi
+      - name: Build wheel
+        shell: bash
+        working-directory: packaging/pypi
+        # cargo finds the binaries the step above built, so nothing compiles twice.
+        run: |
+          compat=""
+          [ -z "${{ matrix.compat }}" ] || compat="--compatibility ${{ matrix.compat }}"
+          uvx maturin build --release --locked --target ${{ matrix.target }} $compat --out ../../wheels
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bin-${{ matrix.target }}
+          path: dist/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.target }}
+          path: wheels/*.whl
+
+  npm:
+    name: npm packages
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "{bin,wheel}-*"
+          path: artifacts
+          merge-multiple: true
+      - name: Only the two binaries ship
+        run: scripts/check-artifacts.sh artifacts
+      - name: Pack
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          node --test scripts/npm-package.test.mjs
+          node scripts/npm-package.mjs "$version" artifacts npm-packages --all
+          ls -l npm-packages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-packages
+          path: npm-packages/*.tgz
+
+  smoke:
+    name: smoke (artifacts)
+    needs: [build, npm]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      source: artifacts

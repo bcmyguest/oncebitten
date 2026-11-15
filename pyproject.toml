@@ -1,0 +1,17 @@
+# Makes this repository installable by the pre-commit framework's
+# `language: python` hooks, which run `pip install .` on the hook repository.
+# The package is empty on purpose: the hook pins the prebuilt `oncebitten`
+# wheel through `additional_dependencies` (see .pre-commit-hooks.yaml), so no
+# Rust toolchain runs. The PyPI wheel itself is built from packaging/pypi.
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oncebitten-pre-commit"
+version = "0.1.0"
+description = "pre-commit hook environment for oncebitten"
+license = "Apache-2.0"
+
+[tool.setuptools]
+packages = []

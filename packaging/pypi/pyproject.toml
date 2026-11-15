@@ -1,0 +1,32 @@
+# Wheel metadata for PyPI. Build from this directory: `maturin build --release`.
+# `bindings = "bin"` ships every bin cargo builds; cargo-extra-args below limits
+# that to oncebitten and oncebitten-checker. They land in the wheel's scripts
+# directory, so installing needs no Rust toolchain. No sdist: PyPI carries binaries only.
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "oncebitten"
+description = "Turns repeated agent mistakes into git-enforced rules"
+readme = "../../README.md"
+license = "Apache-2.0"
+requires-python = ">=3.8"
+dynamic = ["version"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Programming Language :: Rust",
+]
+
+[project.urls]
+Homepage = "https://bcmyguest.github.io/oncebitten/"
+Repository = "https://github.com/bcmyguest/oncebitten"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "../../Cargo.toml"
+# Drops the test-only fake-forge binary (see Cargo.toml).
+no-default-features = true
+# fake-forge is a test binary of the same crate: never ship it.
+cargo-extra-args = "--bin oncebitten --bin oncebitten-checker"
