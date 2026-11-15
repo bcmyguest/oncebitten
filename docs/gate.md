@@ -23,7 +23,7 @@ It checks the paths that changed in a range of commits:
 
 The pre-commit framework sets `PRE_COMMIT_FROM_REF` (the remote's commit) and `PRE_COMMIT_TO_REF` (the local commit) in the pre-push stage. Source: `pre_commit/commands/run.py` and `_pre_push_ns` in `pre_commit/commands/hook_impl.py` (read in pre-commit 4.6.0). It leaves them unset when a push contains the repository's root commit; it then runs hooks on all files, and the gate falls back to `@{upstream}` or every tracked file.
 
-Untracked files never count. The engines read the files in the working tree, as pre-commit hooks do: a pre-push run with uncommitted edits to a changed path checks the edited file. CI checks out the pull request, so there the working tree equals `HEAD`.
+The gate drops paths under `.oncebitten/rules/`: a rule's `fixtures/bad.*` exists to violate it. `rules.lock` and `baseline.json` stay in the range. Untracked files never count. The engines read the files in the working tree, as pre-commit hooks do: a pre-push run with uncommitted edits to a changed path checks the edited file. CI checks out the pull request, so there the working tree equals `HEAD`.
 
 The `native` engine runs over the whole repository whatever the range. A `diff` rule sees the range's paths.
 
@@ -58,6 +58,16 @@ A shipped example from `rules.use_examples` is active, but its directory sits in
 - An `ast-grep` entry has `path`, repo-relative and `/`-separated, and `sha256`, the SHA-256 of the matched source text with CRLF read as LF. The line number is not part of the entry, so a known violation stays known when code above it moves. Two identical matches in one file share one entry: a baselined match lets a second copy of the same text in the same file through. A copy in another file is new.
 - A `native` entry has `rule` only. The native engine reports one finding for the whole repository, with no path and no per-match text, so the entry covers every firing of that rule: while it is listed, the rule cannot fail the gate.
 - A `diff` finding is never baselined. It belongs to one change, so an entry cannot match it.
+
+### `oncebitten baseline update`
+
+```sh
+oncebitten baseline update
+```
+
+Replaces `.oncebitten/baseline.json` with the violations that the active block rules find now. It loads rules as `check` does and runs them on every tracked file, minus `.oncebitten/rules/`. Diff rules do not run. It prints `wrote <n> entries to <path>` and exits 0. A rule that could not run exits 2 and writes nothing; it never writes a partial baseline. A violation fixed since the last update drops out.
+
+The file is pretty-printed JSON, entries sorted by `rule`, then `path`, then `sha256`, one key per line, ending in a newline. Running it twice on the same tree writes the same bytes, so a baseline change reads as a short diff.
 
 A pull request can edit the baseline. Review a change to `baseline.json` like a change to the rules.
 

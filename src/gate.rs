@@ -3,7 +3,7 @@
 //! requires replay proofs, and lets baselined violations through.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
@@ -19,6 +19,7 @@ use crate::rules::{self, Failure};
 /// Set by the pre-commit framework in the pre-push stage.
 pub const FROM_REF: &str = "PRE_COMMIT_FROM_REF";
 pub const TO_REF: &str = "PRE_COMMIT_TO_REF";
+const RULES_PREFIX: &str = ".oncebitten/rules/";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -80,6 +81,44 @@ pub fn run(inputs: &Inputs, stage: Stage, base: Option<&str>) -> Result<Report, 
         checked,
         known,
     })
+}
+
+/// The violations the gated rules find in every tracked file now. Diff rules
+/// are skipped: their findings are never baselined. A rule that could not run
+/// fails the whole update, so a partial baseline is never written.
+pub fn current_baseline(inputs: &Inputs) -> Result<(PathBuf, Baseline), Failure> {
+    let rules = rules::load(inputs, false)?;
+    let repo = config::repo_root(&inputs.cwd)
+        .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
+    let tracked = changed(inputs, &repo, &Range::AllTracked).map_err(Failure::CouldNotRun)?;
+    let gated: Vec<&Resolved> = gated(&rules)
+        .into_iter()
+        .filter(|resolved| !matches!(resolved.rule.check, Check::Diff { .. }))
+        .collect();
+    let checks: HashMap<&str, &Check> = gated
+        .iter()
+        .map(|resolved| (resolved.id.as_str(), &resolved.rule.check))
+        .collect();
+    let mut baseline = Baseline::default();
+    for item in check::run_rules(gated.iter().copied(), &repo, &tracked) {
+        match item.outcome {
+            Outcome::Clean => {}
+            Outcome::Fired(findings) => {
+                baseline
+                    .entries
+                    .extend(findings.iter().filter_map(|finding| {
+                        baseline::entry(&item.id, checks[item.id.as_str()], &repo, finding)
+                    }))
+            }
+            Outcome::CouldNotRun(reason) => {
+                return Err(Failure::CouldNotRun(anyhow!(
+                    "{}: could not run: {reason}",
+                    item.id
+                )))
+            }
+        }
+    }
+    Ok((repo, baseline))
 }
 
 /// The rules the gate enforces: active and in block mode.
@@ -150,13 +189,19 @@ fn since_merge_base(inputs: &Inputs, repo: &Path, base: &str) -> Result<Range> {
     })
 }
 
+/// The range's paths, minus the project's rule directories: their
+/// `fixtures/bad.*` exist to violate the rule.
 fn changed(inputs: &Inputs, repo: &Path, range: &Range) -> Result<Vec<String>> {
-    match range {
+    let paths = match range {
         Range::Diff { from, to } => {
-            check::git_paths(inputs, repo, &["diff", "--name-only", from, to])
+            check::git_paths(inputs, repo, &["diff", "--name-only", from, to])?
         }
-        Range::AllTracked => check::git_paths(inputs, repo, &["ls-files"]),
-    }
+        Range::AllTracked => check::git_paths(inputs, repo, &["ls-files"])?,
+    };
+    Ok(paths
+        .into_iter()
+        .filter(|path| !path.starts_with(RULES_PREFIX))
+        .collect())
 }
 
 fn apply_baseline(

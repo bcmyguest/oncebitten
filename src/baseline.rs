@@ -72,6 +72,19 @@ impl Baseline {
     }
 }
 
+/// Writes the baseline as pretty JSON with entries sorted by rule, path and
+/// hash, so a change to it reads as a short diff.
+pub fn write(repo: &Path, baseline: &Baseline) -> Result<PathBuf> {
+    let path = path(repo);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let mut text = serde_json::to_string_pretty(baseline)?;
+    text.push('\n');
+    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
 /// `path` relative to `repo`, `/`-separated.
 fn relative(repo: &Path, path: &Path) -> String {
     path.strip_prefix(repo)

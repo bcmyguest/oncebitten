@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use oncebitten::baseline;
 use oncebitten::capture;
 use oncebitten::check::{self, Checked};
 use oncebitten::config::{self, Inputs, Platform};
@@ -59,6 +60,11 @@ enum Command {
         #[command(subcommand)]
         stage: GateStage,
     },
+    /// Manage .oncebitten/baseline.json, the violations the gate lets through
+    Baseline {
+        #[command(subcommand)]
+        action: BaselineAction,
+    },
     /// Replay an ast-grep rule against its fixtures and corpus; exit 0 proven, 1 rejected, 2 could not run
     Replay {
         /// Qualified rule id, as `rules list` prints it
@@ -73,6 +79,12 @@ enum Command {
         #[arg(long)]
         local: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum BaselineAction {
+    /// Replace the baseline with the current violations of active block rules in every tracked file
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -153,6 +165,9 @@ fn main() -> Result<()> {
         Command::Rules { action } => run_rules(action),
         Command::Check { base } => run_check(&base),
         Command::Gate { stage } => run_gate(stage),
+        Command::Baseline {
+            action: BaselineAction::Update,
+        } => run_baseline_update(),
         Command::Replay {
             rule,
             checker,
@@ -232,6 +247,24 @@ fn run_gate(stage: GateStage) -> Result<()> {
         );
     }
     std::process::exit(report.exit_code(stage))
+}
+
+fn run_baseline_update() -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let (repo, current) = match gate::current_baseline(&inputs) {
+        Ok(found) => found,
+        Err(failure) => exit_could_not_run(failure),
+    };
+    let path = match baseline::write(&repo, &current) {
+        Ok(path) => path,
+        Err(error) => exit_could_not_run(Failure::CouldNotRun(error)),
+    };
+    println!(
+        "wrote {} entries to {}",
+        current.entries.len(),
+        path.display()
+    );
+    Ok(())
 }
 
 fn run_replay(

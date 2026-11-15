@@ -372,3 +372,17 @@ fn steer_rules_do_not_gate() {
 
     assert_eq!(code(&output), 0, "{}", both(&output));
 }
+
+#[test]
+fn rule_fixtures_do_not_trip_the_gate() {
+    let repo = gated_repo();
+    repo.add_rule("git-fails", &NATIVE.replace("block", "steer"));
+    let fixtures = repo.rule_dir("git-fails").join("fixtures");
+    fs::remove_file(fixtures.join("bad.diff")).unwrap();
+    fs::write(fixtures.join("bad.py"), BAD).unwrap();
+    repo.commit_all("add a rule with a bad fixture");
+
+    let output = pr(&repo);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+}

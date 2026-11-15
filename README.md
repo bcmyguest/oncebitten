@@ -21,6 +21,7 @@ oncebitten config path            # configuration files it reads
 oncebitten check                  # run active rules against changes since HEAD
 oncebitten replay <rule-id>       # prove a rule in an OpenShell sandbox; writes proof.json
 oncebitten gate pr --base origin/main   # CI gate: new violations of active block rules
+oncebitten baseline update        # accept today's violations in .oncebitten/baseline.json
 oncebitten hooks install --host claude --scope user   # also codex, cursor, copilot, opencode, pi
 oncebitten hooks uninstall --host claude --scope user
 ```
