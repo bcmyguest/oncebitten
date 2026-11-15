@@ -13,6 +13,7 @@ use oncebitten::evidence::{self, Cluster};
 use oncebitten::exceptions::{self, Exception};
 use oncebitten::forge;
 use oncebitten::gate::{self, Stage};
+use oncebitten::hits;
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
 use oncebitten::lifecycle;
@@ -541,13 +542,15 @@ fn proposal_line(row: &ProposalRow) -> String {
         Kind::Proposal if row.proven => "proven",
         Kind::Proposal => "unproven",
     };
+    let hits = row.hits.as_ref().map_or("-".to_owned(), hits::summary_text);
     format!(
-        "{}  {}  {}  {}  {}  {}",
+        "{}  {}  {}  {}  {}  {}  {}",
         row.cluster,
         row.state.as_str(),
         row.kind.as_str(),
         row.rule.as_deref().unwrap_or("-"),
         proof,
+        hits,
         row.repo
     )
 }
@@ -565,6 +568,13 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
     }
     if let Some(url) = &row.pr_url {
         println!("pr: {url}");
+    }
+    if let Some(hits) = &row.hits {
+        println!("hits: {}", hits::summary_text(hits));
+        for sample in &hits.samples {
+            println!("  {sample}");
+        }
+        println!("existing hits will be baselined");
     }
     if let Some(rationale) = &row.rationale {
         println!("rationale: {rationale}");
