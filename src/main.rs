@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use oncebitten::capture;
 use oncebitten::config::{self, Inputs};
 
 #[derive(Parser)]
@@ -15,6 +16,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Record an agent hook payload from stdin (always exits 0)
+    Capture {
+        /// Agent host that sent the payload
+        #[arg(long)]
+        host: String,
+    },
     /// Inspect the layered configuration
     Config {
         #[command(subcommand)]
@@ -37,6 +44,12 @@ enum ConfigAction {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Capture { host } => {
+            if let Err(err) = capture::run_from_process(&host) {
+                eprintln!("oncebitten capture: {err:#}");
+            }
+            Ok(())
+        }
         Command::Config { action } => run_config(action),
     }
 }

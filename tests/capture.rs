@@ -1,0 +1,116 @@
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+use oncebitten::capture::run;
+use tempfile::TempDir;
+
+const BIN: &str = env!("CARGO_BIN_EXE_oncebitten");
+
+fn prompt_payload(session: &str, prompt: &str) -> String {
+    format!(
+        r#"{{"session_id":"{session}","cwd":"/nowhere","hook_event_name":"UserPromptSubmit","prompt":"{prompt}"}}"#
+    )
+}
+
+fn count(db: &Path, table: &str) -> i64 {
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+        .unwrap()
+}
+
+fn capture(home: &Path, host: &str, payload: &str, triage: Option<&str>) -> Output {
+    let mut cmd = Command::new(BIN);
+    cmd.args(["capture", "--host", host])
+        .env("HOME", home)
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env_remove("ONCEBITTEN_TRIAGE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(value) = triage {
+        cmd.env("ONCEBITTEN_TRIAGE", value);
+    }
+    let mut child = cmd.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn events_db(home: &Path) -> std::path::PathBuf {
+    home.join("data").join("oncebitten").join("events.db")
+}
+
+#[test]
+fn run_records_the_event_and_its_signals() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("events.db");
+    run("claude", &prompt_payload("s1", "No, stop"), &db, 5).unwrap();
+    assert_eq!(count(&db, "events"), 1);
+    assert_eq!(count(&db, "signals"), 1);
+}
+
+#[test]
+fn run_with_an_unsupported_host_records_nothing() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("events.db");
+    assert!(run("codex", "{}", &db, 5).is_err());
+    assert!(!db.exists());
+}
+
+#[test]
+fn capture_records_into_the_user_data_dir_and_prints_nothing() {
+    let home = TempDir::new().unwrap();
+    let out = capture(home.path(), "claude", &prompt_payload("s1", "fine"), None);
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.is_empty());
+    assert_eq!(count(&events_db(home.path()), "events"), 1);
+}
+
+#[test]
+fn triage_switch_skips_capture_entirely() {
+    let home = TempDir::new().unwrap();
+    let out = capture(home.path(), "claude", &prompt_payload("s1", "x"), Some("1"));
+    assert!(out.status.success());
+    assert!(!events_db(home.path()).exists());
+}
+
+#[test]
+fn errors_exit_zero_with_one_stderr_line() {
+    let home = TempDir::new().unwrap();
+    let out = capture(home.path(), "codex", "{}", None);
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1);
+    assert!(stderr.contains("unsupported host"));
+}
+
+#[test]
+fn malformed_stdin_exits_zero() {
+    let home = TempDir::new().unwrap();
+    let out = capture(home.path(), "claude", "not json", None);
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn one_hundred_captures_finish_in_under_five_seconds() {
+    let home = TempDir::new().unwrap();
+    let start = Instant::now();
+    for i in 0..100 {
+        let payload = prompt_payload("s1", &format!("prompt {i}"));
+        let out = capture(home.path(), "claude", &payload, None);
+        assert!(out.status.success());
+    }
+    let elapsed: Duration = start.elapsed();
+    assert_eq!(count(&events_db(home.path()), "events"), 100);
+    assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
+}
