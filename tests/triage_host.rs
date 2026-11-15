@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use oncebitten::config::Host;
-use oncebitten::triage::host::{invocation, verdict_from, Captured};
+use oncebitten::triage::host::{control_invocation, invocation, verdict_from, Captured};
 use oncebitten::triage::verdict::SCHEMA;
 
 const PROMPT: &str = "classify this";
@@ -168,4 +168,20 @@ fn paths_are_relative_to_the_given_directory() {
     for (path, _) in &inv.files {
         assert!(path.starts_with("w"));
     }
+}
+
+#[test]
+fn claude_hooks_off_passes_disable_all_hooks_inline() {
+    let inv = invocation(Host::Claude, "haiku", PROMPT, &workdir()).unwrap();
+    let args = args_of(&inv.args);
+    assert_eq!(
+        args[position(&args, "--settings") + 1],
+        r#"{"disableAllHooks": true}"#
+    );
+}
+
+#[test]
+fn claude_control_has_no_inline_settings() {
+    let inv = control_invocation(Host::Claude, "haiku", PROMPT, &workdir()).unwrap();
+    assert!(!inv.args.iter().any(|arg| arg == "--settings"));
 }

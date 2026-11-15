@@ -10,6 +10,9 @@ const SCHEMA_FILE: &str = "schema.json";
 const ANSWER_FILE: &str = "answer.json";
 /// The agent name that means "the host's configured default model".
 pub const DEFAULT_AGENT: &str = "default";
+/// Inline settings for `claude --settings`. `--setting-sources project,local`
+/// alone still runs project and local hooks; `disableAllHooks` turns them off.
+pub const HOOKS_OFF_SETTINGS: &str = r#"{"disableAllHooks": true}"#;
 
 /// One headless triage call, fully specified. Nothing here runs a process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +87,7 @@ fn claude(model: Option<&str>, prompt: &str, hooks_off: bool) -> Invocation {
     let mut args = strings(&["-p", prompt, "--output-format", "json"]);
     if hooks_off {
         args.extend(strings(&["--setting-sources", "project,local"]));
+        args.extend(strings(&["--settings", HOOKS_OFF_SETTINGS]));
     }
     args.extend(strings(&[
         "--disable-slash-commands",
