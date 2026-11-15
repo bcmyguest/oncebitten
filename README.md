@@ -11,7 +11,7 @@
 
 Docs: https://bcmyguest.github.io/oncebitten/
 
-Status: pre-alpha. Capture, evidence clustering, `check`, `replay`, the gate, exceptions, retire, rollback and `doctor` work; triage is implemented for claude, codex and opencode ([docs/triage.md](docs/triage.md)), with fake-host tests only; rule proposals are in progress ([PLAN.md](PLAN.md)).
+Status: pre-alpha. Capture, evidence clustering, `check`, `replay`, the gate, steer rules, exceptions, retire, rollback and `doctor` work; triage is implemented for claude, codex and opencode ([docs/triage.md](docs/triage.md)), with fake-host tests only; rule proposals are in progress ([PLAN.md](PLAN.md)).
 
 ## Install
 
@@ -47,7 +47,7 @@ oncebitten check                  # run active rules against changes since HEAD
 oncebitten replay <rule-id>       # prove a rule in an OpenShell sandbox; writes proof.json
 oncebitten gate pr --base origin/main   # CI gate: new violations of active block rules
 oncebitten baseline update        # accept today's violations in .oncebitten/baseline.json
-oncebitten hooks install --host claude --scope user   # also codex, cursor, copilot, opencode, pi
+oncebitten hooks install --host claude --scope user   # capture and steer hooks; also codex, cursor, copilot, opencode, pi
 oncebitten hooks uninstall --host claude --scope user
 oncebitten evidence list          # mistake clusters seen in 2+ sessions, or stated once
 oncebitten evidence reject <id> --reason "one-off"
@@ -56,6 +56,8 @@ oncebitten evidence reject <id> --reason "one-off"
 Rules: [docs/rules.md](docs/rules.md). Example rules: [examples/](examples/README.md). Gate, proofs and baseline: [docs/gate.md](docs/gate.md). Agent-facing summary: [llms.txt](llms.txt).
 
 Hooks record prompts and tool outcomes locally: [docs/capture.md](docs/capture.md) lists what each host reports and how each was verified. [docs/evidence.md](docs/evidence.md) covers clustering and rejections.
+
+Steer rules cover lessons git cannot see, such as running `sudo`: they inform or deny the agent at the tool call. [docs/steer.md](docs/steer.md) lists what each host supports.
 
 Settings and their precedence: [docs/configuration.md](docs/configuration.md).
 

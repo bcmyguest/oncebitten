@@ -73,7 +73,7 @@ The `native` engine runs over the whole repository whatever the range. A `diff` 
 
 ## Proofs
 
-The gate needs a valid `proof.json` (see [rules.md](rules.md#proofs)) for each gated `ast-grep` and `diff` rule. Ast-grep and diff rules need a proof. Native-linter rules are exempt until replay can run their toolchain in the sandbox; the gate still runs them.
+The gate needs a valid `proof.json` (see [rules.md](rules.md#proofs)) for each gated `ast-grep` and `diff` rule. Ast-grep and diff rules need a proof. So does every active steer rule: the gate never runs it, but it acts in every agent session, so a stale or unproven one fails `pr` the same way (see [steer.md](steer.md#fixtures-and-proofs)). Native-linter rules are exempt until replay can run their toolchain in the sandbox; the gate still runs them.
 
 The proof's `dir_sha256` covers every file in the rule directory except `proof.json`, with `rule.toml` parsed, its `status` key removed and the rest re-serialised canonically. So `status = "proposed"` becomes `"active"` without invalidating the proof. Any other change to `rule.toml`, comments and layout aside, makes the proof stale.
 

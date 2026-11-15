@@ -4,10 +4,11 @@ oncebitten turns repeated agent mistakes into rules that git enforces. A rule is
 
 ## Commands
 
-- `oncebitten check [--base <rev>]`: run each `active` rule against changes since `<rev>` (default `HEAD`). Changes are the tracked diff plus untracked files. Exit 0 clean, 1 a rule fired, 2 a rule could not run or rules did not load (2 wins over 1). Findings print to stdout as `<id>: <path>[:<line>]: <message>`. Could-not-run reasons print to stderr as `<id>: could not run: <reason>`.
-- `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]`: replay an ast-grep or diff rule (fires on `fixtures/bad.*`, clean on `fixtures/fixed.*` and `corpus/`) in an OpenShell sandbox. A proven verdict writes `proof.json` into the rule directory; commit it. Exit 0 proven, 1 rejected, 2 could not run. `--local` runs without a sandbox and writes no proof.
-- `oncebitten gate pr --base <target>` (CI) and `oncebitten gate pre-push [--base <ref>]` (pre-push hook): run `active` `block` rules on the paths changed since the merge-base (pre-push: `PRE_COMMIT_FROM_REF`..`PRE_COMMIT_TO_REF`). `pr` needs `rules.lock` and a valid `proof.json` for each gated ast-grep or diff rule; `pre-push` only warns about proofs. Findings listed in `.oncebitten/baseline.json` pass. Exit 0 clean, 1 a new violation, 2 could not run. Details: docs/gate.md. The pre-push hook needs the pre-commit framework: hook id `oncebitten-gate` from this repo, `pre-commit install --hook-type pre-push`. CI templates: templates/.
+- `oncebitten check [--base <rev>]`: run each `active` block rule against changes since `<rev>` (default `HEAD`). Changes are the tracked diff plus untracked files. Exit 0 clean, 1 a rule fired, 2 a rule could not run or rules did not load (2 wins over 1). Findings print to stdout as `<id>: <path>[:<line>]: <message>`. Could-not-run reasons print to stderr as `<id>: could not run: <reason>`.
+- `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]`: replay an ast-grep or diff rule (fires on `fixtures/bad.*`, clean on `fixtures/fixed.*` and `corpus/`) in an OpenShell sandbox; a steer rule replays with the in-process matcher and its proof names `"backend": "matcher"`. A proven verdict writes `proof.json` into the rule directory; commit it. Exit 0 proven, 1 rejected, 2 could not run. `--local` runs without a sandbox and writes no proof.
+- `oncebitten gate pr --base <target>` (CI) and `oncebitten gate pre-push [--base <ref>]` (pre-push hook): run `active` `block` rules on the paths changed since the merge-base (pre-push: `PRE_COMMIT_FROM_REF`..`PRE_COMMIT_TO_REF`). `pr` needs `rules.lock` and a valid `proof.json` for each gated ast-grep or diff rule and each active steer rule; `pre-push` only warns about proofs. Findings listed in `.oncebitten/baseline.json` pass. Exit 0 clean, 1 a new violation, 2 could not run. Details: docs/gate.md. The pre-push hook needs the pre-commit framework: hook id `oncebitten-gate` from this repo, `pre-commit install --hook-type pre-push`. CI templates: templates/.
 - `oncebitten baseline update`: replace `.oncebitten/baseline.json` with the current violations of active block rules in every tracked file (sorted JSON). Diff rules are not baselined; a native rule is baselined by id alone. Exit 0 written, 2 a rule could not run.
+- `oncebitten steer --host <claude|codex|cursor|copilot|opencode|pi>`: agent hook. Reads the host payload on stdin, matches active steer rules and prints the host's inform or deny output; prints nothing when none match. Always exits 0; honours `ONCEBITTEN_TRIAGE=1`. `oncebitten hooks install|uninstall --host <h> --scope <user|project>` writes or removes it beside the capture hook. Cursor and copilot can only deny tool calls; pi informs on a tool call only after the turn. Details: docs/steer.md.
 - `oncebitten rules sync [--frozen]`: clone each source to the data directory and write `.oncebitten/rules.lock`. `--frozen` checks out the locked commits, fetching only a commit the clone lacks, and never writes the lock; exit 2 when it cannot. CI runs `--frozen` before `gate pr`.
 - `oncebitten rules list [--ci]`: print `id  mode  status  origin` per rule.
 - `oncebitten rules retire <id> --reason <text>`: set `status = "retired"` and `retired_reason` on a project rule. A retired rule never runs and needs no proof; `baseline update` drops its entries. A source rule exits 2: retire it in its rules repo or override it. Details: docs/lifecycle.md.
@@ -30,22 +31,23 @@ Precedence, highest first: project `.oncebitten/rules/<id>/`, then sources in co
   check.yml          # ast-grep only
   fixtures/
     bad.<ext>        # exactly one
-    fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
+    fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff, steer rules bad.json and fixed.json
   corpus/            # replay only: files that must stay clean
   proof.json         # written by a proven OpenShell replay; not part of the hash
 ```
 
-`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check` and `gate`), `retired_reason` (optional, non-empty), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
+`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check` and `gate`), `retired_reason` (optional, non-empty), `engine` (`ast-grep`, `native`, `diff`, `steer`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays), `[steer]` (steer: `action` `inform` or `deny`, `message`, `[steer.trigger]` with one of `tool` plus optional `command` regex, `paths` globs, `prompt` regex; `deny` needs `tool`). Unknown keys fail the load.
 
 ## Engines
 
 - `ast-grep`: `check.yml` is an ast-grep rule. Runs on changed files whose language ast-grep recognises. Matches syntax only: no types, and macro arguments are not visible.
 - `native`: runs `command` in the repository root. Exit 0 is clean. An exit code in `fired_exit_codes` is fired, and its output is the message. Any other exit code, a missing binary or a signal is could-not-run. With `fired_output_contains`, a listed exit code is fired only when the output contains that text; otherwise could-not-run.
+- `steer`: needs `mode = "steer"`. Not run by `check` or `gate`; the `oncebitten steer` hook matches it against agent tool calls and prompts. Fixtures are normalized events, e.g. `{"event": "tool", "tool": "Bash", "command": "sudo ls"}`, `{"event": "tool", "tool": "Write", "paths": ["src/gen/a.rs"]}`, `{"event": "prompt", "prompt": "..."}`.
 - `diff`: fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. Globs use `*` within one directory and `**` across directories.
 
 ## Shipped examples (opt-in: list ids in `rules.use_examples`; a listed example is active)
 
-`py-utcnow`, `py-no-print`, `js-moment`, `ts-no-as-any` (ast-grep); `rust-no-unwrap` (native: `cargo clippy --message-format=json -- -D clippy::unwrap_used`, fired on exit 101 with `"code":"clippy::unwrap_used"` in the output); `arch-diagram`, `ui-screenshot` (diff).
+`py-utcnow`, `py-no-print`, `js-moment`, `ts-no-as-any` (ast-grep); `rust-no-unwrap` (native: `cargo clippy --message-format=json -- -D clippy::unwrap_used`, fired on exit 101 with `"code":"clippy::unwrap_used"` in the output); `arch-diagram`, `ui-screenshot` (diff); `no-sudo` (steer: denies shell commands matching `^\s*sudo\b`).
 
 ## Example rule
 

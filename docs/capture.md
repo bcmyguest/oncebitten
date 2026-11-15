@@ -66,6 +66,7 @@ oncebitten hooks uninstall --host <host> --scope <user|project>
 - `<home>` is `HOME`, or on Windows `USERPROFILE`, then `HOMEDRIVE`+`HOMEPATH`.
 - Commands call this executable by absolute, canonicalized path (`std::env::current_exe`), never through `PATH`. The path is single-quoted on Unix, double-quoted on Windows (cmd), `& '...'` in the copilot `powershell` field. No `${VAR:-default}` syntax. Running install again adds nothing; after the binary moves, it rewrites the path in place.
 - Shared files (claude, codex, cursor) keep other keys and hooks; uninstall removes only oncebitten's entries. Owned files (copilot, opencode, pi) are written whole and deleted on uninstall. Both refuse a file they did not write.
+- `hooks install` also writes the steer hook (`oncebitten steer --host <host>`) for the same host and scope, and `hooks uninstall` removes it; see [steer.md](steer.md) for its events, files and what each host cannot do.
 - The opencode and pi scripts spawn the command with a shell, forward the event JSON on stdin, ignore every error and skip when `ONCEBITTEN_TRIAGE=1`.
 
 ## Plugin packaging

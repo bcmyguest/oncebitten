@@ -21,7 +21,7 @@ Run all four before a commit. CI runs the same commands.
 - `src/sources.rs`: source clone location and `git` invocations.
 - `src/lockfile.rs`: `.oncebitten/rules.lock` read and write.
 - `src/rules.rs`: `rules sync`, `rules list` and `rules validate` logic, including `--ci` checks.
-- `src/proof.rs`: `proof.json` in a rule directory: directory hash, validity, writing a proof after an OpenShell replay.
+- `src/proof.rs`: `proof.json` in a rule directory: directory hash, validity, writing a proof after an OpenShell or matcher replay.
 - `src/gate.rs`: `gate pre-push|pr`: range of changed paths, proof checks, baseline filtering. Reuses `src/check.rs`.
 - `src/baseline.rs`: `.oncebitten/baseline.json` entries, matching and writing. `gate::current_baseline` backs `baseline update`.
 - `src/exceptions.rs`: `.oncebitten/exceptions.toml`: parsing, expiry, matching findings, appending entries. Applied by `check`, `gate` and `baseline update`.
@@ -34,7 +34,10 @@ Run all four before a commit. CI runs the same commands.
 - `src/signal.rs`: signal kinds and pure derivation from an event and its session history.
 - `src/host.rs`: per-host hook payload to normalized event (claude, codex, cursor, copilot, opencode, pi).
 - `src/capture.rs`: capture pipeline behind `oncebitten capture`.
-- `src/hooks.rs`: installs and removes capture hooks for every host.
+- `src/hooks.rs`: installs and removes capture and steer hooks for every host.
+- `src/steer.rs`: steer rules: normalized event, trigger matcher, replay, per-host output, `oncebitten steer`. `src/host.rs` `normalize_steer` maps payloads onto its events.
+- `docs/steer.md`: steer rule format, fixtures, the steer hook and what each host supports. Keep it in step with `src/steer.rs`, `src/host.rs` and `src/hooks.rs`.
+- `tests/steer.rs`, `tests/steer_gate.rs`, `tests/steer_hook.rs`, `tests/hooks_steer.rs`: steer schema, matcher, proof, gate, hook output and install tests.
 - `tests/config.rs`: loader tests (precedence, merge, validation). `tests/cli.rs`: binary tests.
 - `tests/proof.rs`: proof hash, validity and `replay` CLI tests. `tests/gate.rs`: `gate` CLI tests. `tests/baseline_cli.rs`: `baseline update` tests. `tests/common/mod.rs`: shared temp git repo helper for the newer CLI tests.
 - `tests/rule.rs`, `tests/registry.rs`: rule schema and resolution tests. `tests/sources.rs`: clone, sync and lockfile tests, using local git repos. `tests/rules_cli.rs`: `rules` subcommand tests.
