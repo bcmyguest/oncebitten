@@ -486,3 +486,184 @@ fn the_store_keeps_its_schema_version_with_the_queue_tables() {
         .unwrap();
     assert_eq!(version, 4);
 }
+
+/// A host that answers every call with `answer` and never runs a model.
+struct FakeHost {
+    answer: String,
+    calls: std::cell::Cell<usize>,
+}
+
+impl FakeHost {
+    fn new(answer: String) -> Self {
+        FakeHost {
+            answer,
+            calls: std::cell::Cell::new(0),
+        }
+    }
+}
+
+impl oncebitten::triage::run::Runner for FakeHost {
+    fn run(
+        &self,
+        _inv: &oncebitten::triage::host::Invocation,
+        dir: &Path,
+        _timeout: std::time::Duration,
+    ) -> Result<oncebitten::triage::host::Captured, oncebitten::triage::run::RunError> {
+        // The control call proves hooks fire; the triage call fires none.
+        if self.calls.get() == 0 {
+            let markers = dir.join("markers");
+            fs::create_dir_all(&markers).unwrap();
+            fs::write(markers.join("marker-0"), "").unwrap();
+        }
+        self.calls.set(self.calls.get() + 1);
+        Ok(oncebitten::triage::host::Captured {
+            stdout: self.answer.clone(),
+            answer: Some(self.answer.clone()),
+        })
+    }
+}
+
+fn fail_in(store: &Store, session: &str, repo: &Path, ts: i64) -> i64 {
+    let event = NewEvent {
+        ts,
+        host: "codex".into(),
+        session_id: session.into(),
+        repo: Some(repo.to_string_lossy().into_owned()),
+        kind: signal::KIND_TOOL_ERROR.into(),
+        tool: Some("Bash".into()),
+        summary: "cargo doc".into(),
+    };
+    let history = store.session_history("codex", session, 500).unwrap();
+    let signals = signal::derive(&event, &history);
+    store.record(&event, &signals).unwrap().unwrap()
+}
+
+#[test]
+fn due_names_the_cluster_and_repo_an_event_brought_to_its_threshold() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let sub = sandbox.repo().join("src");
+    fs::create_dir_all(&sub).unwrap();
+    let first = fail_in(&store, "s1", &sub, 1);
+    assert!(proposals::due(&store, first).unwrap().is_empty());
+    let second = fail_in(&store, "s2", &sub, 2);
+    let due = proposals::due(&store, second).unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(
+        fs::canonicalize(&due[0].repo).unwrap(),
+        fs::canonicalize(sandbox.repo()).unwrap()
+    );
+    let cluster = evidence::load(&store).unwrap().remove(0);
+    assert_eq!(due[0].cluster, cluster.id);
+}
+
+#[test]
+fn due_skips_events_outside_a_repo_and_queued_or_rejected_clusters() {
+    // A relative repo is no repo: it would resolve against capture's own cwd.
+    let store = Store::open_in_memory().unwrap();
+    fail_in(&store, "s1", Path::new("relative"), 1);
+    let second = fail_in(&store, "s2", Path::new("relative"), 2);
+    assert!(proposals::due(&store, second).unwrap().is_empty());
+
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    fail_in(&store, "s1", &sandbox.repo(), 1);
+    let second = fail_in(&store, "s2", &sandbox.repo(), 2);
+    let cluster = evidence::load(&store).unwrap().remove(0);
+    evidence::reject(&store, &cluster.id, 3, "noise").unwrap();
+    assert!(proposals::due(&store, second).unwrap().is_empty());
+}
+
+#[test]
+fn queued_triage_asks_the_host_once_and_records_the_draft() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = cluster(&store);
+    let answer = format!("{{{VERDICT},\"draft\":{}}}", draft_json("docs-with-src"));
+    let host = FakeHost::new(answer);
+    let ask = |cluster: &Cluster| {
+        oncebitten::triage::flow::run_answer(
+            &host,
+            oncebitten::config::Host::Codex,
+            "small",
+            &oncebitten::triage::flow::prompt_input(cluster),
+            oncebitten::triage::flow::DEFAULT_TIMEOUT,
+        )
+    };
+    let ran = proposals::triage_queued(
+        &store,
+        &sandbox.inputs(),
+        &cluster.id,
+        &ask,
+        &no_sandbox,
+        10,
+    )
+    .unwrap();
+    assert_eq!(
+        ran,
+        proposals::Ran::Recorded(Recorded::Proposed { proven: false })
+    );
+    assert!(sandbox.rules_dir().join("docs-with-src").is_dir());
+    let calls = host.calls.get();
+    assert!(calls > 0);
+
+    let again = proposals::triage_queued(
+        &store,
+        &sandbox.inputs(),
+        &cluster.id,
+        &ask,
+        &no_sandbox,
+        20,
+    )
+    .unwrap();
+    assert_eq!(again, proposals::Ran::Skipped);
+    assert_eq!(host.calls.get(), calls);
+}
+
+#[test]
+fn queued_triage_waits_for_a_held_lock_and_releases_its_own() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = cluster(&store);
+    let ask = |_: &Cluster| -> anyhow::Result<Answer> { Ok(answer_with(None)) };
+    assert!(store.try_lock_triage(&cluster.id, 5, 60_000).unwrap());
+    let ran = proposals::triage_queued(
+        &store,
+        &sandbox.inputs(),
+        &cluster.id,
+        &ask,
+        &no_sandbox,
+        10,
+    )
+    .unwrap();
+    assert_eq!(ran, proposals::Ran::Locked);
+    store.unlock_triage(&cluster.id).unwrap();
+
+    let failing = |_: &Cluster| -> anyhow::Result<Answer> { anyhow::bail!("host timed out") };
+    assert!(proposals::triage_queued(
+        &store,
+        &sandbox.inputs(),
+        &cluster.id,
+        &failing,
+        &no_sandbox,
+        20
+    )
+    .is_err());
+    assert!(store.try_lock_triage(&cluster.id, 30, 60_000).unwrap());
+}
+
+#[test]
+fn background_triage_is_on_by_default_and_a_config_key_turns_it_off() {
+    let sandbox = Sandbox::new();
+    let loaded = oncebitten::config::load(&sandbox.inputs()).unwrap();
+    assert!(loaded.config.triage.background);
+    let project = sandbox.repo().join(".oncebitten");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("config.toml"),
+        "[triage]\r\nbackground = false\r\n",
+    )
+    .unwrap();
+    let loaded = oncebitten::config::load(&sandbox.inputs()).unwrap();
+    assert!(!loaded.config.triage.background);
+}

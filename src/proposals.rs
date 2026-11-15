@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::{self, Inputs};
-use crate::evidence::Cluster;
+use crate::evidence::{self, Cluster};
 use crate::proof::{self, Replayed, Validity};
 use crate::replay::Verdict;
 use crate::rule::{self, Rule, Status};
@@ -16,6 +16,28 @@ pub const LIST_HINT: &str = "oncebitten proposals list";
 const PROJECT_RULES: [&str; 2] = [".oncebitten", "rules"];
 const PROPOSED_LINE: &str = "status = \"proposed\"";
 const ACTIVE_LINE: &str = "status = \"active\"";
+/// A triage lock older than this is taken over. It outlasts two host calls
+/// at the triage timeout plus a sandbox replay.
+pub const TRIAGE_LOCK_STALE_MS: i64 = 30 * 60 * 1000;
+
+/// A cluster due for background triage, and the repo it is proposed in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Due {
+    pub cluster: String,
+    pub repo: PathBuf,
+    /// The host that captured the event, as the store names it.
+    pub host: String,
+}
+
+/// What `triage_queued` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ran {
+    Recorded(Recorded),
+    /// Another triage of the cluster holds the lock.
+    Locked,
+    /// The cluster is already queued or rejected; the host was not asked.
+    Skipped,
+}
 
 /// What `record` did with one triage answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +50,77 @@ pub enum Recorded {
     AlreadyQueued,
     /// The cluster was rejected; nothing was written.
     Rejected,
+}
+
+/// Clusters that event `event_id` brought to their threshold, not yet queued
+/// or rejected, whose event ran inside a git repository.
+pub fn due(store: &Store, event_id: i64) -> Result<Vec<Due>> {
+    let clusters = evidence::load(store)?;
+    let mut out = Vec::new();
+    for cluster in evidence::reached_threshold(&clusters, event_id) {
+        if cluster.rejection.is_some() || store.proposal(&cluster.id)?.is_some() {
+            continue;
+        }
+        let Some(event) = cluster
+            .occurrences
+            .iter()
+            .find(|o| o.event.id == event_id)
+            .map(|o| &o.event)
+        else {
+            continue;
+        };
+        let repo = event
+            .repo
+            .as_deref()
+            .map(Path::new)
+            .filter(|repo| repo.is_absolute())
+            .and_then(config::repo_root);
+        if let Some(repo) = repo {
+            out.push(Due {
+                cluster: cluster.id.clone(),
+                repo,
+                host: event.host.clone(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Triages one cluster under its lock and queues the answer. `ask` runs the
+/// host; the lock is released whether or not it succeeds.
+pub fn triage_queued(
+    store: &Store,
+    inputs: &Inputs,
+    id: &str,
+    ask: &dyn Fn(&Cluster) -> Result<Answer>,
+    prove: &dyn Fn(&Rule) -> Replayed,
+    now: i64,
+) -> Result<Ran> {
+    if !store.try_lock_triage(id, now, TRIAGE_LOCK_STALE_MS)? {
+        return Ok(Ran::Locked);
+    }
+    let ran = triage_locked(store, inputs, id, ask, prove, now);
+    let unlocked = store.unlock_triage(id);
+    let ran = ran?;
+    unlocked?;
+    Ok(ran)
+}
+
+fn triage_locked(
+    store: &Store,
+    inputs: &Inputs,
+    id: &str,
+    ask: &dyn Fn(&Cluster) -> Result<Answer>,
+    prove: &dyn Fn(&Rule) -> Replayed,
+    now: i64,
+) -> Result<Ran> {
+    let clusters = evidence::load(store)?;
+    let cluster = evidence::find(&clusters, id)?;
+    if cluster.rejection.is_some() || store.proposal(id)?.is_some() {
+        return Ok(Ran::Skipped);
+    }
+    let answer = ask(cluster)?;
+    record(store, inputs, cluster, &answer, prove, now).map(Ran::Recorded)
 }
 
 /// Queues one triage answer for `cluster`. A draft becomes a rule directory
