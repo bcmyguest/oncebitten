@@ -32,7 +32,7 @@ Run all four before a commit. CI runs the same commands.
 - `src/attachments.rs`: pure matcher for attachment links in PR text; `gate pr` uses it for diff rules. `tests/gate_attachments.rs`.
 - `src/main.rs`: CLI (`config show`, `config path`, `rules sync|list|validate|retire|rollback`, `check`, `replay`, `gate`, `baseline update`, `exception add|list`, `doctor`, `capture`, `hooks install|uninstall`, `evidence list|show|reject`).
 - `src/lib.rs`: library root.
-- `src/store.rs`: SQLite event store (`events`, `signals`, `rejections`).
+- `src/store.rs`: SQLite event store (`events`, `signals`, `rejections`, `proposals`, `decisions`). Events expire; see `docs/evidence.md`.
 - `src/evidence.rs`: clusters signals into mistake classes, independent session counts, rejection memory. Backs `evidence list|show|reject`.
 - `src/signal.rs`: signal kinds and pure derivation from an event and its session history.
 - `src/host.rs`: per-host hook payload to normalized event (claude, codex, cursor, copilot, opencode, pi).

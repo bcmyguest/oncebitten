@@ -13,6 +13,7 @@ const PROJECT_DIR: &str = ".oncebitten";
 const CONFIG_FILE: &str = "config.toml";
 const GIT_MARKER: &str = ".git";
 const ENV_PREFIX: &str = "ONCEBITTEN_";
+const DEFAULT_TTL_DAYS: u32 = 30;
 const PATH_VARS: &[&str] = &[
     "HOME",
     "USERPROFILE",
@@ -211,6 +212,21 @@ impl Default for Capture {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Evidence {
+    /// Days a captured event lives unless a waiting proposal names it.
+    pub ttl_days: u32,
+}
+
+impl Default for Evidence {
+    fn default() -> Self {
+        Evidence {
+            ttl_days: DEFAULT_TTL_DAYS,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -220,10 +236,14 @@ pub struct Config {
     pub sandbox: Sandbox,
     pub rules: Rules,
     pub capture: Capture,
+    pub evidence: Evidence,
 }
 
 impl Config {
     fn validate(&self) -> Result<()> {
+        if self.evidence.ttl_days == 0 {
+            bail!("evidence.ttl_days must be at least 1");
+        }
         if self.capture.correction_phrases.is_empty() {
             bail!("capture.correction_phrases must list at least one phrase");
         }
