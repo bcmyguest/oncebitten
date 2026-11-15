@@ -23,8 +23,11 @@ pub struct Invocation {
     pub files: Vec<(PathBuf, String)>,
     /// The file the host writes its answer to, when it writes one.
     pub answer_file: Option<PathBuf>,
-    /// Stdin is closed: some hosts block on an open stdin.
-    pub stdin_null: bool,
+    /// Written to the host's stdin, which is then closed. `None` closes stdin
+    /// at once: some hosts block on an open stdin. The prompt goes here, not
+    /// in `args`: Rust refuses a multi-line argument to a Windows `.cmd`
+    /// wrapper, which is how npm installs hosts.
+    pub stdin: Option<String>,
     /// The host may print its answer and keep running; the caller must parse
     /// the output and kill the process.
     pub streaming: bool,
@@ -84,7 +87,7 @@ fn build(
 }
 
 fn claude(model: Option<&str>, prompt: &str, hooks_off: bool) -> Invocation {
-    let mut args = strings(&["-p", prompt, "--output-format", "json"]);
+    let mut args = strings(&["-p", "--output-format", "json"]);
     if hooks_off {
         args.extend(strings(&["--setting-sources", "project,local"]));
         args.extend(strings(&["--settings", HOOKS_OFF_SETTINGS]));
@@ -103,7 +106,7 @@ fn claude(model: Option<&str>, prompt: &str, hooks_off: bool) -> Invocation {
         args,
         files: Vec::new(),
         answer_file: None,
-        stdin_null: true,
+        stdin: Some(prompt.to_string()),
         streaming: false,
         reader: Reader::ClaudeJson,
     }
@@ -122,13 +125,12 @@ fn codex(model: Option<&str>, prompt: &str, workdir: &Path, hooks_off: bool) -> 
     args.push(path_arg(&schema_path));
     args.push("-o".into());
     args.push(path_arg(&answer_path));
-    args.push(prompt.to_string());
     Invocation {
         program: "codex".into(),
         args,
         files: vec![(schema_path, SCHEMA.to_string())],
         answer_file: Some(answer_path),
-        stdin_null: true,
+        stdin: Some(prompt.to_string()),
         streaming: false,
         reader: Reader::CodexFile,
     }
@@ -137,13 +139,12 @@ fn codex(model: Option<&str>, prompt: &str, workdir: &Path, hooks_off: bool) -> 
 fn opencode(model: Option<&str>, prompt: &str) -> Invocation {
     let mut args = strings(&["run", "--format", "json", "--agent", "plan"]);
     push_model(&mut args, "-m", model);
-    args.push(prompt.to_string());
     Invocation {
         program: "opencode".into(),
         args,
         files: Vec::new(),
         answer_file: None,
-        stdin_null: true,
+        stdin: Some(prompt.to_string()),
         streaming: true,
         reader: Reader::OpenCodeJsonl,
     }
