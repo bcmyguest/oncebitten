@@ -541,6 +541,7 @@ dependencies = [
  "globset",
  "include_dir",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
 ]

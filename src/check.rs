@@ -61,7 +61,12 @@ fn run_rule(resolved: &Resolved, repo: &Path, changed: &[String]) -> Outcome {
                 .collect();
             astgrep::run(file, &files)
         }
-        Check::Native { command } => native::run(command, &rule.fired_exit_codes, repo),
+        Check::Native { command } => native::run_matching(
+            command,
+            &rule.fired_exit_codes,
+            rule.fired_output_contains.as_deref(),
+            repo,
+        ),
         Check::Diff {
             when_changed,
             require_changed,

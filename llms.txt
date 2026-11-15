@@ -25,17 +25,17 @@ Precedence, highest first: project `.oncebitten/rules/<id>/`, then sources in co
     fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
 ```
 
-`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check`), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
+`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check`), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
 
 ## Engines
 
 - `ast-grep`: `check.yml` is an ast-grep rule. Runs on changed files whose language ast-grep recognises. Matches syntax only: no types, and macro arguments are not visible.
-- `native`: runs `command` in the repository root. Exit 0 is clean. An exit code in `fired_exit_codes` is fired, and its output is the message. Any other exit code, a missing binary or a signal is could-not-run.
+- `native`: runs `command` in the repository root. Exit 0 is clean. An exit code in `fired_exit_codes` is fired, and its output is the message. Any other exit code, a missing binary or a signal is could-not-run. With `fired_output_contains`, a listed exit code is fired only when the output contains that text; otherwise could-not-run.
 - `diff`: fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. Globs use `*` within one directory and `**` across directories.
 
 ## Shipped examples (status `proposed`, so `check` skips them)
 
-`py-utcnow`, `py-no-print`, `js-moment`, `ts-no-as-any` (ast-grep); `rust-no-unwrap` (native: `cargo clippy -- -D clippy::unwrap_used`, fired on exit 101); `arch-diagram`, `ui-screenshot` (diff).
+`py-utcnow`, `py-no-print`, `js-moment`, `ts-no-as-any` (ast-grep); `rust-no-unwrap` (native: `cargo clippy --message-format=json -- -D clippy::unwrap_used`, fired on exit 101 with `"code":"clippy::unwrap_used"` in the output); `arch-diagram`, `ui-screenshot` (diff).
 
 ## Example rule
 

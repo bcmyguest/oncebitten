@@ -301,3 +301,54 @@ status = \"active\"\nengine = \"native\"\ncommand = [\"cargo\", \"clippy\"]\nfir
 
     assert!(message.contains("must not contain 0"), "{message}");
 }
+
+#[test]
+fn native_rule_loads_its_fired_output_contains() {
+    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"block\"\n\
+status = \"active\"\nengine = \"native\"\ncommand = [\"cargo\", \"clippy\"]\nfired_exit_codes = [101]\n\
+fired_output_contains = \"unwrap_used\"\n";
+    let (_root, dir) = rule_dir("no-unwrap", toml);
+    let rule = load_rule(&dir).unwrap();
+
+    assert_eq!(rule.fired_output_contains.as_deref(), Some("unwrap_used"));
+}
+
+#[test]
+fn fired_output_contains_without_native_engine_is_an_error() {
+    let toml = format!("{AST_GREP_RULE}fired_output_contains = \"x\"\n");
+    let (_root, dir) = rule_dir("no-unwrap", &toml);
+    let message = error_of(&dir);
+
+    assert!(
+        message.contains("fired_output_contains is only for engine = \"native\""),
+        "{message}"
+    );
+}
+
+#[test]
+fn fired_output_contains_without_fired_exit_codes_is_an_error() {
+    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"block\"\n\
+status = \"active\"\nengine = \"native\"\ncommand = [\"cargo\", \"clippy\"]\n\
+fired_output_contains = \"unwrap_used\"\n";
+    let (_root, dir) = rule_dir("no-unwrap", toml);
+    let message = error_of(&dir);
+
+    assert!(
+        message.contains("fired_output_contains needs fired_exit_codes"),
+        "{message}"
+    );
+}
+
+#[test]
+fn empty_fired_output_contains_is_an_error() {
+    let toml = "id = \"no-unwrap\"\ndescription = \"Do not call unwrap.\"\nmode = \"block\"\n\
+status = \"active\"\nengine = \"native\"\ncommand = [\"cargo\", \"clippy\"]\nfired_exit_codes = [101]\n\
+fired_output_contains = \"\"\n";
+    let (_root, dir) = rule_dir("no-unwrap", toml);
+    let message = error_of(&dir);
+
+    assert!(
+        message.contains("fired_output_contains is empty"),
+        "{message}"
+    );
+}

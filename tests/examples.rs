@@ -134,6 +134,47 @@ fn rust_no_unwrap_fires_through_clippy_on_bad_and_not_on_fixed() {
     assert_clean(&fired("fixed.rs"), "rust-no-unwrap fixed");
 }
 
+fn rust_no_unwrap_outcome(source: &str) -> Outcome {
+    let rule = load("rust-no-unwrap");
+    let Check::Native { command } = &rule.check else {
+        panic!("rust-no-unwrap is not a native rule");
+    };
+    let crate_dir = TempDir::new().unwrap();
+    fs::write(
+        crate_dir.path().join("Cargo.toml"),
+        "[package]\nname = \"example\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::create_dir(crate_dir.path().join("src")).unwrap();
+    fs::write(crate_dir.path().join("src/main.rs"), source).unwrap();
+    native::run_matching(
+        command,
+        &rule.fired_exit_codes,
+        rule.fired_output_contains.as_deref(),
+        crate_dir.path(),
+    )
+}
+
+#[test]
+fn rust_no_unwrap_needs_the_lint_diagnostic_to_fire() {
+    let bad = fs::read_to_string(fixture("rust-no-unwrap", "bad.rs")).unwrap();
+    let fixed = fs::read_to_string(fixture("rust-no-unwrap", "fixed.rs")).unwrap();
+
+    assert_fires(&rust_no_unwrap_outcome(&bad), "rust-no-unwrap bad");
+    assert_clean(&rust_no_unwrap_outcome(&fixed), "rust-no-unwrap fixed");
+}
+
+#[test]
+fn rust_no_unwrap_crate_that_fails_to_compile_could_not_run() {
+    let broken = "fn main() {\n    let x: i32 = \"not a number\";\n}\n";
+
+    assert!(
+        matches!(rust_no_unwrap_outcome(broken), Outcome::CouldNotRun(_)),
+        "{:?}",
+        rust_no_unwrap_outcome(broken)
+    );
+}
+
 #[test]
 fn arch_diagram_fires_on_bad_and_not_on_fixed() {
     assert_fires(&run_diff("arch-diagram", "bad.diff"), "arch-diagram bad");

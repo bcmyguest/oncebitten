@@ -128,3 +128,70 @@ fn signal_termination_could_not_run() {
         Outcome::CouldNotRun(_)
     ));
 }
+
+fn run_matching(command: &[String], fired: &[i32], needle: &str, cwd: &Path) -> Outcome {
+    native::run_matching(command, fired, Some(needle), cwd)
+}
+
+#[test]
+fn listed_exit_code_without_the_expected_output_could_not_run() {
+    let dir = TempDir::new().unwrap();
+
+    assert!(matches!(
+        run_matching(
+            &exit_with(3, "compile error"),
+            &[3],
+            "unwrap used",
+            dir.path()
+        ),
+        Outcome::CouldNotRun(_)
+    ));
+}
+
+#[test]
+fn listed_exit_code_with_the_expected_output_fires() {
+    let dir = TempDir::new().unwrap();
+
+    match run_matching(
+        &exit_with(3, "unwrap used"),
+        &[3],
+        "unwrap used",
+        dir.path(),
+    ) {
+        Outcome::Fired(findings) => assert_eq!(findings[0].message, "unwrap used"),
+        other => panic!("expected Fired, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn matched_json_diagnostic_is_reported_as_its_rendered_text() {
+    let dir = TempDir::new().unwrap();
+    let json = r#"{"reason":"compiler-message","message":{"code":{"code":"x::y"},"rendered":"error: found it"}}"#;
+    let command = vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        format!("printf '%s\\n' '{json}'; exit 3"),
+    ];
+
+    match run_matching(&command, &[3], r#""code":"x::y""#, dir.path()) {
+        Outcome::Fired(findings) => assert_eq!(findings[0].message, "error: found it"),
+        other => panic!("expected Fired, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unlisted_exit_code_with_the_expected_output_could_not_run() {
+    let dir = TempDir::new().unwrap();
+
+    assert!(matches!(
+        run_matching(
+            &exit_with(4, "unwrap used"),
+            &[3],
+            "unwrap used",
+            dir.path()
+        ),
+        Outcome::CouldNotRun(_)
+    ));
+}

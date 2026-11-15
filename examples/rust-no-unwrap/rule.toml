@@ -4,5 +4,6 @@ mode = "block"
 status = "proposed"
 engine = "native"
 language = "rust"
-command = ["cargo", "clippy", "--quiet", "--", "-D", "clippy::unwrap_used"]
+command = ["cargo", "clippy", "--quiet", "--message-format=json", "--", "-D", "clippy::unwrap_used"]
 fired_exit_codes = [101]
+fired_output_contains = "\"code\":\"clippy::unwrap_used\""
