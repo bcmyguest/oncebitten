@@ -185,3 +185,80 @@ fn unverified_hosts_are_refused() {
         assert!(!path.exists());
     }
 }
+
+mod absolute_exe {
+    use std::path::Path;
+
+    use oncebitten::hooks::{self, Shell};
+    use oncebitten::host::Host;
+
+    #[test]
+    fn current_exe_is_absolute() {
+        assert!(hooks::current_exe().unwrap().is_absolute());
+    }
+
+    #[test]
+    fn posix_command_quotes_the_absolute_path() {
+        let exe = Path::new("/opt/my tools/oncebitten");
+        let command = hooks::capture_command(exe, Host::Claude, Shell::Posix);
+        assert_eq!(command, "'/opt/my tools/oncebitten' capture --host claude");
+    }
+
+    #[test]
+    fn posix_command_escapes_single_quotes() {
+        let command =
+            hooks::capture_command(Path::new("/o'x/oncebitten"), Host::Claude, Shell::Posix);
+        assert_eq!(command, r"'/o'\''x/oncebitten' capture --host claude");
+    }
+
+    #[test]
+    fn cmd_command_double_quotes_a_windows_path() {
+        let exe = Path::new(r"C:\Program Files\oncebitten\oncebitten.exe");
+        let command = hooks::capture_command(exe, Host::Claude, Shell::Cmd);
+        assert_eq!(
+            command,
+            r#""C:\Program Files\oncebitten\oncebitten.exe" capture --host claude"#
+        );
+        assert!(!command.contains("${"));
+    }
+
+    #[test]
+    fn powershell_command_uses_the_call_operator() {
+        let exe = Path::new(r"C:\Users\b\bin\oncebitten.exe");
+        let command = hooks::capture_command(exe, Host::Claude, Shell::PowerShell);
+        assert_eq!(
+            command,
+            r"& 'C:\Users\b\bin\oncebitten.exe' capture --host claude"
+        );
+    }
+
+    #[test]
+    fn install_with_writes_the_command_and_reinstall_is_idempotent() {
+        let dir = std::env::temp_dir().join(format!("ob-abs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        let exe = hooks::current_exe().unwrap();
+        let command = hooks::capture_command(&exe, Host::Claude, Shell::Posix);
+        assert!(hooks::install_with(Host::Claude, &path, &command).unwrap());
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains(&exe.display().to_string()));
+        assert!(!hooks::install_with(Host::Claude, &path, &command).unwrap());
+        assert!(hooks::uninstall(Host::Claude, &path).unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn install_replaces_a_path_command_with_the_absolute_one() {
+        let dir = std::env::temp_dir().join(format!("ob-mig-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        assert!(hooks::install(Host::Claude, &path).unwrap());
+        let command =
+            hooks::capture_command(Path::new("/usr/bin/oncebitten"), Host::Claude, Shell::Posix);
+        assert!(hooks::install_with(Host::Claude, &path, &command).unwrap());
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written.matches("/usr/bin/oncebitten").count(), 3);
+        assert!(hooks::uninstall(Host::Claude, &path).unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

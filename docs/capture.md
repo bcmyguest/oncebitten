@@ -37,7 +37,7 @@ oncebitten hooks install --host claude --scope project
 oncebitten hooks uninstall --host claude --scope user
 ```
 
-- User scope edits `$HOME/.claude/settings.json`. Project scope edits `./.claude/settings.json`.
-- Install adds one `oncebitten capture --host claude` command to `UserPromptSubmit`, `PostToolUse` and `PostToolUseFailure`. Running it again adds nothing.
+- User scope edits `<home>/.claude/settings.json`; `<home>` is `HOME`, or on Windows `USERPROFILE`, then `HOMEDRIVE`+`HOMEPATH`. Project scope edits `./.claude/settings.json`.
+- Install adds one command to `UserPromptSubmit`, `PostToolUse` and `PostToolUseFailure`. The command calls this executable by absolute, canonicalized path (`std::env::current_exe`), so it does not depend on `PATH`. The path is single-quoted on Unix and double-quoted on Windows; no `${VAR:-default}` syntax. Running install again adds nothing; after the binary moves, it rewrites the path in place.
 - Other keys and hooks stay as they are. Uninstall removes only the entries with that command.
 - Only `claude` is accepted.

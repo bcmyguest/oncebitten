@@ -91,7 +91,9 @@ fn run_hooks(action: HooksAction) -> Result<()> {
         .context("no absolute home directory in HOME, USERPROFILE or HOMEDRIVE+HOMEPATH")?;
     let path = hooks::settings_path(scope, &home, &inputs.cwd);
     let changed = if install {
-        hooks::install(host, &path)?
+        let exe = hooks::current_exe()?;
+        let shell = hooks::default_shell(Platform::current());
+        hooks::install_with(host, &path, &hooks::capture_command(&exe, host, shell))?
     } else {
         hooks::uninstall(host, &path)?
     };

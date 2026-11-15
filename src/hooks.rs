@@ -4,12 +4,20 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Map, Value};
 
+use crate::config::Platform;
 use crate::host::Host;
 
 const SETTINGS_DIR: &str = ".claude";
 const SETTINGS_FILE: &str = "settings.json";
-const COMMAND: &str = "oncebitten capture --host claude";
+const BIN_NAME: &str = "oncebitten";
 const HOOK_EVENTS: &[&str] = &["UserPromptSubmit", "PostToolUse", "PostToolUseFailure"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shell {
+    Posix,
+    Cmd,
+    PowerShell,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Scope {
@@ -25,7 +33,42 @@ pub fn settings_path(scope: Scope, home: &Path, project: &Path) -> PathBuf {
     base.join(SETTINGS_DIR).join(SETTINGS_FILE)
 }
 
+pub fn current_exe() -> Result<PathBuf> {
+    let exe = std::env::current_exe().context("cannot locate the oncebitten executable")?;
+    dunce::canonicalize(&exe).with_context(|| format!("cannot resolve {}", exe.display()))
+}
+
+pub fn capture_command(exe: &Path, host: Host, shell: Shell) -> String {
+    let exe = exe.display().to_string();
+    let quoted = match shell {
+        Shell::Posix => format!("'{}'", exe.replace('\'', r"'\''")),
+        Shell::Cmd => format!("\"{exe}\""),
+        Shell::PowerShell => format!("& '{}'", exe.replace('\'', "''")),
+    };
+    format!("{quoted} {}", capture_args(host))
+}
+
+pub fn default_shell(platform: Platform) -> Shell {
+    match platform {
+        Platform::Unix => Shell::Posix,
+        Platform::Windows => Shell::Cmd,
+    }
+}
+
+/// Bare command resolved through `PATH`. The CLI never writes it.
+pub fn path_command(host: Host) -> String {
+    format!("{BIN_NAME} {}", capture_args(host))
+}
+
+fn capture_args(host: Host) -> String {
+    format!("capture --host {}", host.name())
+}
+
 pub fn install(host: Host, path: &Path) -> Result<bool> {
+    install_with(host, path, &path_command(host))
+}
+
+pub fn install_with(host: Host, path: &Path, command: &str) -> Result<bool> {
     ensure_claude(host)?;
     let mut value = load(path)?;
     let root = value
@@ -43,8 +86,10 @@ pub fn install(host: Host, path: &Path) -> Result<bool> {
             .or_insert_with(|| json!([]))
             .as_array_mut()
             .with_context(|| format!("`hooks.{event}` in {} is not an array", path.display()))?;
-        if !groups.iter().any(is_ours_group) {
-            groups.push(json!({"hooks": [{"type": "command", "command": COMMAND}]}));
+        if groups.iter().any(is_ours_group) {
+            changed |= refresh_ours(groups, command);
+        } else {
+            groups.push(json!({"hooks": [{"type": "command", "command": command}]}));
             changed = true;
         }
     }
@@ -96,8 +141,30 @@ fn is_ours_group(group: &Value) -> bool {
         .is_some_and(|hooks| hooks.iter().any(is_ours))
 }
 
+fn refresh_ours(groups: &mut [Value], command: &str) -> bool {
+    let mut changed = false;
+    for hook in groups
+        .iter_mut()
+        .filter_map(|group| group["hooks"].as_array_mut())
+        .flatten()
+        .filter(|hook| is_ours(hook))
+    {
+        if hook["command"] != command {
+            hook["command"] = json!(command);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Matches any command `capture_command` or `path_command` writes, whatever the
+/// quoting or executable path (a moved or renamed binary still counts as ours).
 fn is_ours(hook: &Value) -> bool {
-    hook["command"] == COMMAND
+    hook["command"].as_str().is_some_and(|command| {
+        command
+            .strip_suffix(&capture_args(Host::Claude))
+            .is_some_and(|head| !head.trim().is_empty())
+    })
 }
 
 fn remove_ours(hooks: &mut Map<String, Value>) -> bool {
