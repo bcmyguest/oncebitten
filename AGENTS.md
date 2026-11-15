@@ -44,6 +44,8 @@ Run all four before a commit. CI runs the same commands.
 - `.pre-commit-hooks.yaml`: the `oncebitten-gate` pre-commit hook. `templates/`: CI gate jobs (GitHub Actions, GitLab CI, Azure Pipelines). `tests/gate.rs` checks both call real commands.
 - `docs/capture.md`: signals, host support, hook install. Keep it in step with `src/signal.rs`, `src/host.rs` and `src/hooks.rs`.
 - `docs/evidence.md`: clusters, counts, provenance, rejections. Keep it in step with `src/evidence.rs`. `tests/evidence.rs` covers library and CLI.
+- `docs/roadmap.md`: milestones and step status. Keep it in step with PLAN.md "Steps" and "Milestones and review".
+- `site/`: Starlight docs site built from `docs/*.md`. `site/scripts/lib/docs.mjs` `PAGES` lists every page and the sidebar; add a new doc there. `cd site && pnpm test && pnpm build` checks links. `.github/workflows/pages.yml` deploys it to https://bcmyguest.github.io/oncebitten/.
 - `docs/research/`: written by other agents. Do not edit.
 
 ## Conventions

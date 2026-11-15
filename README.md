@@ -9,6 +9,8 @@
 </picture>
 </p>
 
+Docs: https://bcmyguest.github.io/oncebitten/
+
 Status: pre-alpha. Capture, evidence clustering, `check`, `replay` and the gate work; triage and rule proposals are in progress ([PLAN.md](PLAN.md)).
 
 ## Install
