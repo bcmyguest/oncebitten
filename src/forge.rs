@@ -264,10 +264,20 @@ impl Forge for GitHub {
     }
 }
 
-/// `glab`. Flags from https://docs.gitlab.com/cli/mr/list/, /create/ and
-/// /view/ (the view page lists `-c, --comments` and `-F, --output text|json`). The JSON field names (`iid`, `web_url`, `description`, `notes`)
-/// and the `create` output format are not documented there and are unverified:
-/// `glab` is not installed here, so nothing in this backend has run.
+/// `glab` (v1.130.0). Flags checked against `glab mr list|create|view --help` and
+/// https://gitlab.com/gitlab-org/cli/-/tree/v1.130.0/internal/commands/mr.
+/// - `mr list --output json` prints the `[]gitlab.BasicMergeRequest` array
+///   (`list/mr_list.go`, `PrintJSON(mergeRequests)`); `iid`, `web_url`, `description`
+///   come from `merge_requests.go` in gitlab.com/gitlab-org/api/client-go v3.46.1.
+///   Without `--all`/`--closed`/`--merged` the list holds opened MRs only.
+/// - `mr create` has no JSON output. It prints `mrutils.DisplayMR`: the bare
+///   `web_url` when stdout is not a TTY, else `!iid title (branch)` then the URL
+///   on the last line (`create/mr_create.go`, `mrutils/mrutils.go`).
+/// - `mr view --output json` has no top-level `notes`. With `--comments` it prints
+///   the merge request plus a `Discussions` array (`view/mr_view.go`,
+///   `MRWithDiscussions`); each discussion has `notes[]` with `body` and `system`
+///   (`discussions.go` in client-go). `read` keeps non-system notes. View fetches
+///   one page of discussions (`--per-page`, default 20).
 struct GitLab(Cli);
 
 #[derive(Deserialize)]
@@ -279,6 +289,12 @@ struct GlabMr {
 #[derive(Deserialize)]
 struct GlabView {
     description: Option<String>,
+    #[serde(default, rename = "Discussions")]
+    discussions: Vec<GlabDiscussion>,
+}
+
+#[derive(Deserialize)]
+struct GlabDiscussion {
     #[serde(default)]
     notes: Vec<GlabNote>,
 }
@@ -286,6 +302,8 @@ struct GlabView {
 #[derive(Deserialize)]
 struct GlabNote {
     body: String,
+    #[serde(default)]
+    system: bool,
 }
 
 impl Forge for GitLab {
@@ -329,16 +347,33 @@ impl Forge for GitLab {
         let view: GlabView = serde_json::from_str(&text).context("parsing glab mr view")?;
         Ok(PrText {
             description: view.description.unwrap_or_default(),
-            comments: view.notes.into_iter().map(|n| n.body).collect(),
+            comments: view
+                .discussions
+                .into_iter()
+                .flat_map(|discussion| discussion.notes)
+                .filter(|note| !note.system)
+                .map(|note| note.body)
+                .collect(),
         })
     }
 }
 
-/// `az repos pr`. Flags from https://learn.microsoft.com/en-us/cli/azure/repos/pr
-/// (the group page; the per-command pages would not load here). Unverified:
-/// `az` is not installed here. The `pullRequestId` and `_links.web.href` fields
-/// are assumed. `az repos pr` has no comment listing, so `read` returns the
-/// description only.
+/// `az repos pr` (azure-cli 2.92.0, azure-devops extension 1.0.10). Flags checked
+/// against `az repos pr list|create|show --help`; behavior against the extension
+/// source `azext_devops/dev/repos/pull_request.py`. `az repos pr` has no comment
+/// listing, so `read` returns the description only.
+///
+/// KNOWN DEFECT, not yet fixed: the code reads `_links.web.href`, but the Azure
+/// DevOps REST GitPullRequest `_links` holds self, repository, workItems,
+/// sourceBranch, targetBranch, sourceCommit, targetCommit, createdBy and
+/// iterations, with no `web`
+/// (https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.1).
+/// `pr list` also omits `_links` unless `--include-links` is set. The extension
+/// itself builds the URL as `<org>/<project>/_git/<repo>/pullrequest/<id>`
+/// (`_open_pull_request`). Its v5_0 SDK model drops `repository.webUrl`, but keeps
+/// `repository.remoteUrl`, the repository web URL with an optional `user@`.
+/// `tests/forge.rs::azure_find_open_uses_source_branch_and_active_status` asserts
+/// the `_links.web.href` shape, so the fix awaits a decision on that test.
 struct Azure(Cli);
 
 #[derive(Deserialize)]

@@ -225,3 +225,54 @@ fn azure_find_open_uses_source_branch_and_active_status() {
         ])
     );
 }
+
+#[test]
+fn gitlab_read_flattens_discussion_notes_and_skips_system_notes() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = fake_cli(dir.path(), "glab");
+    // Shape of `glab mr view --comments --output json`: the merge request with a
+    // `Discussions` array appended, each discussion holding `notes`.
+    fs::write(
+        dir.path().join("reply"),
+        r#"{"iid":4,"description":"desc","Discussions":[
+            {"id":"a","individual_note":true,"notes":[{"body":"first","system":false}]},
+            {"id":"b","individual_note":false,"notes":[
+                {"body":"added 1 commit","system":true},
+                {"body":"second","system":false},
+                {"body":"reply","system":false}]}]}"#,
+    )
+    .unwrap();
+    let backend = forge::backend_with(Kind::Gitlab, program, dir.path());
+
+    let text = backend.read(4).unwrap();
+
+    assert_eq!(text.description, "desc");
+    assert_eq!(text.comments, vec!["first", "second", "reply"]);
+    assert_eq!(
+        calls(dir.path())[0],
+        argv(&["mr", "view", "4", "--output", "json", "--comments"])
+    );
+}
+
+#[test]
+fn gitlab_open_takes_the_url_from_the_last_output_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = fake_cli(dir.path(), "glab");
+    fs::write(
+        dir.path().join("reply"),
+        "!17 Add a rule (feat/x)\n https://gitlab.com/g/r/-/merge_requests/17\n",
+    )
+    .unwrap();
+    let backend = forge::backend_with(Kind::Gitlab, program, dir.path());
+    let request = NewPr {
+        head: "feat/x".into(),
+        base: "main".into(),
+        title: "Add a rule".into(),
+        body: "body".into(),
+    };
+
+    let created = backend.open(&request).unwrap();
+
+    assert_eq!(created.number, 17);
+    assert_eq!(created.url, "https://gitlab.com/g/r/-/merge_requests/17");
+}
