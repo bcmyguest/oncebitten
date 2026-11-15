@@ -3,7 +3,9 @@
 # `default_install_hook_types` makes a plain `pre-commit install` wire BOTH the
 # pre-commit stage (fmt/clippy below) and the commit-msg stage (Conventional
 # Commits check) — the latter keeps subjects machine-parseable for release notes.
-default_install_hook_types: [pre-commit, commit-msg]
+# The pre-push stage runs this repo's own gate from source (dogfooding).
+# Install with `prek install` (or `pre-commit install`).
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.4.0
@@ -24,3 +26,10 @@ repos:
         language: system
         files: \.rs$
         pass_filenames: false
+      - id: oncebitten-gate-dogfood
+        name: oncebitten gate (from source)
+        entry: cargo run -q --bin oncebitten -- gate pre-push
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
