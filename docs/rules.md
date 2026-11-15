@@ -11,6 +11,7 @@ A rule is a directory. Rules come from three layers, and the project layer wins.
   fixtures/
     bad.<ext>        # exactly one
     fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
+  corpus/            # replay only: files that must stay clean
 ```
 
 `id` must equal the directory name.
@@ -73,7 +74,7 @@ Shipped examples:
 | `arch-diagram` | diff | `src/**/mod.rs` or `src/lib.rs` changed without `docs/architecture/*.svg` or `*.png` |
 | `ui-screenshot` | diff | `src/ui/**` changed without `docs/screenshots/*.png` |
 
-Native rules fire on exit 101, which cargo also returns for a compile error. The `rust-no-unwrap` fixtures are whole crate roots (`src/main.rs`) for the rule's own tests. `check` runs the rule in the repository root.
+Native rules fire only when the command exits with a code in `fired_exit_codes` and its output contains `fired_output_contains`, if set. `rust-no-unwrap` sets both: it fires on exit 101 with the `"code":"clippy::unwrap_used"` JSON diagnostic. Cargo also exits 101 on a compile error, so that case is could-not-run. The `rust-no-unwrap` fixtures are whole crate roots (`src/main.rs`) for the rule's own tests. `check` runs the rule in the repository root.
 
 A project rule with a bare id equal to a source rule's id is an error unless it sets `overrides`. `overrides` must name an existing id. A project rule with `overrides = "team/x"` replaces `team/x`. Two sources defining the same qualified id is an error.
 
@@ -106,3 +107,14 @@ Git runs through the `git` binary.
 `--ci` never fetches. It requires each source clone to sit at the commit in `rules.lock` (`git rev-parse HEAD`). A missing lockfile, a missing entry, or a mismatch exits 2.
 
 Without `--ci`, a source that is not cloned exits 2 and asks for `rules sync`.
+
+## Replay
+
+`oncebitten::replay` proves an ast-grep rule against its files. It takes a rule directory with `check.yml`, `fixtures/bad.*`, `fixtures/fixed.*` and a non-empty `corpus/`.
+
+- The rule is proven when the checker reports `fired` for `bad.*` and `clean` for `fixed.*` and every `corpus/` file.
+- The checker is the `oncebitten-checker` binary. It prints one JSON line and exits 0. A result counts only when the JSON, the target path and exit 0 agree. Any other result is could-not-run. An exit code alone never means fired.
+- Missing rule file, fixture or corpus, a missing checker, a sandbox or gateway failure, and a checker error are could-not-run. A rule that misses `bad.*`, or fires on `fixed.*` or a corpus file, is rejected.
+- `OpenShell` runs the replay in an OpenShell sandbox. It builds an image per replay from `nvcr.io/nvidia/base/ubuntu:24.04` with the checker, rule and files baked in, creates the sandbox with a read-only policy, runs the checker once per file, and deletes the sandbox. The gateway limits sandbox names to 19 characters.
+- Build the checker for the image as a static musl binary: `cargo build --release --target x86_64-unknown-linux-musl --bin oncebitten-checker` (needs a musl C toolchain; the replay tests used a `rust:1-alpine` container).
+- Replay supports ast-grep rules only. No CLI command runs it yet.

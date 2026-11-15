@@ -23,6 +23,7 @@ Precedence, highest first: project `.oncebitten/rules/<id>/`, then sources in co
   fixtures/
     bad.<ext>        # exactly one
     fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
+  corpus/            # replay only: files that must stay clean
 ```
 
 `rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check`), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `fired_output_contains` (native, with `fired_exit_codes`; fires only when stdout or stderr contains this text), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
