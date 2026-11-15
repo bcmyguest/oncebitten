@@ -57,6 +57,7 @@ fn matching_lines(output: &Output, needle: &str) -> Vec<String> {
         .lines()
         .chain(stderr.lines())
         .filter(|line| line.contains(needle))
+        .map(str::trim_end)
         .map(rendered)
         .collect()
 }
