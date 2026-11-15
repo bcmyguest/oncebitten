@@ -10,7 +10,7 @@ A rule is a directory. Rules come from three layers, and the project layer wins.
   check.yml          # ast-grep only
   fixtures/
     bad.<ext>        # exactly one
-    fixed.<ext>      # exactly one
+    fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
 ```
 
 `id` must equal the directory name.
@@ -38,7 +38,7 @@ Engines:
 
 - `ast-grep`: needs `check.yml`.
 - `native`: runs `command` in the repository root. Takes no check file. Exit 0 is clean. An exit code listed in `fired_exit_codes` is a fired finding, and its output (stderr, else stdout) is the message. Any other exit code, a missing binary, or termination by signal is could-not-run. With no `fired_exit_codes`, the rule never fires.
-- `diff`: takes no check file. It takes a list of changed paths, relative to the repository root with `/` separators. It fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. The finding names the matching paths and the required globs. Globs use `globset` syntax with `literal_separator`: `*` stays within one directory, `**` crosses directories. An invalid glob is could-not-run.
+- `diff`: takes no check file. Its fixtures list changed paths, one per line, relative to the repository root with `/` separators. `check` passes the paths from `git diff --name-only <base>` plus untracked files. It fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. The finding names the matching paths and the required globs. Globs use `globset` syntax with `literal_separator`: `*` stays within one directory, `**` crosses directories. An invalid glob is could-not-run.
 
 Unknown keys fail the load. Every error names the file.
 
@@ -48,9 +48,25 @@ Unknown keys fail the load. Every error names the file.
 |---|---|---|
 | project | `<repo>/.oncebitten/rules/<id>/` | `<id>` |
 | source | `[[rules.sources]]` clone, `<name>` in config | `<source>/<id>` |
-| examples | optional directory, not passed by the CLI yet | `examples/<id>` |
+| examples | shipped in the binary (`examples/` in the repository) | `examples/<id>` |
 
 Precedence: project, then sources in config order, then examples.
+
+The examples layer is loaded by `check` only. `rules list` and `rules validate` do not show it. All shipped examples have `status = "proposed"`, so `check` skips them. Copy one into `.oncebitten/rules/` and set `status = "active"` to run it.
+
+Shipped examples:
+
+| Id | Engine | Fires on |
+|---|---|---|
+| `py-utcnow` | ast-grep (python) | `datetime.utcnow()` |
+| `py-no-print` | ast-grep (python) | `print(...)` |
+| `js-moment` | ast-grep (javascript) | importing or requiring `moment` |
+| `ts-no-as-any` | ast-grep (typescript) | `x as any` |
+| `rust-no-unwrap` | native, `cargo clippy -D clippy::unwrap_used` | `.unwrap()` in a crate (exit 101 is fired) |
+| `arch-diagram` | diff | `src/**/mod.rs` or `src/lib.rs` changed without `docs/architecture/*.svg` or `*.png` |
+| `ui-screenshot` | diff | `src/ui/**` changed without `docs/screenshots/*.png` |
+
+Native rules fire on exit 101, which cargo also returns for a compile error. The `rust-no-unwrap` fixtures are whole crate roots (`src/main.rs`) for the rule's own tests. `check` runs the rule in the repository root.
 
 A project rule with a bare id equal to a source rule's id is an error unless it sets `overrides`. `overrides` must name an existing id. A project rule with `overrides = "team/x"` replaces `team/x`. Two sources defining the same qualified id is an error.
 
@@ -76,6 +92,9 @@ Git runs through the `git` binary.
 | `oncebitten rules sync` | Clone or fetch each source, check out `rev` or `origin/HEAD`, write `rules.lock` | 0 on success |
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
+| `oncebitten check [--base <rev>]` | Run each `active` rule against changes since `<rev>` (default `HEAD`), print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |
+
+`check` prints a could-not-run reason to stderr as `<id>: could not run: <reason>`. It reads the repository the current directory is in.
 
 `--ci` never fetches. It requires each source clone to sit at the commit in `rules.lock` (`git rev-parse HEAD`). A missing lockfile, a missing entry, or a mismatch exits 2.
 

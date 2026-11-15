@@ -1,0 +1,50 @@
+# oncebitten
+
+oncebitten turns repeated agent mistakes into rules that git enforces. A rule is a directory. `oncebitten check` runs the active rules against changed files and reports findings.
+
+## Commands
+
+- `oncebitten check [--base <rev>]`: run each `active` rule against changes since `<rev>` (default `HEAD`). Changes are the tracked diff plus untracked files. Exit 0 clean, 1 a rule fired, 2 a rule could not run or rules did not load (2 wins over 1). Findings print to stdout as `<id>: <path>[:<line>]: <message>`. Could-not-run reasons print to stderr as `<id>: could not run: <reason>`.
+- `oncebitten rules sync`: clone each source to the data directory and write `.oncebitten/rules.lock`.
+- `oncebitten rules list [--ci]`: print `id  mode  status  origin` per rule.
+- `oncebitten rules validate [--ci]`: load and resolve every rule.
+- `oncebitten config show|path`: show merged configuration.
+
+## Rule layers
+
+Precedence, highest first: project `.oncebitten/rules/<id>/`, then sources in config order, then shipped examples (used by `check` only). A project rule with the id of a source rule needs `overrides = "<source>/<id>"` and a `reason`.
+
+## Rule directory
+
+```
+<rule-id>/
+  rule.toml
+  check.yml          # ast-grep only
+  fixtures/
+    bad.<ext>        # exactly one
+    fixed.<ext>      # exactly one; diff rules use bad.diff and fixed.diff
+```
+
+`rule.toml` fields: `id` (equal to the directory name), `description`, `mode` (`block` or `steer`), `status` (`proposed`, `active`, `retired`; only `active` runs in `check`), `engine` (`ast-grep`, `native`, `diff`), `language` (optional), `overrides` and `reason`, `command` (native), `fired_exit_codes` (native, non-zero integers), `when_changed` and `require_changed` (diff, non-empty glob arrays). Unknown keys fail the load.
+
+## Engines
+
+- `ast-grep`: `check.yml` is an ast-grep rule. Runs on changed files whose language ast-grep recognises. Matches syntax only: no types, and macro arguments are not visible.
+- `native`: runs `command` in the repository root. Exit 0 is clean. An exit code in `fired_exit_codes` is fired, and its output is the message. Any other exit code, a missing binary or a signal is could-not-run.
+- `diff`: fires when a `when_changed` glob matches a changed path and no `require_changed` glob matches any changed path. Globs use `*` within one directory and `**` across directories.
+
+## Shipped examples (status `proposed`, so `check` skips them)
+
+`py-utcnow`, `py-no-print`, `js-moment`, `ts-no-as-any` (ast-grep); `rust-no-unwrap` (native: `cargo clippy -- -D clippy::unwrap_used`, fired on exit 101); `arch-diagram`, `ui-screenshot` (diff).
+
+## Example rule
+
+```toml
+id = "ui-screenshot"
+description = "UI changes need a screenshot."
+mode = "block"
+status = "active"
+engine = "diff"
+when_changed = ["src/ui/**"]
+require_changed = ["docs/screenshots/*.png"]
+```
