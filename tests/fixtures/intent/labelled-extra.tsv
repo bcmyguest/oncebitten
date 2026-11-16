@@ -1,0 +1,138 @@
+# split	label	text
+# Hand-written by a language model (Claude) to imitate agent-session user messages. Not real user data.
+dev	rule-request	from now on pls use `cargo nextest` not cargo test
+test	rule-request	always ask me before you run `git push --force`. always.
+dev	rule-request	rule: no unwrap() in src/, only in tests
+test	rule-request	remember for this repo - tabs only in the Makefile, spaces everywhere else
+dev	rule-request	in future dont touch the lockfile unless i say so
+test	rule-request	pls make it a rule that every new endpoint gets an integration test
+dev	rule-request	never use `rm -rf` in scripts, use trash-cli
+test	rule-request	going fwd commit msgs in english only even if i write to you in german
+dev	rule-request	add this to your rules: run `just check` before you say something is done
+test	rule-request	Next time when you write migration, please make always also the down migration.
+dev	rule-request	dont ever log the api token, mask it like `sk-****`
+test	rule-request	for all python here use uv run, never bare pip install
+dev	rule-request	can you remember that our CI is on gitlab not github, so its .gitlab-ci.yml
+test	rule-request	Every time you add env var, put it in .env.example too
+dev	rule-request	keep PRs small from now on, max ~300 lines of diff
+test	rule-request	i want you to stop generating mocks for the db, always use the testcontainers postgres
+dev	rule-request	standing order: headings in docs/ use sentence case
+test	rule-request	Please in this project you must put `#[tracing::instrument]` on all public async fns.
+dev	rule-request	never bump MSRV without asking me first
+test	rule-request	remember: `src/generated/*` is codegen output, dont hand edit it ever
+dev	correction	no no, i said `--release` not `--profile release`
+test	correction	thats wrong, take `Option<&str>` not `&Option<String>`
+dev	correction	u reverted the wrong commit, it was a3f9c1 not a3f9c2
+test	correction	not like that. the fn should return Result, you made it panic
+dev	correction	error[E0382]: borrow of moved value: `cfg` -- your change did this, you moved cfg into the closure
+test	correction	you put the test in src/lib.rs, I wanted it in tests/
+dev	correction	wrong env, this is staging not prod, change the url back
+test	correction	hm no, the column is `created_at` not `createdAt`
+dev	correction	you have misunderstand me, I want the flag default ON, not off
+test	correction	That's not the bug. The panic is in `parse_header` line 88, not in main
+dev	correction	revert that, you removed `#[serde(default)]` and now old configs fail to load
+test	correction	no - keep the old behaviour for empty input, return empty vec not an error
+dev	correction	you used `unwrap_or_default` but the spec says error on missing, change it
+test	correction	the import path is wrong, its `crate::store::Store` not `crate::db::Store`
+dev	correction	you fixed the symptom not the cause. the race is in the writer thread
+test	correction	nope the test still asserts the old message "file not found", update it
+dev	correction	why is there `println!` everywhere now? remove the debug prints you added
+test	correction	incorrect, python 3.12 not 3.11 in the Dockerfile
+dev	correction	you used `git add -A` and it staged my .env. unstage it
+test	correction	wait thats backwards, `>=` should be `<`
+dev	frustration	omg. again??
+test	frustration	i swear this is the 5th time i explain the same thing
+dev	frustration	wtf is this, 400 lines for a one line fix
+test	frustration	this is soooo slow, I am waiting 20 min for nothing
+dev	frustration	stop. just stop. you make it worse every time
+test	frustration	i dont have time for this, its friday evening and nothing works
+dev	frustration	honestly whats the point if i have to check every line you write
+test	frustration	FFS the build is red again
+dev	frustration	are you even reading what i write??
+test	frustration	pff. useless
+dev	frustration	I give up on this, it's hopeless
+test	frustration	why u always do this when the deadline is close
+dev	frustration	this is a nightmare, three hours and the hook still doesnt fire
+test	frustration	jesus, `cargo test` takes forever and then fails on the same thing
+dev	frustration	I am really tired from this. Every small change it break something else.
+test	frustration	seriously what is wrong with you today
+dev	frustration	great. just great. now CI is broken AND local
+test	frustration	ugh i hate this flaky test so much
+dev	frustration	this is unbearable, we go in circles since the morning
+test	frustration	no words. 2 hours lost.
+dev	neutral	1 a 2 b
+test	neutral	1b, 2a, 3 skip
+dev	neutral	yes
+test	neutral	ok go ahead
+dev	neutral	lgtm, commit it
+test	neutral	y
+dev	neutral	sounds good, do option 2
+test	neutral	status?
+dev	neutral	how far are you
+test	neutral	where are we with the migration
+dev	neutral	is the build done yet
+test	neutral	continue
+dev	neutral	go on with step 3
+test	neutral	what does `Arc<Mutex<_>>` buy us here vs RwLock
+dev	neutral	explain this error: error[E0277]: the trait bound `Foo: Serialize` is not satisfied
+test	neutral	here is the log: 2026-11-14T10:22:01Z INFO server listening on 0.0.0.0:8080 2026-11-14T10:22:03Z WARN slow query 1203ms - is the warn a problem?
+dev	neutral	run `cargo bench -- parse` and paste the results
+test	neutral	add a `--json` flag to the list command
+dev	neutral	write a test for the empty-input case of `split_args`
+test	neutral	can u check why `npm ci` fails on node 18? log: npm ERR! code ERESOLVE npm ERR! ERESOLVE unable to resolve dependency tree
+dev	neutral	pls bump serde to 1.0.215
+test	neutral	rename `tmp_dir` to `scratch_dir` everywhere
+dev	neutral	move the helper into utils.rs
+test	neutral	what is the difference between `--locked` and `--frozen`
+dev	neutral	no, not yet - first finish the parser, then we do the docs
+test	neutral	thanks!
+dev	neutral	perfect, thank you
+test	neutral	nice, that worked
+dev	neutral	hmm interesting. why does it allocate there?
+test	neutral	which files did you change so far
+dev	neutral	show me git log for the last 5 commits
+test	neutral	make a branch feat/export-csv and start there
+dev	neutral	Can you look into issue #142?
+test	neutral	I'm back. Where were we?
+dev	neutral	ok now the frontend part
+test	neutral	delete the old `scripts/legacy-build.sh`, we dont need it anymore
+dev	neutral	never mind the windows build for now, focus on linux
+test	neutral	always the same question from reviewers: why not tokio? write a short answer for the PR
+dev	neutral	the test fails with `assertion `left == right` failed left: 3 right: 4` - what does it mean here?
+test	neutral	lets try the other approach you suggested
+dev	neutral	a) keep b) drop c) keep
+test	neutral	2
+dev	neutral	option B pls
+test	neutral	Do it the way you proposed.
+dev	neutral	stop here, I want to review first
+test	neutral	pause, i need to go to a meeting
+dev	neutral	how many tokens did we use
+test	neutral	Traceback (most recent call last): File "app.py", line 12, in <module> import requests ModuleNotFoundError: No module named 'requests' -- add it to pyproject
+dev	neutral	could you generate the openapi schema from the routes
+test	neutral	whats in .oncebitten/config.toml right now
+dev	neutral	please write the commit message for this
+test	neutral	squash the last two commits
+dev	neutral	open a PR to main with a short description
+test	neutral	i dont know, what would you recommend?
+dev	neutral	I prefer the second one but either is fine
+test	neutral	use the same pattern as in src/hooks.rs for the new file
+dev	neutral	For this function only skip the doc comment, it's private.
+test	neutral	is it safe to delete target/ ?
+dev	neutral	how do i run only one test with cargo
+test	neutral	the error is gone now
+dev	neutral	wait, let me check something first
+test	neutral	good catch, yes fix that too
+dev	neutral	format the table in the README as markdown
+test	neutral	translate this error message to german for the i18n file
+dev	neutral	can we make it faster? the loop over 10k items takes 2s
+test	neutral	check the CI status of MR !57
+dev	neutral	what version of rustc do we have in the container
+test	neutral	ok. next: the export endpoint
+dev	neutral	docker compose logs api | tail gives `api-1 | panic: runtime error: index out of range [3] with length 3` - find where that comes from
+test	neutral	go ahead and overwrite it, i have a backup
+dev	neutral	agreed
+test	neutral	hm ok, and what about the windows path case?
+dev	neutral	try again with the verbose flag, -vv
+test	neutral	remove the TODO comments in parser.rs, they are done
+dev	neutral	build passes now? then run clippy
+test	neutral	1 yes 2 no 3 yes but rename it

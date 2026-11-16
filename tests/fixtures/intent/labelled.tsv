@@ -1,0 +1,121 @@
+# split	label	text
+dev	rule-request	From now on, run cargo fmt before every commit.
+test	rule-request	Always use the existing Store::open helper instead of opening sqlite directly.
+dev	rule-request	Going forward, keep commit subjects under 72 characters.
+test	rule-request	Please remember to update docs/configuration.md whenever you add a config key.
+dev	rule-request	Never add a new dependency without asking me first.
+test	rule-request	I'd rather you not add comments that restate the code from here on.
+dev	rule-request	Make sure every new public function has a doc comment.
+test	rule-request	Use snake_case for module names in this repo, always.
+dev	rule-request	The rule is that tests go in tests/, not inline in src files.
+test	rule-request	Prefer dunce::canonicalize over std canonicalize on Windows paths from now on.
+dev	rule-request	Whenever you touch the schema, add a migration rather than editing the table.
+test	rule-request	Keep functions under 60 lines in this crate; split helpers out otherwise.
+dev	rule-request	Use jiff for all time handling in this project, not chrono.
+test	rule-request	Don't commit generated files under target/, add them to .gitignore instead.
+dev	rule-request	Standing instruction: write the failing test before the fix.
+test	rule-request	Going forward, pin the CI toolchain to stable.
+dev	rule-request	For every hook change, add a fixture under tests/fixtures.
+test	rule-request	Please keep the README in sync when a command changes.
+dev	rule-request	Each PR body should reference its issue number from now on.
+test	rule-request	Stop using println for logging; use the tracing macros.
+dev	rule-request	Name every branch with a feat/ or fix/ prefix going forward.
+test	rule-request	Use anyhow::Result in binaries and thiserror in library modules, as a rule.
+dev	rule-request	Keep one behaviour change per commit, always.
+test	rule-request	Whenever you rename a CLI flag, keep the old one as an alias.
+dev	rule-request	Add a CHANGELOG line for every user-visible change from now on.
+test	rule-request	Treat warnings as errors in every crate, always.
+dev	rule-request	Don't run the full test suite on every edit; run the module's tests.
+test	rule-request	Store temporary files under the project's .oncebitten directory from now on.
+dev	rule-request	Use the forge abstraction for every GitHub call, never raw gh.
+test	rule-request	Prefer iterators over index loops in this codebase.
+dev	correction	No, that's the wrong file. Revert the change to src/store.rs.
+test	correction	You edited the wrong function, the parser was fine before.
+dev	correction	That's not what I asked for, undo it and try again.
+test	correction	You deleted the migration I wanted to keep. Put it back.
+dev	correction	Why did you rename the field? I never asked for that.
+test	correction	The fix you made broke the Windows path handling.
+dev	correction	Wrong branch: you committed to main instead of the feature branch.
+test	correction	You used the old config key again, it was renamed last week.
+dev	correction	Actually the timeout should be 30 seconds, not 3.
+test	correction	That regex matches too much, tighten it so it only matches whole words.
+dev	correction	You forgot to update the test expectations after changing the output format.
+test	correction	Nope, the default should stay false. Flip it back.
+dev	correction	You changed the public signature without asking. Restore the old one.
+test	correction	Use a HashMap instead of the vec, the lookup is in a hot loop.
+dev	correction	That's incorrect, the exit code for a missing file is 2, not 1.
+test	correction	You misread the spec: the limit applies per host, not globally.
+dev	correction	Revert the reformatting you did to unrelated files.
+test	correction	The helper already exists in util.rs, don't write a second copy.
+dev	correction	Wrong: the gate runs before triage, not after.
+test	correction	That change belongs in the hook module, not in the CLI parser.
+dev	correction	You removed the error case entirely. Add it back with its message.
+test	correction	Still wrong. The path should be relative to the repo root.
+dev	correction	Undo the commit you just made and split the changes into two.
+test	correction	The sort order is reversed. Newest first, please.
+dev	correction	You hardcoded the model name, read it from config instead.
+test	correction	Not that file. I meant the lexicon in signal.rs.
+dev	correction	Your patch removed the Windows branch of the install script.
+test	correction	That assertion checks the wrong field; the score is in detail.
+dev	correction	I said keep the old flag working, you dropped it.
+test	correction	You skipped the failing case I described and only fixed the happy path.
+dev	frustration	Ugh, this is the third time you've done this today.
+test	frustration	I'm so tired of fixing the same mess after you touch the build.
+dev	frustration	This is driving me up the wall, why can't you get this right?
+test	frustration	Seriously? You broke it again.
+dev	frustration	I can't believe how much time this is wasting.
+test	frustration	Honestly I'm losing patience with this session.
+dev	frustration	Every single session you forget the same thing. It's infuriating.
+test	frustration	Great, now nothing compiles. Thanks a lot.
+dev	frustration	Why is this so hard for you? It's a one-line change.
+test	frustration	I'm annoyed that we're still stuck on the same error.
+dev	frustration	Ugh, not this again.
+test	frustration	This is the worst output I've seen from you all week.
+dev	frustration	I'm fed up with the timeouts. Every run hangs.
+test	frustration	You're really making me regret trusting you with this repo.
+dev	frustration	Come on, focus. We've been on this for an hour.
+test	frustration	I'm frustrated that the tests pass locally but you keep saying they don't.
+dev	frustration	Argh, my patience is gone with this flaky build.
+test	frustration	Unbelievable. Another broken import.
+dev	frustration	Why does every answer you give have to be wrong?
+test	frustration	I'm exhausted by this loop, we keep going in circles.
+dev	frustration	Terrible. Just terrible. Start over.
+test	frustration	This session is a mess and I'm getting really irritated.
+dev	frustration	Oh for crying out loud, the same typo again.
+test	frustration	I'm sick of babysitting you through simple edits.
+dev	frustration	Why does this keep happening? It's maddening.
+test	frustration	My week is ruined by this build, honestly.
+dev	frustration	You had one job here and you blew it.
+test	frustration	I'm furious the hook still isn't firing.
+dev	frustration	Can we please stop wasting my afternoon on this?
+test	frustration	This is so frustrating, nothing I ask gets done properly.
+dev	neutral	Can you show me the diff for the store module?
+test	neutral	Never mind, I found the file myself, thanks.
+dev	neutral	Don't worry about the warning, it's a known false positive.
+test	neutral	Run the tests again and tell me the failing count.
+dev	neutral	The cache is always cold after a reboot, that's expected.
+test	neutral	Stop the dev server and restart it on port 4000.
+dev	neutral	What does the doctor command check first?
+test	neutral	No problem, I'll handle the review myself.
+dev	neutral	Thanks, that looks good. Let's move on to the next task.
+test	neutral	Add a loading spinner to the progress bar in the CLI.
+dev	neutral	How many rows are in the events table right now?
+test	neutral	Please summarize the open issues in this repo.
+dev	neutral	I think the answer is in the README, could you check?
+test	neutral	Don't worry about the lint output for now, we will fix it later.
+dev	neutral	Again, the build log is in target/ if you want it.
+test	neutral	Rename the variable count to total in the stats module.
+dev	neutral	What's the default value of the triage timeout?
+test	neutral	The output always prints in UTC, right?
+dev	neutral	Please compare the two benchmark runs and tell me which is faster.
+test	neutral	Stop the background job, I don't need it anymore.
+dev	neutral	I'm going to lunch, I'll look at the review when I'm back.
+test	neutral	Good work on that refactor, the code reads well.
+dev	neutral	Can you explain how the lockfile is written?
+test	neutral	Show me the last ten entries from the audit log.
+dev	neutral	The docs say the port is 8080, is that still right?
+test	neutral	Oh well, the test was flaky before too, nothing new.
+dev	neutral	No worries if you can't finish that today.
+test	neutral	I don't mind the slower build, the cache will help later.
+dev	neutral	Pick the cheapest model for the summary job.
+test	neutral	What changed in the last release? Give me a short list.

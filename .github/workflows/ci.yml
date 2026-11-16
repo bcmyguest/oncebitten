@@ -27,6 +27,11 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: cargo clippy and test (intent feature)
+        run: |
+          cargo clippy --all-targets --features intent -- -D warnings
+          cargo test --features intent --lib intent
+          cargo test --features intent --test intent_fixture
 
   test:
     name: test (${{ matrix.os }})
