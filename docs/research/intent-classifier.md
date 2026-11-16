@@ -76,10 +76,24 @@ Quantization check: the mean cosine between int8 and F32 query vectors is 1.0000
 ```
 cargo build --release --example intent_eval
 python3 scripts/intent-quantize.py <f32_model_dir> <int8_out_dir>
-./target/release/examples/intent_eval <f32_model_dir> <int8_out_dir>   # reads both fixtures
+./target/release/examples/intent_eval <f32_model_dir> <int8_out_dir> [--json <path>]   # reads both fixtures
 ```
 
 `<f32_model_dir>` holds `model.safetensors`, `tokenizer.json`, `config.json` from the HF repo.
+
+## Benchmark
+
+`bench/intent/bench.py` runs `intent_eval --json` and logs one MLflow run per variant to experiment `oncebitten-intent`: regex, and f32 and int8 x nn and kNN k in {1, 3, 5, 7, 9} x three dev-chosen thresholds (max-F1, hook, and capped-F1: max dev macro-F1 with dev neutral FPR at most 5%). Each run holds params (model, quant, classifier, k, threshold, fixture git sha, row counts), per-split macro-F1, accuracy, neutral FPR and per-class precision / recall / F1, per-query latency p50 / p95 (embed plus classify, 5 timed passes over 256 rows), weights size on disk, and the dev and test confusion matrices as artifacts. A `report` run holds the text output and the raw JSON.
+
+```
+cd bench/intent
+INTENT_F32_DIR=<f32_model_dir> INTENT_INT8_DIR=<int8_model_dir> uv run bench.py
+uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db   # http://127.0.0.1:5000
+```
+
+The default store is `bench/intent/mlruns/` (gitignored): `mlflow.db` plus `artifacts/`. MLflow 3.18 refuses the plain file store unless `MLFLOW_ALLOW_FILE_STORE=true`, so the default is SQLite. `MLFLOW_TRACKING_URI` overrides it. The script picks the winner on dev only (ties go to the smaller model, then nn, then smaller k), tags it `selected_dev_fpr_capped=true`, and prints a Markdown table of every variant.
+
+Run of 2026-11-15: dev picks int8 kNN k=5 capped-F1 (threshold 0.57, dev macro-F1 0.319). On test it scores macro-F1 0.264 with neutral FPR 0.038 and finds 8 of 25 frustration rows, no rule-request or correction rows. Latency on this machine: nn about 10 µs p50, kNN 42 to 53 µs p50, regex 5.6 µs p50.
 
 ## Model delivery (decided, not built)
 
