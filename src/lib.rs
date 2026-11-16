@@ -14,6 +14,8 @@ pub mod gate;
 pub mod hits;
 pub mod hooks;
 pub mod host;
+#[cfg(feature = "intent")]
+pub mod intent;
 pub mod lifecycle;
 pub mod lockfile;
 pub mod proof;
