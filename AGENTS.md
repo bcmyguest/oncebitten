@@ -13,6 +13,14 @@ cargo clippy --all-targets -- -D warnings
 
 Run all four before a commit. CI runs the same commands.
 
+Two scripts run a release binary end to end in a scratch repository. Neither runs in CI: both need an OpenShell gateway, and the second needs signed-in agent hosts.
+
+```sh
+cargo build --release
+scripts/e2e.sh        # rules, replay, check, gate, exceptions, steer, capture, proposals, doctor; no agent host
+scripts/e2e-live.sh   # real Claude Code sessions: capture, background triage, accept, gate, steer deny; spends model calls
+```
+
 ## Layout
 
 - `src/config.rs`: layered configuration loader, validation, origin rendering.

@@ -2,7 +2,7 @@
 
 oncebitten ships in twelve steps, grouped into four milestones. Each step ends with its tests passing and user sign-off. A review closes each milestone. This page follows the step list in [PLAN.md](../PLAN.md).
 
-Status as of 2026-11-15:
+Status as of 2026-11-16:
 
 | Milestone | Steps | Status |
 | --- | --- | --- |
