@@ -32,6 +32,10 @@ Pi has no verified headless call. Cursor is not a triage host.
 
 The model comes from the target: `triage.default` or `triage.<host>` in configuration (`<host>:<agent>`). `default` as the agent omits the model flag.
 
+## Steer drafts
+
+When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). It is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Steer fixtures come from the recorded command, so triage does not invent the bad case.
+
 ## Call contract
 
 - Each call runs in a fresh empty temp directory, removed afterwards, with `ONCEBITTEN_TRIAGE=1`. Every `oncebitten capture` call exits 0 at once when that variable is `1`.

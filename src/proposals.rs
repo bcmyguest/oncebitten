@@ -8,12 +8,12 @@ use crate::evidence::{self, Cluster};
 use crate::hits;
 use crate::proof::{self, Replayed, Validity};
 use crate::replay::Verdict;
-use crate::rule::{self, Rule, Status};
+use crate::rule::{self, Check, Rule, Status};
 use crate::rules::{self, Failure};
 use crate::signal;
 pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
 use crate::store::{Outcome, Store};
-use crate::triage::draft::Draft;
+use crate::triage::draft::{Draft, Engine};
 use crate::triage::prompt::context_block;
 use crate::triage::verdict::Answer;
 
@@ -21,6 +21,9 @@ pub const LIST_HINT: &str = "oncebitten proposals list";
 const PROJECT_RULES: [&str; 2] = [".oncebitten", "rules"];
 const PROPOSED_LINE: &str = "status = \"proposed\"";
 const ACTIVE_LINE: &str = "status = \"active\"";
+const DENY_ACTION: &str = "action = \"deny\"";
+/// Most clean commands a steer draft takes from the store as its corpus.
+const STEER_CORPUS: usize = 5;
 /// A triage lock older than this is taken over. It outlasts two host calls
 /// at the triage timeout plus a sandbox replay.
 pub const TRIAGE_LOCK_STALE_MS: i64 = 30 * 60 * 1000;
@@ -239,11 +242,16 @@ pub fn record(
             draft.rationale.as_str()
         });
     let mark = possible_duplicate(store, &cluster.id, class, Some(text))?.map(|m| m.to_string());
-    let Some(draft) = &answer.draft else {
+    let Some(answered) = &answer.draft else {
         store.insert_proposal(&row)?;
         store.set_proposal_marks(&cluster.id, class, mark.as_deref())?;
         return Ok(Recorded::Finding);
     };
+    let mut steered = answered.clone();
+    if steered.engine == Engine::Steer {
+        steer_fixtures(store, &repo, cluster, &mut steered)?;
+    }
+    let draft = &steered;
     let existing = load_rules(inputs).context("the current rules do not load")?;
     if existing.iter().any(|resolved| resolved.rule.id == draft.id) {
         bail!("a rule named `{}` already exists", draft.id);
@@ -310,6 +318,32 @@ pub fn mark_lines(marks: &ProposalMarks) -> Vec<String> {
     lines
 }
 
+/// Fills a steer draft's fixtures from the cluster's latest recorded command,
+/// which becomes `bad`, and from the repo's other successful commands, which
+/// become the corpus. Fails when the cluster's evidence holds no command.
+fn steer_fixtures(store: &Store, repo: &Path, cluster: &Cluster, draft: &mut Draft) -> Result<()> {
+    let latest = cluster
+        .occurrences
+        .iter()
+        .map(|occurrence| &occurrence.event)
+        .filter(|event| {
+            event
+                .tool
+                .as_deref()
+                .is_some_and(crate::host::is_command_tool)
+        })
+        .max_by_key(|event| event.id)
+        .context("a steer draft needs a cluster whose evidence is a command")?;
+    let command = latest.summary.clone();
+    let tool = latest.tool.clone().unwrap_or_default();
+    let corpus: Vec<String> = store
+        .successful_commands(&repo_key(repo), &command, STEER_CORPUS)?
+        .into_iter()
+        .map(|event| event.summary)
+        .collect();
+    draft.with_recorded_command(&tool, &command, &corpus)
+}
+
 /// Proves and queues the rule directory `dir`. The caller removes `dir`
 /// unless this returns `Proposed`.
 fn queue_written(
@@ -350,7 +384,10 @@ pub fn accept(store: &Store, id: &str) -> Result<PathBuf> {
     if row.state != State::Waiting {
         bail!("proposal `{id}` is already {}", row.state.as_str());
     }
-    let dir = row.dir.context("the proposal names no rule directory")?;
+    let dir = row
+        .dir
+        .clone()
+        .context("the proposal names no rule directory")?;
     let rule = rule::load_rule(&dir)?;
     if rule.status != Status::Proposed {
         bail!(
@@ -381,17 +418,81 @@ pub fn accept(store: &Store, id: &str) -> Result<PathBuf> {
             .with_context(|| format!("restoring {}", rule.file.display()))?;
         bail!("activating `{}` did not keep its proof valid", rule.id);
     }
+    record_accepted(store, id, &row, &rule.id)?;
+    Ok(dir)
+}
+
+/// Accepts a queued steer proposal with `action = "deny"`. The rewritten rule
+/// must load, activate and prove under `prove`; otherwise the file is restored
+/// and the proposal stays waiting. Denying needs a tool trigger.
+pub fn accept_deny<F>(store: &Store, id: &str, prove: F) -> Result<PathBuf>
+where
+    F: Fn(&Rule) -> Replayed,
+{
+    let row = find(store, id)?;
+    if row.kind == Kind::Finding {
+        bail!("`{id}` is a finding; it has no rule to accept");
+    }
+    if row.state != State::Waiting {
+        bail!("proposal `{id}` is already {}", row.state.as_str());
+    }
+    let dir = row
+        .dir
+        .clone()
+        .context("the proposal names no rule directory")?;
+    let rule = rule::load_rule(&dir)?;
+    if !matches!(rule.check, Check::Steer(_)) {
+        bail!("`{id}` is not a steer rule; --deny applies only to steer proposals");
+    }
+    if rule.status != Status::Proposed {
+        bail!(
+            "rule `{}` is {}, not proposed",
+            rule.id,
+            rule.status.as_str()
+        );
+    }
+    let original = std::fs::read_to_string(&rule.file)
+        .with_context(|| format!("reading {}", rule.file.display()))?;
+    let denied = deny_action(&original)
+        .with_context(|| format!("{} has no [steer] table", rule.file.display()))?;
+    let flipped = activate(&denied)
+        .with_context(|| format!("{} has no `{PROPOSED_LINE}` line", rule.file.display()))?;
+    let restore = |error: anyhow::Error| -> anyhow::Error {
+        match std::fs::write(&rule.file, &original) {
+            Ok(()) => error,
+            Err(write) => error.context(format!("restoring {}: {write}", rule.file.display())),
+        }
+    };
+    std::fs::write(&rule.file, &flipped)
+        .with_context(|| format!("writing {}", rule.file.display()))?;
+    let active = match rule::load_rule(&dir) {
+        Ok(active) => active,
+        Err(error) => return Err(restore(error)),
+    };
+    let (proven_now, note) = proven(&active, &prove(&active));
+    if !proven_now {
+        let reason = note.unwrap_or_else(|| "no valid proof".to_owned());
+        return Err(restore(anyhow::anyhow!(
+            "steer rule `{}` with deny did not prove: {reason}",
+            active.id
+        )));
+    }
+    record_accepted(store, id, &row, &active.id)?;
+    Ok(dir)
+}
+
+/// Marks an accepted proposal in the store and writes its decision record.
+fn record_accepted(store: &Store, id: &str, row: &ProposalRow, rule_id: &str) -> Result<()> {
     store.set_proposal_state(id, State::Accepted)?;
     evidence::decide(
         store,
         id,
         Outcome::Accepted,
-        Some(&rule.id),
+        Some(rule_id),
         None,
         now_millis()?,
         row.occurrences.len(),
-    )?;
-    Ok(dir)
+    )
 }
 
 /// Rejects a queued result. The cluster is rejected in the evidence store, so
@@ -515,5 +616,34 @@ fn activate(text: &str) -> Option<String> {
             }
         })
         .collect::<String>();
+    found.then_some(out)
+}
+
+/// `text` with its `[steer]` table's action set to deny, replacing any action
+/// line there. `None` when the file has no `[steer]` table.
+fn deny_action(text: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len() + DENY_ACTION.len() + 2);
+    let mut in_steer = false;
+    let mut found = false;
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\r', '\n']);
+        let trimmed = body.trim();
+        if trimmed.starts_with('[') {
+            in_steer = trimmed == "[steer]";
+            out.push_str(line);
+            if in_steer {
+                found = true;
+                if !line.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(DENY_ACTION);
+                out.push('\n');
+            }
+        } else if in_steer && trimmed.starts_with("action") && trimmed.contains('=') {
+            continue;
+        } else {
+            out.push_str(line);
+        }
+    }
     found.then_some(out)
 }

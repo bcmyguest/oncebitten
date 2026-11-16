@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -485,6 +485,47 @@ impl Store {
             }
         }
         Ok(paths)
+    }
+
+    /// Successful shell calls recorded in `repo`, newest first, without the
+    /// command `exclude`. A steer draft takes its corpus from these.
+    pub fn successful_commands(
+        &self,
+        repo: &str,
+        exclude: &str,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, ts, host, session_id, repo, kind, tool, summary, git_head FROM events \
+             WHERE repo IS NOT NULL AND kind = ?1 AND summary != ?2 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map(params![signal::KIND_TOOL_OK, exclude], |row| {
+            stored_event(row, 0)
+        })?;
+        let wanted = normalised_repo(repo);
+        let mut same: HashMap<String, bool> = HashMap::new();
+        let mut found = Vec::new();
+        for row in rows {
+            let event = row?;
+            let Some(event_repo) = event.repo.as_deref() else {
+                continue;
+            };
+            let in_repo = *same
+                .entry(event_repo.to_owned())
+                .or_insert_with(|| normalised_repo(event_repo) == wanted);
+            if in_repo
+                && event
+                    .tool
+                    .as_deref()
+                    .is_some_and(crate::host::is_command_tool)
+            {
+                found.push(event);
+                if found.len() == limit {
+                    break;
+                }
+            }
+        }
+        Ok(found)
     }
 
     pub fn signals(&self) -> Result<Vec<SignalRow>> {
@@ -1100,6 +1141,27 @@ pub fn events_db_path() -> Result<PathBuf> {
     })
     .collect();
     events_db_path_for(&vars, Platform::current())
+}
+
+/// `repo` in one comparable form: canonical when the path exists, which
+/// resolves symlinks such as macOS `/var` -> `/private/var`, and without the
+/// Windows verbatim `\\?\` prefix either way.
+fn normalised_repo(repo: &str) -> PathBuf {
+    let path = Path::new(repo);
+    match dunce::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(_) => PathBuf::from(strip_verbatim(repo)),
+    }
+}
+
+/// Drops a Windows verbatim prefix: `\\?\UNC\server` -> `\\server` and
+/// `\\?\C:\dir` -> `C:\dir`.
+fn strip_verbatim(repo: &str) -> String {
+    if let Some(rest) = repo.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        repo.strip_prefix(r"\\?\").unwrap_or(repo).to_owned()
+    }
 }
 
 fn stored_event(row: &rusqlite::Row, start: usize) -> rusqlite::Result<StoredEvent> {
