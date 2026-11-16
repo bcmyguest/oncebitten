@@ -1,0 +1,8 @@
+id = "docs-no-mermaid-fence"
+description = "Docs embed rendered diagram SVGs, not raw mermaid fences; run `pnpm diagrams` in site/."
+mode = "block"
+status = "active"
+engine = "native"
+command = ["node", "--test", "--test-reporter=tap", "--test-name-pattern=mermaid fences", "site/scripts/diagrams.test.mjs"]
+fired_exit_codes = [1]
+fired_output_contains = "not ok 1 - docs embed rendered diagrams, not mermaid fences"
