@@ -55,7 +55,8 @@ Each stored event records its host, session id, repo (the directory holding `.gi
 The dedupe key is stored in `events.payload_hash`, which has a UNIQUE constraint. A duplicate insert stores no event and no signals.
 
 - If the hook payload has a `tool_use_id`, the key is SHA-256 over (host, session id, kind, tool_use_id). A redelivered hook repeats the id, so it is stored once even when its capture time differs.
-- Otherwise the key is SHA-256 over the whole event: timestamp, host, session id, repo, kind, tool and summary. Two identical prompts at different times differ by timestamp and are both kept. A prompt redelivered at a different millisecond is stored twice; prompts carry no id to dedupe on.
+- Otherwise the key is SHA-256 over the whole event: timestamp, host, session id, repo, kind, tool and summary. Two identical prompts at different times differ by timestamp and are both kept.
+- A prompt without a `tool_use_id` is also a duplicate when the store holds a prompt with the same host, session id and stored summary whose timestamp lies within 2000 ms. Two hook scopes that deliver one prompt milliseconds apart store it once. The check and insert run in one IMMEDIATE transaction, so concurrent captures see each other's rows.
 
 ## Source
 
