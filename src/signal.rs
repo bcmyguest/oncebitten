@@ -98,9 +98,46 @@ pub fn derive(event: &NewEvent, history: &[StoredEvent]) -> Vec<Signal> {
     derive_with(event, history, DEFAULT_CORRECTION_LEXICON)
 }
 
+/// Tags that agent harnesses wrap around text the user did not type.
+const HARNESS_TAGS: &[&str] = &[
+    "system-reminder",
+    "task-notification",
+    "agent-message",
+    "command-message",
+    "command-name",
+    "command-args",
+    "local-command-stdout",
+    "local-command-stderr",
+    "local-command-caveat",
+    "user-prompt-submit-hook",
+];
+
+/// `text` with every closed harness block removed. An unclosed tag stays as text.
+fn strip_harness_blocks(text: &str) -> String {
+    let mut out = text.to_string();
+    for tag in HARNESS_TAGS {
+        let open = format!("<{tag}");
+        let close = format!("</{tag}>");
+        let mut from = 0;
+        while let Some(rel) = out[from..].find(&open) {
+            let start = from + rel;
+            let after = &out[start + open.len()..];
+            if !after.starts_with(['>', ' ', '\n', '\t']) {
+                from = start + open.len();
+                continue;
+            }
+            match out[start..].find(&close) {
+                Some(end) => out.replace_range(start..start + end + close.len(), " "),
+                None => break,
+            }
+        }
+    }
+    out
+}
+
 /// Phrases in `lexicon` that `text` contains, lowercased, in lexicon order, once each.
 pub fn matched_phrases<P: AsRef<str>>(text: &str, lexicon: &[P]) -> Vec<String> {
-    let lowered = normalize_apostrophes(&text.to_lowercase());
+    let lowered = normalize_apostrophes(&strip_harness_blocks(text).to_lowercase());
     let mut found: Vec<String> = Vec::new();
     for phrase in lexicon {
         let phrase = normalize_apostrophes(&phrase.as_ref().trim().to_lowercase());
