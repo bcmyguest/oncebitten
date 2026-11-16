@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use tempfile::TempDir;
 
@@ -83,6 +84,15 @@ impl Repo {
     }
 
     pub fn run(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        self.spawn(args, env, None)
+    }
+
+    /// Runs oncebitten with `input` on stdin, as an agent hook does.
+    pub fn run_with_stdin(&self, args: &[&str], env: &[(&str, &str)], input: &str) -> Output {
+        self.spawn(args, env, Some(input))
+    }
+
+    fn spawn(&self, args: &[&str], env: &[(&str, &str)], input: Option<&str>) -> Output {
         let path = std::env::var_os("PATH").unwrap_or_default();
         let mut command = Command::new(env!("CARGO_BIN_EXE_oncebitten"));
         command
@@ -105,7 +115,24 @@ impl Repo {
         for (name, value) in env {
             command.env(name, value);
         }
-        command.output().unwrap()
+        match input {
+            None => command.output().unwrap(),
+            Some(input) => {
+                let mut child = command
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(input.as_bytes())
+                    .unwrap();
+                child.wait_with_output().unwrap()
+            }
+        }
     }
 }
 
