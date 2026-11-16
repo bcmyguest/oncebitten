@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use oncebitten::capture::{run, run_with};
@@ -21,7 +21,7 @@ fn count(db: &Path, table: &str) -> i64 {
         .unwrap()
 }
 
-fn capture(home: &Path, host: &str, payload: &str, triage: Option<&str>) -> Output {
+fn spawn_capture(home: &Path, host: &str, triage: Option<&str>) -> Child {
     let mut cmd = Command::new(BIN);
     cmd.args(["capture", "--host", host])
         .env("HOME", home)
@@ -33,7 +33,11 @@ fn capture(home: &Path, host: &str, payload: &str, triage: Option<&str>) -> Outp
     if let Some(value) = triage {
         cmd.env("ONCEBITTEN_TRIAGE", value);
     }
-    let mut child = cmd.spawn().unwrap();
+    cmd.spawn().unwrap()
+}
+
+fn capture(home: &Path, host: &str, payload: &str, triage: Option<&str>) -> Output {
+    let mut child = spawn_capture(home, host, triage);
     child
         .stdin
         .take()
@@ -277,4 +281,26 @@ fn hook_redelivery_of_one_tool_use_is_stored_once() {
     run("claude", payload, &db, 1).unwrap();
     run("claude", payload, &db, 2).unwrap();
     assert_eq!(count(&db, "events"), 1);
+}
+
+#[test]
+fn two_hook_scopes_delivering_one_prompt_store_it_once() {
+    let home = TempDir::new().unwrap();
+    let payload = prompt_payload("s1", "No, stop");
+    let mut children: Vec<Child> = (0..2)
+        .map(|_| spawn_capture(home.path(), "claude", None))
+        .collect();
+    for child in &mut children {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+    }
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+    assert_eq!(count(&events_db(home.path()), "events"), 1);
 }

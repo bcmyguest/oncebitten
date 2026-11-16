@@ -7,7 +7,7 @@
 - `ONCEBITTEN_TRIAGE=1` makes it exit 0 without reading stdin or writing.
 - An event that brings a cluster to its threshold starts `oncebitten triage <id> --queue` detached, unless `triage.background = false`. Capture does not wait for it, and a failure to start it is one stderr line, not a failed hook. See [proposals.md](proposals.md#background-triage).
 - 100 captures finish in under 5 s (test `one_hundred_captures_finish_in_under_five_seconds`).
-- A hook payload with a `tool_use_id` is one event: a redelivery of the same id stores nothing. Without one, the event is deduplicated on its whole content. See [evidence.md](evidence.md#provenance-and-dedupe).
+- A hook payload with a `tool_use_id` is one event: a redelivery of the same id stores nothing. Without one, the event is deduplicated on its whole content, and a prompt is also deduplicated against the same prompt in the same session within 2000 ms. See [evidence.md](evidence.md#provenance-and-dedupe).
 
 ## Signals
 

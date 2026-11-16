@@ -20,6 +20,8 @@ pub const SUMMARY_LIMIT: usize = 2000;
 const SCHEMA_VERSION: i64 = 4;
 const PROMPT_DIGEST_PREFIX: &str = "sha256:";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Two hook scopes deliver one prompt milliseconds apart; a person cannot submit the same prompt twice in one session this fast.
+const PROMPT_REDELIVERY_WINDOW_MS: i64 = 2000;
 const SCHEMA: &str = "
 CREATE TABLE events (
     id INTEGER PRIMARY KEY,
@@ -404,7 +406,13 @@ impl Store {
             summary: stored_summary(event, signals),
             ..event.clone()
         };
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        if event.kind == KIND_PROMPT
+            && capture.tool_use_id.is_none()
+            && is_prompt_redelivery(&tx, &event)?
+        {
+            return Ok(None);
+        }
         let inserted = tx.execute(
             "INSERT OR IGNORE INTO events \
              (ts, host, session_id, repo, kind, tool, summary, payload_hash, git_head) \
@@ -1357,6 +1365,23 @@ fn dedupe_key(event: &NewEvent, tool_use_id: Option<&str>) -> String {
         }
         None => payload_hash(event),
     }
+}
+
+fn is_prompt_redelivery(conn: &Connection, event: &NewEvent) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM events \
+         WHERE host = ?1 AND session_id = ?2 AND kind = ?3 AND summary = ?4 \
+         AND ts BETWEEN ?5 AND ?6)",
+        params![
+            event.host,
+            event.session_id,
+            event.kind,
+            event.summary,
+            event.ts - PROMPT_REDELIVERY_WINDOW_MS,
+            event.ts + PROMPT_REDELIVERY_WINDOW_MS
+        ],
+        |row| row.get(0),
+    )?)
 }
 
 fn payload_hash(event: &NewEvent) -> String {

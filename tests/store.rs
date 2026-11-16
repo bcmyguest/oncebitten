@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use oncebitten::config::Platform;
-use oncebitten::signal::Signal;
+use oncebitten::signal::{Signal, KIND_PROMPT, USER_CORRECTION};
 use oncebitten::store::{events_db_path_for, Capture, NewEvent, Store, SUMMARY_LIMIT};
 use tempfile::TempDir;
 
@@ -23,6 +23,21 @@ fn event(session: &str, summary: &str, ts: i64) -> NewEvent {
         tool: Some("Bash".into()),
         summary: summary.into(),
     }
+}
+
+fn prompt(session: &str, summary: &str, ts: i64) -> NewEvent {
+    NewEvent {
+        kind: KIND_PROMPT.into(),
+        tool: None,
+        ..event(session, summary, ts)
+    }
+}
+
+fn correction() -> Vec<Signal> {
+    vec![Signal {
+        kind: USER_CORRECTION,
+        detail: "no,".into(),
+    }]
 }
 
 #[test]
@@ -143,6 +158,76 @@ fn duplicate_event_does_not_store_its_signals() {
         .query_row("SELECT COUNT(*) FROM signals", [], |r| r.get(0))
         .unwrap();
     assert_eq!(count, 1);
+}
+
+#[test]
+fn prompt_from_two_hook_scopes_is_stored_once() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.db");
+    let store = Store::open(&path).unwrap();
+    let signals = correction();
+    assert!(store
+        .record(&prompt("s1", "No, stop", 1), &signals)
+        .unwrap()
+        .is_some());
+    assert!(store
+        .record(&prompt("s1", "No, stop", 2), &signals)
+        .unwrap()
+        .is_none());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 1);
+    let count: i64 = raw(&path)
+        .query_row("SELECT COUNT(*) FROM signals", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn prompt_repeated_after_the_window_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    let signals = correction();
+    store
+        .record(&prompt("s1", "No, stop", 1), &signals)
+        .unwrap();
+    assert!(store
+        .record(&prompt("s1", "No, stop", 2002), &signals)
+        .unwrap()
+        .is_some());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 2);
+}
+
+#[test]
+fn same_prompt_in_another_session_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    let signals = correction();
+    store
+        .record(&prompt("s1", "No, stop", 1), &signals)
+        .unwrap();
+    assert!(store
+        .record(&prompt("s2", "No, stop", 2), &signals)
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn different_prompt_text_a_millisecond_apart_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    let signals = correction();
+    store
+        .record(&prompt("s1", "No, stop", 1), &signals)
+        .unwrap();
+    assert!(store
+        .record(&prompt("s1", "No, wait", 2), &signals)
+        .unwrap()
+        .is_some());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 2);
+}
+
+#[test]
+fn tool_event_repeated_a_millisecond_apart_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    store.record(&event("s1", "x", 1), &[]).unwrap();
+    assert!(store.record(&event("s1", "x", 2), &[]).unwrap().is_some());
+    assert_eq!(store.session_history("claude", "s1", 10).unwrap().len(), 2);
 }
 
 #[test]
