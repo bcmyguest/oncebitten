@@ -1,0 +1,191 @@
+mod common;
+
+use std::env;
+use std::fs;
+use std::iter;
+use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use common::{both, code, stdout, Repo};
+use serde_json::Value;
+use tempfile::TempDir;
+
+const CORRECTION: &str = "No, stop.\n\"Don't\" run 100% of ^ & | the \"suite\".\nTry again.";
+const HOOKS_OFF: &str = r#"{"disableAllHooks": true}"#;
+const REPLY: &str = r#"{"type":"result","is_error":false,"structured_output":{"repeatable":true,"user_correction":true,"root_cause":"The agent ignored an explicit stop request.","proposed_fix_kind":"none","generality":"general"}}"#;
+const BACKGROUND_OFF: &str = "[triage]\nbackground = false\n";
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(60);
+const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+struct FakeHost {
+    root: TempDir,
+}
+
+struct HostEnv {
+    path: String,
+    calls: String,
+}
+
+impl HostEnv {
+    fn pairs(&self) -> [(&str, &str); 2] {
+        [
+            ("PATH", self.path.as_str()),
+            ("FAKE_HOST_DIR", self.calls.as_str()),
+        ]
+    }
+}
+
+impl FakeHost {
+    fn new() -> Self {
+        let host = FakeHost {
+            root: TempDir::new().unwrap(),
+        };
+        fs::create_dir_all(host.bin()).unwrap();
+        fs::create_dir_all(host.calls()).unwrap();
+        install(&host.bin());
+        host
+    }
+
+    fn bin(&self) -> PathBuf {
+        self.root.path().join("bin")
+    }
+
+    fn calls(&self) -> PathBuf {
+        self.root.path().join("calls")
+    }
+
+    fn set_reply(&self, reply: &str) {
+        fs::write(self.calls().join("reply"), reply).unwrap();
+    }
+
+    fn env(&self) -> HostEnv {
+        HostEnv {
+            path: path_with(&self.bin()),
+            calls: self.calls().display().to_string(),
+        }
+    }
+
+    fn call_count(&self) -> usize {
+        fs::read_dir(self.calls())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("stdin."))
+            .count()
+    }
+
+    fn stdin_of(&self, call: usize) -> String {
+        fs::read_to_string(self.calls().join(format!("stdin.{call}"))).unwrap()
+    }
+
+    fn args_of(&self, call: usize) -> Vec<String> {
+        let text = fs::read_to_string(self.calls().join(format!("args.{call}"))).unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+}
+
+fn host_exe() -> &'static Path {
+    Path::new(env!("CARGO_BIN_EXE_fake-host"))
+}
+
+#[cfg(windows)]
+fn install(bin: &Path) {
+    let wrapper = format!("@echo off\r\n\"{}\" %*\r\n", host_exe().display());
+    fs::write(bin.join("claude.cmd"), wrapper).unwrap();
+}
+
+#[cfg(not(windows))]
+fn install(bin: &Path) {
+    fs::copy(host_exe(), bin.join("claude")).unwrap();
+}
+
+fn path_with(dir: &Path) -> String {
+    let existing = env::var_os("PATH").unwrap_or_default();
+    env::join_paths(iter::once(dir.to_path_buf()).chain(env::split_paths(&existing)))
+        .unwrap()
+        .into_string()
+        .expect("PATH is UTF-8")
+}
+
+fn write_user_config(repo: &Repo, text: &str) {
+    let dir = repo.root.path().join("xdg-config").join("oncebitten");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("config.toml"), text).unwrap();
+}
+
+fn prompt_payload(session: &str, cwd: &Path, prompt: &str) -> String {
+    serde_json::json!({
+        "session_id": session,
+        "cwd": cwd.display().to_string(),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": prompt,
+    })
+    .to_string()
+}
+
+fn capture_correction(repo: &Repo, host: &HostEnv) -> std::process::Output {
+    let payload = prompt_payload("s1", &repo.project(), CORRECTION);
+    repo.run_with_stdin(&["capture", "--host", "claude"], &host.pairs(), &payload)
+}
+
+fn cluster_id(repo: &Repo, host: &HostEnv) -> String {
+    let out = repo.run(&["evidence", "list", "--all"], &host.pairs());
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    stdout(&out)
+        .lines()
+        .find_map(|line| line.split_whitespace().next().map(str::to_owned))
+        .expect("evidence list shows a cluster")
+}
+
+#[test]
+fn triage_cli_asks_a_host_found_by_bare_name_on_path() {
+    let repo = Repo::new();
+    write_user_config(&repo, BACKGROUND_OFF);
+    let host = FakeHost::new();
+    host.set_reply(REPLY);
+    let env = host.env();
+
+    let captured = capture_correction(&repo, &env);
+    assert_eq!(code(&captured), 0, "{}", both(&captured));
+    let id = cluster_id(&repo, &env);
+
+    let out = repo.run(&["triage", &id, "--host", "claude"], &env.pairs());
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    let verdict: Value = serde_json::from_str(&stdout(&out)).expect("stdout is the verdict JSON");
+    assert_eq!(verdict["proposed_fix_kind"], "none");
+
+    assert_eq!(host.call_count(), 2);
+    assert!(host.stdin_of(1).contains(CORRECTION));
+    assert!(!host.args_of(0).iter().any(|arg| arg == HOOKS_OFF));
+    assert!(host.args_of(1).iter().any(|arg| arg == HOOKS_OFF));
+}
+
+#[test]
+fn capture_starts_background_triage_and_queues_the_answer() {
+    let repo = Repo::new();
+    let host = FakeHost::new();
+    host.set_reply(REPLY);
+    let env = host.env();
+
+    let captured = capture_correction(&repo, &env);
+    assert_eq!(code(&captured), 0, "{}", both(&captured));
+    let id = cluster_id(&repo, &env);
+
+    let deadline = Instant::now() + BACKGROUND_TIMEOUT;
+    loop {
+        let out = repo.run(&["proposals", "list"], &env.pairs());
+        assert_eq!(code(&out), 0, "{}", both(&out));
+        let listed = stdout(&out)
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some(id.as_str()));
+        if listed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no proposal row for {id} within {BACKGROUND_TIMEOUT:?}:\n{}",
+            stdout(&out)
+        );
+        thread::sleep(POLL_INTERVAL);
+    }
+}
