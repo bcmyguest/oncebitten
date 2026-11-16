@@ -82,18 +82,18 @@ Pin one version for everyone so the gate behaves the same on every machine and i
 ```toml
 # pyproject.toml
 [dependency-groups]
-dev = ["oncebitten==0.1.0"]
+dev = ["oncebitten==0.1.1"]
 ```
 
 ```json
-{ "devDependencies": { "oncebitten": "0.1.0" } }
+{ "devDependencies": { "oncebitten": "0.1.1" } }
 ```
 
 ```yaml
 # .pre-commit-config.yaml: prebuilt binary from PyPI, no Rust toolchain
 repos:
   - repo: https://github.com/bcmyguest/oncebitten
-    rev: v0.1.0
+    rev: v0.1.1
     hooks:
       - id: oncebitten-gate-python
 ```
