@@ -22,7 +22,7 @@ The prompt carries a context block before the cluster details: the ids and descr
 | Host | Status | Command | Hooks off |
 |---|---|---|---|
 | claude | implemented | `claude -p --output-format json --setting-sources project,local --settings '{"disableAllHooks": true}' --disable-slash-commands --tools "" --json-schema <schema> --no-session-persistence` | proof required |
-| codex | implemented | `codex exec --skip-git-repo-check --json --ephemeral --disable hooks -s read-only --output-schema <file> -o <file>` | proof required |
+| codex | implemented; refused on codex 0.167.2 (see below) | `codex exec --skip-git-repo-check --json --ephemeral --disable hooks -s read-only --output-schema <file> -o <file>` | proof required |
 | opencode | implemented | `opencode run --format json --agent plan` | no proof (accepted by decision) |
 | pi | unsupported | none | none |
 
@@ -49,6 +49,8 @@ When the cluster's evidence is a command, the draft may use `engine = "steer"` (
 
 Before a claude or codex call, oncebitten runs the same call with hooks on and sentinel hooks installed in the temp directory's project scopes. Each sentinel writes a marker file. The control must fire every sentinel, or the proof is inconclusive. Then it runs the triage call with hooks off and fails if any sentinel fires.
 
+codex 0.167.2 does not run the project-scope sentinel: a `.codex/hooks.json` in the temp directory never fires, with or without `--dangerously-bypass-hook-trust` (run on 2026-11-16). The control therefore fails and every codex triage ends with `hooks-off proof inconclusive: sentinels did not fire with hooks on (codex project hooks)`. Codex is unusable as a triage host until the proof has a codex scope it can fire.
+
 The user settings scope (`~/.claude`, `~/.codex`) is not sentinel-tested. Those files hold the host's credentials and the proof cannot move HOME. Coverage of that scope rests on the hooks-off flag for each host.
 
 ## Code hunks
@@ -70,7 +72,7 @@ No verdict is ever printed with exit 2.
 
 ## Background mode
 
-`capture` starts `oncebitten triage <id> --queue` (a hidden flag) when a cluster reaches its threshold. It takes the cluster's triage lock, queues the answer, prints nothing and exits 2 on any failure. See [proposals.md](proposals.md#background-triage).
+`capture` starts `oncebitten triage <id> --queue` (a hidden flag) when a cluster reaches its threshold. It takes the cluster's triage lock, queues the answer, prints nothing and exits 2 on any failure, after storing the error in a `failed: <error>` row. `oncebitten proposals list` prints each cluster whose latest row is such a failure to stderr, with the host asked and the retry command; a later run of the cluster, or a queued proposal, clears the line. The row's `host` is the host asked, which differs from the `started` row's capturing host when the default target answered for it. See [proposals.md](proposals.md#background-triage).
 
 ## Daily budget
 
@@ -81,7 +83,8 @@ Each triage run is two host calls for claude and codex, so `triage.max_per_day` 
 | `started` | `capture` when it spawns `triage --queue`; manual `triage <id>` | yes |
 | `skipped: budget` | `capture` when the day's runs reach the cap; spawns nothing | no |
 | `spawn-failed` | `capture` when the `triage --queue` child cannot start | no |
+| `failed: <error>` | the `triage --queue` child when it exits 2; the error is one line, cut to 300 characters | no; the run's `started` row already counted |
 
-The day is the local calendar day. `capture` counts `started` rows since local midnight, then spawns or skips each due cluster. The `--queue` child writes no row, so one background run counts once. Manual `triage <id>` runs past the cap and prints `warning: triage budget spent: N of M runs today` to stderr; it still counts as a run.
+The day is the local calendar day. `capture` counts `started` rows since local midnight, then spawns or skips each due cluster. The `--queue` child writes no `started` row, so one background run counts once. Manual `triage <id>` runs past the cap and prints `warning: triage budget spent: N of M runs today` to stderr; it still counts as a run.
 
 A cluster skipped for budget gets one `skipped: budget` row. The next `capture` in the same repo, once the day's runs fall under the cap, starts it: oldest skip first, and only while its latest row is still the skip. A cluster with a proposal or rejection is never picked up again. `triggers.session` filters background starts in both paths (see [configuration.md](configuration.md)).

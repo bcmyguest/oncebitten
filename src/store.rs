@@ -192,6 +192,21 @@ impl TriageOutcome {
     }
 }
 
+/// Prefix of the `triage_runs.outcome` a failed background run writes; the
+/// error text follows it.
+pub const TRIAGE_FAILED_PREFIX: &str = "failed: ";
+/// Longest error text stored with a failed run, in characters.
+const TRIAGE_ERROR_MAX_CHARS: usize = 300;
+
+/// A background triage run that failed, and the error it ended with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriageFailure {
+    pub cluster: String,
+    pub ts: i64,
+    pub host: Option<String>,
+    pub error: String,
+}
+
 /// A `triage_runs` row, as read back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TriageRun {
@@ -852,6 +867,48 @@ impl Store {
             params![ts, cluster, host, outcome.as_str()],
         )?;
         Ok(())
+    }
+
+    /// Records that a triage run of `cluster` failed with `error`, on one line
+    /// cut to [`TRIAGE_ERROR_MAX_CHARS`]. This is a row of its own: the run's
+    /// `started` row stays, so the failure still spends the daily budget.
+    pub fn record_triage_failure(
+        &self,
+        cluster: &str,
+        host: Option<&str>,
+        ts: i64,
+        error: &str,
+    ) -> Result<()> {
+        let line = error.split_whitespace().collect::<Vec<_>>().join(" ");
+        let text: String = line.chars().take(TRIAGE_ERROR_MAX_CHARS).collect();
+        self.conn.execute(
+            "INSERT INTO triage_runs (ts, cluster, host, outcome) VALUES (?1, ?2, ?3, ?4)",
+            params![ts, cluster, host, format!("{TRIAGE_FAILED_PREFIX}{text}")],
+        )?;
+        Ok(())
+    }
+
+    /// Clusters whose latest `triage_runs` row is a failure and that have no
+    /// queued proposal, oldest first. Any later run of the cluster drops it.
+    pub fn triage_failures(&self) -> Result<Vec<TriageFailure>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.cluster, t.ts, t.host, t.outcome FROM triage_runs t \
+             WHERE substr(t.outcome, 1, ?1) = ?2 AND t.id = (\
+               SELECT MAX(id) FROM triage_runs WHERE cluster = t.cluster) \
+             AND NOT EXISTS (SELECT 1 FROM proposals p WHERE p.cluster = t.cluster) \
+             ORDER BY t.ts, t.id",
+        )?;
+        let prefix = TRIAGE_FAILED_PREFIX.len();
+        let rows = stmt.query_map(params![prefix as i64, TRIAGE_FAILED_PREFIX], |row| {
+            let outcome: String = row.get(3)?;
+            Ok(TriageFailure {
+                cluster: row.get(0)?,
+                ts: row.get(1)?,
+                host: row.get(2)?,
+                error: outcome[prefix..].to_string(),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Records a `Started` run for `cluster` when fewer than `max` runs started at

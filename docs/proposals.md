@@ -92,7 +92,8 @@ When `capture` records an event that brings a cluster to its threshold (see [evi
 
 - takes a per-cluster lock in the store, so one triage per cluster runs; a lock older than 30 minutes is taken over;
 - skips a cluster that is already queued or rejected without asking the host;
-- prints nothing and uses the triage timeout (120 seconds per host call).
+- prints nothing and uses the triage timeout (120 seconds per host call);
+- stores the error of a failed run, which `oncebitten proposals list` prints to stderr as `triage failed for <id> (<host>): <error>; retry: oncebitten triage <id>` until a later run of that cluster or a queued proposal replaces it.
 
 Capture ignores events outside a git repository for this purpose and never fails the host's hook because of triage. Set `triage.background = false` to turn it off (see [configuration.md](configuration.md)).
 
