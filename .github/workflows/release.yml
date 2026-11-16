@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           # Platform packages first: the main package depends on them.
-          for tgz in $(ls npm-packages/oncebitten-*-*.tgz) npm-packages/oncebitten-[0-9]*.tgz; do
+          for tgz in $(ls ./npm-packages/oncebitten-*-*.tgz) ./npm-packages/oncebitten-[0-9]*.tgz; do
             spec="$(tar -xzOf "$tgz" package/package.json | jq -r '.name + "@" + .version')"
             if npm view "$spec" version > /dev/null 2>&1; then
               echo "::notice::$spec is already on npm."
