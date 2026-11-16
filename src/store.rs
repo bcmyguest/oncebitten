@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection, OpenFlags};
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
+use rusqlite::{
+    params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
 use sha2::{Digest, Sha256};
 
 use crate::config::{home_dir, windows_app_dir, Platform};
@@ -84,6 +88,13 @@ CREATE TABLE IF NOT EXISTS decisions (
     tool TEXT,
     pattern TEXT
 );
+CREATE TABLE IF NOT EXISTS triage_runs (
+    id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    cluster TEXT NOT NULL,
+    host TEXT,
+    outcome TEXT NOT NULL
+);
 ";
 /// Columns `proposals deliver` fills. Databases created before delivery lack
 /// them; `add_delivery_columns` adds each missing one on open.
@@ -146,6 +157,34 @@ pub struct Rejection {
     pub cluster: String,
     pub ts: i64,
     pub reason: String,
+}
+
+/// What a `triage_runs` row records. `Started` spends one run of the daily
+/// budget; `SkippedBudget` marks a capture that spawned nothing; `SpawnFailed`
+/// marks a run that never started and so spends nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriageOutcome {
+    Started,
+    SkippedBudget,
+    SpawnFailed,
+}
+
+impl TriageOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TriageOutcome::Started => "started",
+            TriageOutcome::SkippedBudget => "skipped: budget",
+            TriageOutcome::SpawnFailed => "spawn-failed",
+        }
+    }
+}
+
+/// A `triage_runs` row, as read back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriageRun {
+    pub cluster: String,
+    pub ts: i64,
+    pub host: Option<String>,
 }
 
 /// What a queue row holds: a drafted rule, or a triage finding without one.
@@ -634,6 +673,102 @@ impl Store {
         Ok(())
     }
 
+    pub fn record_triage(
+        &self,
+        cluster: &str,
+        host: Option<&str>,
+        ts: i64,
+        outcome: TriageOutcome,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO triage_runs (ts, cluster, host, outcome) VALUES (?1, ?2, ?3, ?4)",
+            params![ts, cluster, host, outcome.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Records a `Started` run for `cluster` when fewer than `max` runs started at
+    /// or after `since` (ms), counting and inserting in one IMMEDIATE transaction
+    /// so concurrent captures cannot overspend. Returns the row id, or `None`
+    /// when the budget is spent.
+    pub fn claim_triage_run(
+        &self,
+        cluster: &str,
+        host: Option<&str>,
+        ts: i64,
+        since: i64,
+        max: u32,
+    ) -> Result<Option<i64>> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let spent: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM triage_runs WHERE outcome = ?1 AND ts >= ?2",
+            params![TriageOutcome::Started.as_str(), since],
+            |row| row.get(0),
+        )?;
+        if !within_budget(spent, max) {
+            return Ok(None);
+        }
+        tx.execute(
+            "INSERT INTO triage_runs (ts, cluster, host, outcome) VALUES (?1, ?2, ?3, ?4)",
+            params![ts, cluster, host, TriageOutcome::Started.as_str()],
+        )?;
+        let id = tx.last_insert_rowid();
+        tx.commit()?;
+        Ok(Some(id))
+    }
+
+    /// Rewrites the outcome of the `triage_runs` row `id`.
+    pub fn set_triage_outcome(&self, id: i64, outcome: TriageOutcome) -> Result<()> {
+        self.conn.execute(
+            "UPDATE triage_runs SET outcome = ?2 WHERE id = ?1",
+            params![id, outcome.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Triage runs started at or after `since` (ms). Skipped rows do not count.
+    pub fn triage_runs_since(&self, since: i64) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM triage_runs WHERE outcome = ?1 AND ts >= ?2",
+            params![TriageOutcome::Started.as_str(), since],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// The repo an event was captured in, or `None` for an unknown id or an
+    /// event captured outside a repo.
+    pub fn event_repo(&self, id: i64) -> Result<Option<String>> {
+        let repo = self
+            .conn
+            .query_row(
+                "SELECT repo FROM events WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        Ok(repo.flatten())
+    }
+
+    /// Clusters whose latest `triage_runs` row is `skipped: budget`, oldest
+    /// first. Rows are filtered on their latest outcome, so a later run of the
+    /// same cluster drops it from this list.
+    pub fn budget_skipped(&self) -> Result<Vec<TriageRun>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.cluster, t.ts, t.host FROM triage_runs t \
+             WHERE t.outcome = ?1 AND t.id = (\
+               SELECT MAX(id) FROM triage_runs WHERE cluster = t.cluster) \
+             ORDER BY t.ts, t.id",
+        )?;
+        let rows = stmt.query_map(params![TriageOutcome::SkippedBudget.as_str()], |row| {
+            Ok(TriageRun {
+                cluster: row.get(0)?,
+                ts: row.get(1)?,
+                host: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     fn query_decisions(
         &self,
         filter: &str,
@@ -775,6 +910,24 @@ pub fn probe(path: &Path) -> Result<Probe> {
         older if older < SCHEMA_VERSION => Probe::Older(older),
         newer => Probe::Newer(newer),
     })
+}
+
+/// The start of the calendar day holding `now_ms`, in `zone`, as unix ms.
+pub fn day_start_ms(now_ms: i64, zone: &TimeZone) -> Result<i64> {
+    let now = Timestamp::from_millisecond(now_ms).context("timestamp out of range")?;
+    let date = now.to_zoned(zone.clone()).date();
+    let midnight = date.at(0, 0, 0, 0).to_zoned(zone.clone())?;
+    Ok(midnight.timestamp().as_millisecond())
+}
+
+/// Whether `spent` triage runs leave room under the daily `max`.
+pub fn within_budget(spent: i64, max: u32) -> bool {
+    spent < i64::from(max)
+}
+
+/// `day_start_ms` in the system's local zone.
+pub fn local_day_start_ms(now_ms: i64) -> Result<i64> {
+    day_start_ms(now_ms, &TimeZone::system())
 }
 
 pub fn events_db_path_for(vars: &BTreeMap<String, String>, platform: Platform) -> Result<PathBuf> {

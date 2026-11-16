@@ -2,12 +2,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::config::{self, Inputs};
+use crate::config::{self, Inputs, SessionTrigger, Triggers};
 use crate::evidence::{self, Cluster};
 use crate::proof::{self, Replayed, Validity};
 use crate::replay::Verdict;
 use crate::rule::{self, Rule, Status};
 use crate::rules::{self, Failure};
+use crate::signal;
 pub use crate::store::{Kind, ProposalRow, State};
 use crate::store::{Outcome, Store};
 use crate::triage::draft::Draft;
@@ -56,10 +57,77 @@ pub enum Recorded {
 /// Clusters that event `event_id` brought to their threshold, not yet queued
 /// or rejected, whose event ran inside a git repository.
 pub fn due(store: &Store, event_id: i64) -> Result<Vec<Due>> {
+    due_gated(store, event_id, &Triggers::default())
+}
+
+/// The session trigger that starts a cluster of this class, or `None` when
+/// the class starts from a gate or a correction and never waits on a session
+/// trigger. Failure clusters come from tool-failure and repeat-failure, so
+/// both map to the repeat-failure trigger.
+fn session_trigger_for(class: &str) -> Option<SessionTrigger> {
+    match class {
+        evidence::CLASS_FAILURE => Some(SessionTrigger::RepeatFailure),
+        signal::USER_CORRECTION => Some(SessionTrigger::UserCorrection),
+        signal::TEST_FAIL_THEN_PASS => Some(SessionTrigger::TestFailThenPass),
+        signal::REVERT => Some(SessionTrigger::Revert),
+        _ => None,
+    }
+}
+
+fn session_trigger_on(class: &str, triggers: &Triggers) -> bool {
+    match session_trigger_for(class) {
+        Some(trigger) => triggers.session.contains(&trigger),
+        None => true,
+    }
+}
+
+/// Clusters a budget skip left behind, in `repo`, oldest skip first. A cluster
+/// qualifies while its latest `triage_runs` row is `skipped: budget` and it
+/// has no proposal or rejection yet. Each due item carries the skip's host.
+pub fn pickup(store: &Store, repo: &Path, triggers: &Triggers) -> Result<Vec<Due>> {
+    let clusters = evidence::load(store)?;
+    let mut out = Vec::new();
+    for run in store.budget_skipped()? {
+        let Some(cluster) = clusters.iter().find(|c| c.id == run.cluster) else {
+            continue;
+        };
+        if cluster.rejection.is_some() || store.proposal(&cluster.id)?.is_some() {
+            continue;
+        }
+        if !session_trigger_on(cluster.class, triggers) {
+            continue;
+        }
+        let Some(event) = cluster.occurrences.last().map(|o| &o.event) else {
+            continue;
+        };
+        let event_repo = event
+            .repo
+            .as_deref()
+            .map(Path::new)
+            .filter(|r| r.is_absolute())
+            .and_then(config::repo_root);
+        if event_repo.as_deref() != Some(repo) {
+            continue;
+        }
+        out.push(Due {
+            cluster: cluster.id.clone(),
+            repo: repo.to_path_buf(),
+            host: run.host.unwrap_or_default(),
+        });
+    }
+    Ok(out)
+}
+
+/// `due`, but a cluster whose class has its `triggers.session` entry off
+/// starts nothing. The cluster stays captured.
+pub fn due_gated(store: &Store, event_id: i64, triggers: &Triggers) -> Result<Vec<Due>> {
     let clusters = evidence::load(store)?;
     let mut out = Vec::new();
     for cluster in evidence::reached_threshold(&clusters, event_id) {
         if cluster.rejection.is_some() || store.proposal(&cluster.id)?.is_some() {
+            continue;
+        }
+        if !session_trigger_on(cluster.class, triggers) {
             continue;
         }
         let Some(event) = cluster

@@ -372,6 +372,7 @@ struct TriageSetup {
     triage: config::Triage,
     host: config::Host,
     agent: String,
+    max_per_day: u32,
 }
 
 fn triage_setup(host: Option<&str>) -> Result<TriageSetup> {
@@ -388,6 +389,7 @@ fn triage_setup(host: Option<&str>) -> Result<TriageSetup> {
         triage: loaded.config.triage.clone(),
         host,
         agent,
+        max_per_day: loaded.config.triage.max_per_day,
     })
 }
 
@@ -414,6 +416,21 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
     let setup = triage_setup(host)?;
     let clusters = evidence::load(&setup.store)?;
     let cluster = evidence::find(&clusters, id)?;
+    let now = now_millis()?;
+    let day = store::local_day_start_ms(now)?;
+    let spent = setup.store.triage_runs_since(day)?;
+    if !store::within_budget(spent, setup.max_per_day) {
+        eprintln!(
+            "warning: triage budget spent: {spent} of {} runs today; running anyway",
+            setup.max_per_day
+        );
+    }
+    setup.store.record_triage(
+        id,
+        Some(setup.host.as_str()),
+        now,
+        store::TriageOutcome::Started,
+    )?;
     let answer = ask(&setup, cluster)?;
     println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
     let checker = default_checker()?;

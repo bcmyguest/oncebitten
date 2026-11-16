@@ -595,3 +595,14 @@ fn blank_capture_test_commands_are_rejected() {
     sandbox.write_user("[capture]\ntest_commands = [\" \"]\n");
     assert!(load(&sandbox.inputs(&[])).is_err());
 }
+
+#[test]
+fn triage_max_per_day_defaults_to_ten_and_loads_from_project() {
+    let sandbox = Sandbox::new();
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    assert_eq!(loaded.config.triage.max_per_day, 10);
+    sandbox.write_project("[triage]\nmax_per_day = 3\n");
+    let loaded = load(&sandbox.inputs(&[])).unwrap();
+    assert_eq!(loaded.config.triage.max_per_day, 3);
+    assert_eq!(loaded.origins["triage.max_per_day"], Origin::Project);
+}

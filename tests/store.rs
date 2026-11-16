@@ -584,3 +584,148 @@ fn same_event_in_another_repo_is_kept() {
     other.repo = Some("/other".into());
     assert!(store.record(&other, &[]).unwrap().is_some());
 }
+
+#[test]
+fn triage_runs_count_only_started_rows_since_the_day_start() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage("c1", Some("claude"), 100, TriageOutcome::Started)
+        .unwrap();
+    store
+        .record_triage("c2", Some("claude"), 200, TriageOutcome::SkippedBudget)
+        .unwrap();
+    store
+        .record_triage("c3", None, 300, TriageOutcome::Started)
+        .unwrap();
+    assert_eq!(store.triage_runs_since(0).unwrap(), 2);
+    assert_eq!(store.triage_runs_since(250).unwrap(), 1);
+}
+
+#[test]
+fn day_start_is_local_midnight_in_the_given_zone() {
+    use jiff::tz::TimeZone;
+    use oncebitten::store::day_start_ms;
+    let zone = TimeZone::fixed(jiff::tz::offset(-5));
+    let now: jiff::Timestamp = "2026-11-15T01:30:00-05:00".parse().unwrap();
+    let start: jiff::Timestamp = "2026-11-15T00:00:00-05:00".parse().unwrap();
+    assert_eq!(
+        day_start_ms(now.as_millisecond(), &zone).unwrap(),
+        start.as_millisecond()
+    );
+}
+
+#[test]
+fn within_budget_allows_runs_below_the_daily_max() {
+    use oncebitten::store::within_budget;
+    assert!(within_budget(0, 1));
+    assert!(within_budget(9, 10));
+    assert!(!within_budget(10, 10));
+    assert!(!within_budget(11, 10));
+}
+
+#[test]
+fn budget_skipped_lists_clusters_whose_latest_run_was_skipped_oldest_first() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage("c1", Some("claude"), 200, TriageOutcome::SkippedBudget)
+        .unwrap();
+    store
+        .record_triage("c2", Some("claude"), 100, TriageOutcome::SkippedBudget)
+        .unwrap();
+    store
+        .record_triage("c2", Some("claude"), 300, TriageOutcome::Started)
+        .unwrap();
+    store
+        .record_triage("c3", Some("codex"), 50, TriageOutcome::SkippedBudget)
+        .unwrap();
+    let skipped = store.budget_skipped().unwrap();
+    let names: Vec<(&str, Option<&str>)> = skipped
+        .iter()
+        .map(|run| (run.cluster.as_str(), run.host.as_deref()))
+        .collect();
+    assert_eq!(names, [("c3", Some("codex")), ("c1", Some("claude"))]);
+}
+
+#[test]
+fn spawn_failed_runs_do_not_count_against_the_budget() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage("c1", Some("claude"), 100, TriageOutcome::SpawnFailed)
+        .unwrap();
+    assert_eq!(store.triage_runs_since(0).unwrap(), 0);
+}
+
+#[test]
+fn event_repo_returns_the_repo_an_event_was_captured_in() {
+    let store = Store::open_in_memory().unwrap();
+    let event = NewEvent {
+        ts: 1,
+        host: "codex".into(),
+        session_id: "s1".into(),
+        repo: Some("/work/app".into()),
+        kind: "user-correction".into(),
+        tool: None,
+        summary: "no".into(),
+    };
+    let id = store.record(&event, &[]).unwrap().unwrap();
+    assert_eq!(store.event_repo(id).unwrap().as_deref(), Some("/work/app"));
+    assert_eq!(store.event_repo(id + 1).unwrap(), None);
+}
+
+#[test]
+fn spawn_failed_outcome_is_spelled_with_a_hyphen() {
+    use oncebitten::store::TriageOutcome;
+    assert_eq!(TriageOutcome::SpawnFailed.as_str(), "spawn-failed");
+}
+
+#[test]
+fn concurrent_budget_claims_never_exceed_the_daily_cap() {
+    use std::sync::{Arc, Barrier};
+    const MAX: u32 = 3;
+    const RACERS: usize = 12;
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("events.db");
+    Store::open(&db).unwrap();
+    let barrier = Arc::new(Barrier::new(RACERS));
+    let handles: Vec<_> = (0..RACERS)
+        .map(|n| {
+            let db = db.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let store = Store::open(&db).unwrap();
+                barrier.wait();
+                store
+                    .claim_triage_run(&format!("c{n}"), Some("claude"), 100, 0, MAX)
+                    .unwrap()
+            })
+        })
+        .collect();
+    let claimed = handles
+        .into_iter()
+        .filter_map(|handle| handle.join().unwrap())
+        .count();
+    assert_eq!(claimed, MAX as usize);
+    assert_eq!(Store::open(&db).unwrap().triage_runs_since(0).unwrap(), 3);
+}
+
+#[test]
+fn a_claimed_run_that_fails_to_spawn_gives_its_budget_back() {
+    use oncebitten::store::TriageOutcome;
+    let store = Store::open_in_memory().unwrap();
+    let id = store
+        .claim_triage_run("c1", Some("claude"), 100, 0, 1)
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.claim_triage_run("c2", None, 100, 0, 1).unwrap(), None);
+    store
+        .set_triage_outcome(id, TriageOutcome::SpawnFailed)
+        .unwrap();
+    assert_eq!(store.triage_runs_since(0).unwrap(), 0);
+    assert!(store
+        .claim_triage_run("c2", None, 100, 0, 1)
+        .unwrap()
+        .is_some());
+}

@@ -39,7 +39,7 @@ dunce = "1.0.5"
 globset = "0.4"
 regex = "1"
 include_dir = "0.7"
-jiff = { version = "0.2.45", default-features = false, features = ["std"] }
+jiff = { version = "0.2.45", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform"] }
 rusqlite = { version = "0.42.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

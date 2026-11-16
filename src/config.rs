@@ -112,6 +112,9 @@ pub struct Triage {
     pub send_code: bool,
     /// Byte cap on the diff text sent to the triage host.
     pub max_code_bytes: usize,
+    /// Triage runs per local calendar day. Capture skips a background run
+    /// once the day's runs reach this; a manual `triage` still runs.
+    pub max_per_day: u32,
 }
 
 impl Default for Triage {
@@ -128,6 +131,7 @@ impl Default for Triage {
             background: true,
             send_code: true,
             max_code_bytes: DEFAULT_MAX_CODE_BYTES,
+            max_per_day: 10,
         }
     }
 }
