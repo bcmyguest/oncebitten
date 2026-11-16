@@ -44,3 +44,9 @@ Status as of 2026-11-16:
 | --- | --- | --- |
 | 10. Steer mode | Steer rules and their proofs, and routing for lessons git cannot see. | Done (PR #13) |
 | 11. Lifecycle | Rule exceptions with a reason and an expiry date, retirement, rollback and `oncebitten doctor`. | Done (PR #12) |
+
+## Experiments
+
+| Experiment | State |
+| --- | --- |
+| Prompt-intent classifier | Built behind the cargo feature `intent`, off by default and wired to nothing. It finds 0 of 25 rule-request and 0 of 25 correction test rows at a false-positive rate of 5% or less ([research](research/intent-classifier.md)). Regex signals stay the capture path. |

@@ -46,6 +46,7 @@ scripts/e2e-live.sh   # real Claude Code sessions: capture, background triage, a
 - `src/host.rs`: per-host hook payload to normalized event (claude, codex, cursor, copilot, opencode, pi).
 - `src/capture.rs`: capture pipeline behind `oncebitten capture`.
 - `src/hooks.rs`: installs and removes capture and steer hooks for every host.
+- `src/intent.rs`: experimental prompt-intent classifier, compiled only with the cargo feature `intent` and called by nothing in the binary. `bench/intent` and `docs/research/intent-classifier.md` hold its measurements; regex signals in `src/signal.rs` stay the capture path.
 - `src/steer.rs`: steer rules: normalized event, trigger matcher, replay, per-host output, `oncebitten steer`. `src/host.rs` `normalize_steer` maps payloads onto its events.
 - `docs/steer.md`: steer rule format, fixtures, the steer hook and what each host supports. Keep it in step with `src/steer.rs`, `src/host.rs` and `src/hooks.rs`.
 - `tests/steer.rs`, `tests/steer_gate.rs`, `tests/steer_hook.rs`, `tests/hooks_steer.rs`: steer schema, matcher, proof, gate, hook output and install tests.
