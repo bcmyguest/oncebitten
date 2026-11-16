@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::config::{self, Inputs, SessionTrigger, Triggers};
+use crate::duplicates::{first_match, Candidate, Mark};
 use crate::evidence::{self, Cluster};
 use crate::hits;
 use crate::proof::{self, Replayed, Validity};
@@ -10,9 +11,10 @@ use crate::replay::Verdict;
 use crate::rule::{self, Rule, Status};
 use crate::rules::{self, Failure};
 use crate::signal;
-pub use crate::store::{Kind, ProposalRow, State};
+pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
 use crate::store::{Outcome, Store};
 use crate::triage::draft::Draft;
+use crate::triage::prompt::context_block;
 use crate::triage::verdict::Answer;
 
 pub const LIST_HINT: &str = "oncebitten proposals list";
@@ -229,8 +231,17 @@ pub fn record(
         pr_url: None,
         hits: None,
     };
+    let class = answer.verdict.mistake_class.as_deref();
+    let text = answer
+        .draft
+        .as_ref()
+        .map_or(answer.verdict.root_cause.as_str(), |draft| {
+            draft.rationale.as_str()
+        });
+    let mark = possible_duplicate(store, &cluster.id, class, Some(text))?.map(|m| m.to_string());
     let Some(draft) = &answer.draft else {
         store.insert_proposal(&row)?;
+        store.set_proposal_marks(&cluster.id, class, mark.as_deref())?;
         return Ok(Recorded::Finding);
     };
     let existing = load_rules(inputs).context("the current rules do not load")?;
@@ -241,8 +252,62 @@ pub fn record(
     let queued = queue_written(store, inputs, draft, &dir, row, prove);
     if !matches!(queued, Ok(Recorded::Proposed { .. })) {
         let _ = std::fs::remove_dir_all(&dir);
+    } else {
+        store.set_proposal_marks(&cluster.id, class, mark.as_deref())?;
     }
     queued
+}
+
+/// The first queued or rejected proposal that `class` or `text` matches, other
+/// than `id` itself. Matching is advisory: the user decides what to merge.
+pub fn possible_duplicate(
+    store: &Store,
+    id: &str,
+    class: Option<&str>,
+    text: Option<&str>,
+) -> Result<Option<Mark>> {
+    let rows = store.mark_candidates()?;
+    let others: Vec<Candidate> = rows
+        .iter()
+        .filter(|row| row.cluster != id)
+        .map(|row| Candidate {
+            id: &row.cluster,
+            class: row.mistake_class.as_deref(),
+            text: row.rationale.as_deref(),
+        })
+        .collect();
+    Ok(first_match(&Candidate { id, class, text }, &others))
+}
+
+/// The context block for the triage prompt: loaded rule ids with descriptions,
+/// and past rejection reasons. Both lists are bounded by `context_block`. A rule
+/// that fails to load is left out, so a broken rule never blocks triage.
+pub fn triage_context(store: &Store, inputs: &Inputs) -> Result<String> {
+    let rules: Vec<(String, String)> = match rules::load_skipping_broken(inputs) {
+        Ok((resolved, _)) => resolved
+            .into_iter()
+            .map(|entry| (entry.id, entry.rule.description))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    let rejections: Vec<String> = store
+        .rejections()?
+        .into_iter()
+        .map(|rejection| rejection.reason)
+        .collect();
+    Ok(context_block(&rules, &rejections))
+}
+
+/// Lines that show a proposal's duplicate marks in `list`, `show` and PR bodies.
+pub fn mark_lines(marks: &ProposalMarks) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(possible) = &marks.possible_duplicate {
+        lines.push(possible.clone());
+    }
+    if let Some(of) = &marks.duplicate_of {
+        lines.push(format!("confirmed duplicate of {of}"));
+    }
+    lines
 }
 
 /// Proves and queues the rule directory `dir`. The caller removes `dir`
@@ -333,6 +398,23 @@ pub fn accept(store: &Store, id: &str) -> Result<PathBuf> {
 /// triage does not propose it again, and a still-proposed rule is removed.
 /// The cluster's events are deleted; its decision record keeps the counts.
 pub fn reject(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
+    reject_with_reason(store, id, reason, ts)
+}
+
+/// Rejects `id` as a duplicate of `other`, which must be a queued or rejected
+/// proposal. The link is kept for the user; nothing merges automatically.
+pub fn reject_duplicate(store: &Store, id: &str, other: &str, ts: i64) -> Result<()> {
+    if id == other {
+        bail!("proposal `{id}` cannot be a duplicate of itself");
+    }
+    if store.proposal(other)?.is_none() {
+        bail!("no proposal `{other}`; see {LIST_HINT}");
+    }
+    reject_with_reason(store, id, &format!("duplicate of {other}"), ts)?;
+    store.set_duplicate_of(id, other)
+}
+
+fn reject_with_reason(store: &Store, id: &str, reason: &str, ts: i64) -> Result<()> {
     if reason.trim().is_empty() {
         bail!("a rejection needs a non-empty reason");
     }

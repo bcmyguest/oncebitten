@@ -197,8 +197,15 @@ enum ProposalsAction {
     /// Reject a proposal; its cluster is never proposed again
     Reject {
         id: String,
-        #[arg(long)]
-        reason: String,
+        #[arg(
+            long,
+            required_unless_present = "duplicate_of",
+            conflicts_with = "duplicate_of"
+        )]
+        reason: Option<String>,
+        /// Reject as a duplicate of another proposal, recording the link
+        #[arg(long, conflicts_with = "reason")]
+        duplicate_of: Option<String>,
     },
     /// Commit a proposed rule to the current branch or to the writable rules source; exit 2 on a finding or a rejected proposal
     Deliver {
@@ -394,14 +401,15 @@ fn triage_setup(host: Option<&str>) -> Result<TriageSetup> {
     })
 }
 
-fn ask(setup: &TriageSetup, cluster: &Cluster) -> Result<Answer> {
-    triage::flow::ask_cluster(
+fn ask(setup: &TriageSetup, cluster: &Cluster, context: &str) -> Result<Answer> {
+    triage::flow::ask_cluster_with_context(
         &triage::run::ProcessRunner,
         setup.host,
         &setup.agent,
         &setup.store,
         cluster,
         &setup.triage,
+        context,
         triage::flow::DEFAULT_TIMEOUT,
     )
 }
@@ -432,7 +440,8 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
         now,
         store::TriageOutcome::Started,
     )?;
-    let answer = ask(&setup, cluster)?;
+    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let answer = ask(&setup, cluster, &context)?;
     println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
@@ -463,7 +472,8 @@ fn triage_queued(id: &str, host: Option<&str>) -> Result<()> {
     let setup = triage_setup(host)?;
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
-    let ask = |cluster: &Cluster| ask(&setup, cluster);
+    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let ask = |cluster: &Cluster| ask(&setup, cluster, &context);
     proposals::triage_queued(&setup.store, &setup.inputs, id, &ask, &prove, now_millis()?)?;
     Ok(())
 }
@@ -506,16 +516,28 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
         ProposalsAction::List => {
             for row in store.proposals()? {
                 println!("{}", proposal_line(&row));
+                for line in
+                    proposals::mark_lines(&store.proposal_marks(&row.cluster)?.unwrap_or_default())
+                {
+                    println!("  {line}");
+                }
             }
             Ok(())
         }
         ProposalsAction::Show { id } => show_proposal(&store, &id),
         ProposalsAction::Accept { id } => run_accept(&store, &inputs, &id),
         ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
-        ProposalsAction::Reject { id, reason } => {
-            proposals::reject(&store, &id, &reason, now_millis()?)
-                .map(|()| println!("rejected {id}"))
-        }
+        ProposalsAction::Reject {
+            id,
+            reason,
+            duplicate_of,
+        } => match (duplicate_of, reason) {
+            (Some(other), _) => proposals::reject_duplicate(&store, &id, &other, now_millis()?)
+                .map(|()| println!("rejected {id} as a duplicate of {other}")),
+            (None, Some(reason)) => proposals::reject(&store, &id, &reason, now_millis()?)
+                .map(|()| println!("rejected {id}")),
+            (None, None) => anyhow::bail!("reject needs --reason or --duplicate-of"),
+        },
     };
     if let Err(error) = result {
         eprintln!("error: {error:#}");
@@ -582,6 +604,9 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
         anyhow::bail!("no proposal `{id}`; see {}", proposals::LIST_HINT);
     };
     println!("{}", proposal_line(&row));
+    for line in proposals::mark_lines(&store.proposal_marks(&row.cluster)?.unwrap_or_default()) {
+        println!("{line}");
+    }
     if let Some(dir) = &row.dir {
         println!("rule dir: {}", dir.display());
     }
