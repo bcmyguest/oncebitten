@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::config::{self, Inputs, SessionTrigger, Triggers};
 use crate::evidence::{self, Cluster};
+use crate::hits;
 use crate::proof::{self, Replayed, Validity};
 use crate::replay::Verdict;
 use crate::rule::{self, Rule, Status};
@@ -226,6 +227,7 @@ pub fn record(
         target: None,
         commit: None,
         pr_url: None,
+        hits: None,
     };
     let Some(draft) = &answer.draft else {
         store.insert_proposal(&row)?;
@@ -264,6 +266,9 @@ fn queue_written(
     row.proven = proven;
     row.note = note;
     row.rationale = Some(draft.rationale.trim().to_owned());
+    // A rule whose hits fail to count stays unmeasured; it never blocks a proposal.
+    row.hits = config::repo_root(&inputs.cwd)
+        .and_then(|repo| hits::measure(inputs, &repo, dir).ok().flatten());
     if !store.insert_proposal(&row)? {
         return Ok(Recorded::AlreadyQueued);
     }

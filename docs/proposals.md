@@ -47,9 +47,9 @@ oncebitten proposals reject <cluster-id> --reason <text>
 
 Proposals are keyed by their evidence cluster id.
 
-- `list` prints `cluster  state  kind  rule  proof  repo` per queued result. State is `waiting`, `accepted` or `rejected`; kind is `proposal` or `finding`; proof is `proven`, `unproven` or `-`.
-- `show` adds the rule directory, rationale, proof note, verdict JSON and the occurrence event ids that produced it. After a decision it prints the kept counts instead, because the events are gone.
-- `accept` flips `status = "proposed"` to `status = "active"` only when the rule has a valid proof. Otherwise it exits 2 with the reason: no proof, a stale proof, or a finding. Commit the rule directory with its `proof.json`.
+- `list` prints `cluster  state  kind  rule  proof  hits  repo` per queued result. State is `waiting`, `accepted` or `rejected`; kind is `proposal` or `finding`; proof is `proven`, `unproven` or `-`; hits is `N hits in M files` or `-`.
+- `show` adds the rule directory, the hits with up to three sample lines (`path:line: text`), rationale, proof note, verdict JSON and the occurrence event ids that produced it. After a decision it prints the kept counts instead, because the events are gone.
+- `accept` flips `status = "proposed"` to `status = "active"` only when the rule has a valid proof. Otherwise it exits 2 with the reason: no proof, a stale proof, or a finding. Commit the rule directory with its `proof.json`. On activation, `accept` also writes, in the proposal's own repo whatever the cwd, one `.oncebitten/baseline.json` entry per existing hit of that rule, and keeps the entries of other rules. Later commits that touch those lines pass the gate; a new hit fails it.
 - `reject` records the rejection in the evidence store (as `evidence reject` does) and removes the rule directory if it is still proposed. The cluster is never proposed again.
 - `accept` and `reject` delete the cluster's captured events and keep one provenance record: outcome, rule, reason, occurrence and session counts, first and last seen, decision time. The `rejections` table, not the events, keeps a rejected cluster from returning.
 
@@ -79,34 +79,29 @@ Capture ignores events outside a git repository for this purpose and never fails
 
 Two tables in the evidence database, created on open: `proposals` (one row per cluster: repo, kind, state, rule id and directory, proof flag and note, verdict JSON, rationale, occurrence ids, and after delivery the target, commit and PR URL) and `triage_locks`.
 
+## Existing hits
+
+When a proposal is recorded, its rule runs over the tracked files as they are on disk. The count is stored as `N hits in M files` with up to three sample lines. It informs reviewers and never blocks.
+
+- Only `ast-grep` rules are counted. Native rules and diff rules show `-`.
+- A scan that fails leaves the proposal queued with no hits.
+- `list` shows the count; `show` shows the count and samples. The delivered PR body adds `Hits:` and the line `existing hits will be baselined`, which `accept` makes true in the proposal's own repo. A `rules-repo` PR qualifies the line: only the proposal's repo is baselined, and other repos using the rule get no baseline.
+
 ## Delivery
 
 `oncebitten proposals deliver <cluster-id> [--to pr|rules-repo] [--push]` commits a proposed rule. It never sets the rule's status; `proposals accept` does.
 
-```mermaid
-flowchart TD
-    A[deliver id] --> B{kind and state}
-    B -->|finding or rejected| X[exit 2]
-    B -->|rule| C{proof valid?}
-    C -->|no| D[replay; unproven keeps going, stated in message]
-    C -->|yes| E
-    D --> E{--to given?}
-    E -->|pr| P
-    E -->|rules-repo| R
-    E -->|no| F{forge reports open PR for branch?}
-    F -->|yes| P
-    F -->|no| R
-    F -->|forge error| G{writable source?}
-    G -->|yes| R
-    G -->|no| X
-    P[commit the rule dir on the current branch] -->|--push| P2[git push]
-    R[copy the rule dir into the writable source clone, branch oncebitten/propose-id, commit] -->|--push| R2[push, open PR through the forge of the clone's origin]
-    R -->|no --push| R3[print the branch and the push command]
-```
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="media/proposals-delivery-dark.svg" />
+<img src="media/proposals-delivery.svg" alt="Flowchart of proposals deliver: a finding or rejected proposal exits 2. A rule with a missing or stale proof replays first, and an unproven rule still goes on. With no --to, an open PR for the branch or a forge error with no writable source decides between pr and rules-repo. pr commits the rule directory on the current branch, and rules-repo copies it into the writable source clone on branch oncebitten/propose-id. --push pushes and opens a PR; without it the rules-repo path prints the branch and push command." width="624" />
+</picture>
+</p>
 
 - A stale or missing proof replays first, with the prover `triage` uses. A rule that stays unproven is still delivered; the commit message and PR body say `unproven: <reason>`.
 - `pr` commits only the rule directory, with the message `chore(oncebitten): propose rule <id>` and a body that lists the cluster id, the rationale and the proof state. Nothing to commit exits 2. `--push` runs `git push` to the branch's upstream.
 - `rules-repo` needs the one source with `writable = true` (`rules.sources[].writable`) and that source cloned by `rules sync`. It copies the rule directory into the clone, creates `oncebitten/propose-<id>` there and commits. The clone stays on that branch until the next `rules sync`. With `--push` it pushes the branch and opens a PR against the source's `rev`, or origin's default branch; without it prints the branch and the push command.
 - The forge is chosen as in [configuration.md](configuration.md) (`forge` key, else the `origin` remote). A forge CLI that is missing or exits non-zero is an error that carries its stderr.
 - The store records the target, commit and PR URL; `proposals list` and `proposals show` print them. Older databases gain the three columns on open.
+- The `Hits:` line and `existing hits will be baselined` line appear in the PR body when the proposal has hits. For `rules-repo` the line says that only the proposal's repo is baselined, by `oncebitten proposals accept <id>`.
 - Exit 0 delivered; 2 a finding, a rejected proposal, no target, or any failure.

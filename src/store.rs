@@ -99,6 +99,13 @@ CREATE TABLE IF NOT EXISTS triage_runs (
 /// Columns `proposals deliver` fills. Databases created before delivery lack
 /// them; `add_delivery_columns` adds each missing one on open.
 const DELIVERY_COLUMNS: [&str; 3] = ["target", "commit_sha", "pr_url"];
+/// Columns `proposals list` and `show` read the baseline hits from. Databases
+/// created before they existed get each one on open, as `add_hits_columns`.
+const HITS_COLUMNS: [(&str, &str); 3] = [
+    ("hits_count", "INTEGER"),
+    ("hits_files", "INTEGER"),
+    ("hits_samples", "TEXT"),
+];
 /// Indexes for expiry. Created by `Store::expire`, never by `open`, so the
 /// gate's open builds no index on a large store.
 const EXPIRY_INDEXES: &str = "
@@ -302,6 +309,8 @@ pub struct ProposalRow {
     /// The commit that delivery made.
     pub commit: Option<String>,
     pub pr_url: Option<String>,
+    /// How often the rule fires on the repo at HEAD. `None` until measured.
+    pub hits: Option<HitsRow>,
 }
 
 /// What `proposals deliver` did, as the store keeps it.
@@ -310,6 +319,15 @@ pub struct DeliveryRow {
     pub target: String,
     pub commit: String,
     pub pr_url: Option<String>,
+}
+
+/// How often a proposed rule fires on the repo at HEAD: `count` hits in
+/// `files` files, with up to three `path:line: text` samples.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HitsRow {
+    pub count: i64,
+    pub files: i64,
+    pub samples: Vec<String>,
 }
 
 pub struct Store {
@@ -345,6 +363,7 @@ impl Store {
         migrate(&conn)?;
         conn.execute_batch(QUEUE)?;
         add_delivery_columns(&conn)?;
+        add_hits_columns(&conn)?;
         Ok(Store { conn })
     }
 
@@ -576,8 +595,8 @@ impl Store {
     pub fn insert_proposal(&self, row: &ProposalRow) -> Result<bool> {
         let inserted = self.conn.execute(
             &format!(
-                "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+                "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}, hits_count, hits_files, hits_samples) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
             ),
             params![
                 row.cluster,
@@ -594,6 +613,12 @@ impl Store {
                 row.verdict,
                 row.rationale,
                 serde_json::to_string(&row.occurrences)?,
+                row.hits.as_ref().map(|hits| hits.count),
+                row.hits.as_ref().map(|hits| hits.files),
+                row.hits
+                    .as_ref()
+                    .map(|hits| serde_json::to_string(&hits.samples))
+                    .transpose()?,
             ],
         )?;
         Ok(inserted == 1)
@@ -632,6 +657,19 @@ impl Store {
         let changed = self.conn.execute(
             "UPDATE proposals SET proven = ?2, note = ?3 WHERE cluster = ?1",
             params![cluster, proven, note],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
+    /// Records how often the proposed rule fires on the repo at HEAD.
+    pub fn set_proposal_hits(&self, cluster: &str, hits: &HitsRow) -> Result<()> {
+        let samples = serde_json::to_string(&hits.samples)?;
+        let changed = self.conn.execute(
+            "UPDATE proposals SET hits_count = ?2, hits_files = ?3, hits_samples = ?4 WHERE cluster = ?1",
+            params![cluster, hits.count, hits.files, samples],
         )?;
         if changed == 0 {
             bail!("no proposal `{cluster}`");
@@ -817,7 +855,7 @@ impl Store {
         args: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<ProposalRow>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT {PROPOSAL_COLUMNS}, target, commit_sha, pr_url FROM proposals {filter} ORDER BY ts, cluster"
+            "SELECT {PROPOSAL_COLUMNS}, target, commit_sha, pr_url, hits_count, hits_files, hits_samples FROM proposals {filter} ORDER BY ts, cluster"
         ))?;
         let rows = stmt.query_map(args, |row| {
             Ok((
@@ -836,6 +874,9 @@ impl Store {
                 row.get::<_, Option<String>>(12)?,
                 row.get::<_, Option<String>>(13)?,
                 row.get::<_, Option<String>>(14)?,
+                row.get::<_, Option<i64>>(15)?,
+                row.get::<_, Option<i64>>(16)?,
+                row.get::<_, Option<String>>(17)?,
             ))
         })?;
         let mut out = Vec::new();
@@ -856,7 +897,19 @@ impl Store {
                 target,
                 commit,
                 pr_url,
+                hits_count,
+                hits_files,
+                hits_samples,
             ) = row?;
+            let hits = match (hits_count, hits_samples) {
+                (Some(count), Some(samples)) => Some(HitsRow {
+                    count,
+                    files: hits_files.unwrap_or(0),
+                    samples: serde_json::from_str(&samples)
+                        .with_context(|| format!("proposal `{cluster}` has unreadable hits"))?,
+                }),
+                _ => None,
+            };
             out.push(ProposalRow {
                 kind: Kind::parse(&kind)
                     .with_context(|| format!("proposal `{cluster}` has unknown kind `{kind}`"))?,
@@ -864,6 +917,7 @@ impl Store {
                     .with_context(|| format!("proposal `{cluster}` has unknown state `{state}`"))?,
                 occurrences: serde_json::from_str(&occ)
                     .with_context(|| format!("proposal `{cluster}` has unreadable occurrences"))?,
+                hits,
                 cluster,
                 ts,
                 repo,
@@ -1003,6 +1057,19 @@ fn add_delivery_columns(conn: &Connection) -> Result<()> {
     for name in DELIVERY_COLUMNS {
         if !columns.iter().any(|column| column == name) {
             conn.execute_batch(&format!("ALTER TABLE proposals ADD COLUMN {name} TEXT"))?;
+        }
+    }
+    Ok(())
+}
+
+fn add_hits_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(proposals)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (name, kind) in HITS_COLUMNS {
+        if !columns.iter().any(|column| column == name) {
+            conn.execute_batch(&format!("ALTER TABLE proposals ADD COLUMN {name} {kind}"))?;
         }
     }
     Ok(())

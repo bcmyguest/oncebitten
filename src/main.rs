@@ -13,6 +13,7 @@ use oncebitten::evidence::{self, Cluster};
 use oncebitten::exceptions::{self, Exception};
 use oncebitten::forge;
 use oncebitten::gate::{self, Stage};
+use oncebitten::hits;
 use oncebitten::hooks::{self, Scope};
 use oncebitten::host::Host;
 use oncebitten::lifecycle;
@@ -474,6 +475,30 @@ fn open_store(inputs: &Inputs) -> Result<Store> {
     )?)
 }
 
+/// Accepts a proposal, then baselines the rule's existing hits in the
+/// proposal's own repo, whatever the cwd. The rule is active once `accept`
+/// returns, so a failed baseline leaves it active.
+fn run_accept(store: &Store, inputs: &Inputs, id: &str) -> Result<()> {
+    let repo = PathBuf::from(proposals::find(store, id)?.repo);
+    let dir = proposals::accept(store, id)?;
+    let rule = oncebitten::rule::load_rule(&dir)?;
+    let in_repo = Inputs {
+        cwd: repo,
+        vars: inputs.vars.clone(),
+    };
+    match gate::baseline_rule(&in_repo, &rule.id) {
+        Ok(path) => {
+            println!(
+                "accepted {id}: {} is active; existing hits baselined in {}",
+                dir.display(),
+                path.display()
+            );
+            Ok(())
+        }
+        Err(failure) => exit_could_not_run(failure),
+    }
+}
+
 fn run_proposals(action: ProposalsAction) -> Result<()> {
     let inputs = Inputs::from_process()?;
     let store = open_store(&inputs)?;
@@ -485,9 +510,7 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
             Ok(())
         }
         ProposalsAction::Show { id } => show_proposal(&store, &id),
-        ProposalsAction::Accept { id } => proposals::accept(&store, &id).map(|dir| {
-            println!("accepted {id}: {} is active", dir.display());
-        }),
+        ProposalsAction::Accept { id } => run_accept(&store, &inputs, &id),
         ProposalsAction::Deliver { id, to, push } => run_deliver(&store, &inputs, &id, to, push),
         ProposalsAction::Reject { id, reason } => {
             proposals::reject(&store, &id, &reason, now_millis()?)
@@ -541,13 +564,15 @@ fn proposal_line(row: &ProposalRow) -> String {
         Kind::Proposal if row.proven => "proven",
         Kind::Proposal => "unproven",
     };
+    let hits = row.hits.as_ref().map_or("-".to_owned(), hits::summary_text);
     format!(
-        "{}  {}  {}  {}  {}  {}",
+        "{}  {}  {}  {}  {}  {}  {}",
         row.cluster,
         row.state.as_str(),
         row.kind.as_str(),
         row.rule.as_deref().unwrap_or("-"),
         proof,
+        hits,
         row.repo
     )
 }
@@ -565,6 +590,13 @@ fn show_proposal(store: &Store, id: &str) -> Result<()> {
     }
     if let Some(url) = &row.pr_url {
         println!("pr: {url}");
+    }
+    if let Some(hits) = &row.hits {
+        println!("hits: {}", hits::summary_text(hits));
+        for sample in &hits.samples {
+            println!("  {sample}");
+        }
+        println!("existing hits will be baselined");
     }
     if let Some(rationale) = &row.rationale {
         println!("rationale: {rationale}");

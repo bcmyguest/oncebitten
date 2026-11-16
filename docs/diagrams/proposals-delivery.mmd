@@ -1,0 +1,19 @@
+flowchart TD
+A[deliver id] --> B{kind and state}
+B -->|finding or rejected| X[exit 2]
+B -->|rule| C{proof valid?}
+C -->|no| D[replay; unproven keeps going, stated in message]
+C -->|yes| E
+D --> E{--to given?}
+E -->|pr| P
+E -->|rules-repo| R
+E -->|no| F{forge reports open PR for branch?}
+F -->|yes| P
+F -->|no| R
+F -->|forge error| G{writable source?}
+G -->|yes| R
+G -->|no| X
+P[commit the rule dir on the current branch] -->|--push| P2[git push]
+R[copy the rule dir into the writable source clone, branch oncebitten/propose-id, commit] -->|--push| R2[push, open PR through the forge of the clone's origin]
+R -->|no --push| R3[print the branch and the push command]
+

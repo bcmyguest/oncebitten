@@ -10,6 +10,7 @@ pub mod evidence;
 pub mod exceptions;
 pub mod forge;
 pub mod gate;
+pub mod hits;
 pub mod hooks;
 pub mod host;
 pub mod lifecycle;
