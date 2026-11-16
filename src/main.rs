@@ -369,6 +369,7 @@ fn run_triage(id: &str, host: Option<&str>, queue: bool) -> Result<()> {
 struct TriageSetup {
     inputs: Inputs,
     store: Store,
+    triage: config::Triage,
     host: config::Host,
     agent: String,
 }
@@ -384,17 +385,20 @@ fn triage_setup(host: Option<&str>) -> Result<TriageSetup> {
     Ok(TriageSetup {
         inputs,
         store,
+        triage: loaded.config.triage.clone(),
         host,
         agent,
     })
 }
 
 fn ask(setup: &TriageSetup, cluster: &Cluster) -> Result<Answer> {
-    triage::flow::run_answer(
+    triage::flow::ask_cluster(
         &triage::run::ProcessRunner,
         setup.host,
         &setup.agent,
-        &triage::flow::prompt_input(cluster),
+        &setup.store,
+        cluster,
+        &setup.triage,
         triage::flow::DEFAULT_TIMEOUT,
     )
 }

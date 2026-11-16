@@ -352,9 +352,21 @@ pub fn is_edit_tool(tool: &str) -> bool {
     EDIT_TOOLS.contains(&tool.to_ascii_lowercase().as_str())
 }
 
+/// Codex `apply_patch` and opencode `patch`: their summary lists the files the
+/// patch names, one per line.
+pub fn is_patch_tool(tool: &str) -> bool {
+    PATCH_TOOLS.contains(&tool.to_ascii_lowercase().as_str())
+}
+
 fn tool_summary(value: &Value, tool: &str) -> String {
     let input = &tool_input(value);
     let lower = tool.to_ascii_lowercase();
+    if is_patch_tool(tool) {
+        let paths = edited_paths(tool, input);
+        if !paths.is_empty() {
+            return paths.join("\n");
+        }
+    }
     let found = if is_command_tool(tool) {
         input["command"].as_str()
     } else if PATH_TOOLS.contains(&lower.as_str()) {

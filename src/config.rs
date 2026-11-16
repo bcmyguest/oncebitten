@@ -14,6 +14,7 @@ const CONFIG_FILE: &str = "config.toml";
 const GIT_MARKER: &str = ".git";
 const ENV_PREFIX: &str = "ONCEBITTEN_";
 const DEFAULT_TTL_DAYS: u32 = 30;
+const DEFAULT_MAX_CODE_BYTES: usize = 16 * 1024;
 const PATH_VARS: &[&str] = &[
     "HOME",
     "USERPROFILE",
@@ -107,6 +108,10 @@ pub struct Triage {
     /// Start triage in the background when capture brings a cluster to its
     /// threshold.
     pub background: bool,
+    /// Send the code hunks a session changed to the triage host.
+    pub send_code: bool,
+    /// Byte cap on the diff text sent to the triage host.
+    pub max_code_bytes: usize,
 }
 
 impl Default for Triage {
@@ -121,6 +126,8 @@ impl Default for Triage {
             pi: None,
             opencode: None,
             background: true,
+            send_code: true,
+            max_code_bytes: DEFAULT_MAX_CODE_BYTES,
         }
     }
 }
@@ -244,6 +251,9 @@ pub struct Config {
 
 impl Config {
     fn validate(&self) -> Result<()> {
+        if self.triage.send_code && self.triage.max_code_bytes == 0 {
+            bail!("triage.max_code_bytes must be at least 1");
+        }
         if self.evidence.ttl_days == 0 {
             bail!("evidence.ttl_days must be at least 1");
         }
