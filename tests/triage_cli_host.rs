@@ -189,3 +189,62 @@ fn capture_starts_background_triage_and_queues_the_answer() {
         thread::sleep(POLL_INTERVAL);
     }
 }
+
+fn wait_for_failure_note(repo: &Repo, env: &HostEnv, id: &str) -> String {
+    let deadline = Instant::now() + BACKGROUND_TIMEOUT;
+    loop {
+        let out = repo.run(&["proposals", "list"], &env.pairs());
+        assert_eq!(code(&out), 0, "{}", both(&out));
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        if stderr.contains(id) {
+            return stderr;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no failure note for {id} within {BACKGROUND_TIMEOUT:?}:\n{}",
+            both(&out)
+        );
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
+#[test]
+fn a_failed_background_triage_is_reported_by_proposals_list() {
+    let repo = Repo::new();
+    let host = FakeHost::new();
+    host.set_reply("not json");
+    let env = host.env();
+
+    let captured = capture_correction(&repo, &env);
+    assert_eq!(code(&captured), 0, "{}", both(&captured));
+    let id = cluster_id(&repo, &env);
+
+    let note = wait_for_failure_note(&repo, &env, &id);
+    assert!(note.contains("triage failed"), "{note}");
+    assert!(note.contains("claude"), "{note}");
+    assert!(note.contains(&format!("oncebitten triage {id}")), "{note}");
+    let listed = repo.run(&["proposals", "list"], &env.pairs());
+    assert_eq!(stdout(&listed), "", "a failure is not a proposal");
+}
+
+#[test]
+fn a_later_answer_clears_the_failure_note() {
+    let repo = Repo::new();
+    let host = FakeHost::new();
+    host.set_reply("not json");
+    let env = host.env();
+
+    let captured = capture_correction(&repo, &env);
+    assert_eq!(code(&captured), 0, "{}", both(&captured));
+    let id = cluster_id(&repo, &env);
+    wait_for_failure_note(&repo, &env, &id);
+
+    host.set_reply(REPLY);
+    let retried = repo.run(&["triage", &id, "--host", "claude"], &env.pairs());
+    assert_eq!(code(&retried), 0, "{}", both(&retried));
+
+    let listed = repo.run(&["proposals", "list"], &env.pairs());
+    let stderr = String::from_utf8_lossy(&listed.stderr);
+    assert!(!stderr.contains("triage failed"), "{stderr}");
+    assert!(stdout(&listed).contains(&id));
+}

@@ -23,8 +23,8 @@ const ROWS: [(&str, &[&str]); 5] = [
     (UNKNOWN_CLASS, &[]),
 ];
 
-/// One funnel row. `triage_runs` is `None`: the store records a queue row only
-/// for a triage that answered, so a run that failed leaves no trace.
+/// One funnel row. `triage_runs` is `None`: the funnel does not read the
+/// `triage_runs` table yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Row {
     pub kind: &'static str,

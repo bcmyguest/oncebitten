@@ -814,3 +814,38 @@ fn a_claimed_run_that_fails_to_spawn_gives_its_budget_back() {
         .unwrap()
         .is_some());
 }
+
+#[test]
+fn a_failed_run_keeps_its_budget_spent_and_is_listed_until_a_later_run() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .claim_triage_run("c1", Some("claude"), 100, 0, 1)
+        .unwrap()
+        .unwrap();
+    store
+        .record_triage_failure("c1", Some("codex"), 200, "could not run:\n  host said no")
+        .unwrap();
+
+    assert_eq!(store.triage_runs_since(0).unwrap(), 1);
+    let failures = store.triage_failures().unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].cluster, "c1");
+    assert_eq!(failures[0].host.as_deref(), Some("codex"));
+    assert_eq!(failures[0].error, "could not run: host said no");
+
+    store
+        .claim_triage_run("c1", Some("claude"), 300, 0, 5)
+        .unwrap()
+        .unwrap();
+    assert!(store.triage_failures().unwrap().is_empty());
+}
+
+#[test]
+fn a_stored_triage_error_is_cut_to_300_characters() {
+    let store = Store::open_in_memory().unwrap();
+    store
+        .record_triage_failure("c1", None, 100, &"é".repeat(400))
+        .unwrap();
+    let failures = store.triage_failures().unwrap();
+    assert_eq!(failures[0].error.chars().count(), 300);
+}

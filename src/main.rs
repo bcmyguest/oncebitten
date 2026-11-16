@@ -370,12 +370,32 @@ fn run_triage(id: &str, host: Option<&str>, queue: bool) -> Result<()> {
         triage_now(id, host)
     };
     if let Err(error) = result {
-        if !queue {
+        if queue {
+            // Nobody reads a background run's stderr, so the store keeps the
+            // error for `proposals list`. A store that cannot take it has no
+            // other place to report to.
+            let _ = record_triage_failure(id, host, &error);
+        } else {
             eprintln!("error: {error:#}");
         }
         std::process::exit(2)
     }
     Ok(())
+}
+
+/// Stores a background run's error against the host that was asked: `host`,
+/// or the configured default when capture passed none.
+fn record_triage_failure(id: &str, host: Option<&str>, error: &anyhow::Error) -> Result<()> {
+    let inputs = Inputs::from_process()?;
+    let store = open_store(&inputs)?;
+    let asked = match host {
+        Some(host) => host.to_owned(),
+        None => {
+            let loaded = config::load(&inputs)?;
+            loaded.config.triage.default.host.as_str().to_owned()
+        }
+    };
+    store.record_triage_failure(id, Some(&asked), now_millis()?, &format!("{error:#}"))
 }
 
 /// Everything a triage run needs: the cluster's store, config and host target.
@@ -532,6 +552,15 @@ fn run_proposals(action: ProposalsAction) -> Result<()> {
                 {
                     println!("  {line}");
                 }
+            }
+            for failure in store.triage_failures()? {
+                eprintln!(
+                    "triage failed for {} ({}): {}; retry: oncebitten triage {}",
+                    failure.cluster,
+                    failure.host.as_deref().unwrap_or("unknown host"),
+                    failure.error,
+                    failure.cluster
+                );
             }
             Ok(())
         }
