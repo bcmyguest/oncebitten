@@ -131,8 +131,11 @@ fn malformed_stdin_exits_zero() {
     assert!(out.stdout.is_empty());
 }
 
-/// Baseline for `one_hundred_captures_stay_near_process_spawn_cost`: the same
-/// binary doing nothing, so machine load and slow spawns hit both sides alike.
+/// Baseline for `one_hundred_captures_stay_near_process_spawn_cost`: the two
+/// process spawns every capture pays for, so machine load and slow spawns hit
+/// both sides alike. One is the binary itself doing nothing; the other is the
+/// `git rev-parse` capture runs for the session's cwd, which costs tens of
+/// milliseconds on Windows.
 fn timed_noop() -> Duration {
     let start = Instant::now();
     let out = Command::new(BIN)
@@ -141,6 +144,11 @@ fn timed_noop() -> Duration {
         .output()
         .unwrap();
     assert!(out.status.success());
+    Command::new("git")
+        .args(["-C", "/nowhere", "rev-parse", "--verify", "-q", "HEAD"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
     start.elapsed()
 }
 
@@ -164,11 +172,11 @@ fn one_hundred_captures_stay_near_process_spawn_cost() {
     }
     assert_eq!(count(&events_db(home.path()), "events"), 100);
     let (capture_median, baseline_median) = (median(captures), median(baselines));
-    eprintln!("median capture {capture_median:?}, median no-op spawn {baseline_median:?}");
+    eprintln!("median capture {capture_median:?}, median spawn baseline {baseline_median:?}");
     let limit = baseline_median * 3 + Duration::from_millis(20);
     assert!(
         capture_median < limit,
-        "median capture {capture_median:?} exceeds {limit:?} (no-op spawn {baseline_median:?})"
+        "median capture {capture_median:?} exceeds {limit:?} (spawn baseline {baseline_median:?})"
     );
 }
 
