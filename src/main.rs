@@ -439,9 +439,17 @@ fn ask(setup: &TriageSetup, cluster: &Cluster, context: &str) -> Result<Answer> 
     )
 }
 
-/// Replays a new proposal in the OpenShell sandbox; without one it stays unproven.
+/// Replays a new proposal: a steer rule with the matcher, any other in the
+/// OpenShell sandbox, without which it stays unproven.
 fn prove_in_sandbox(checker: &Path, rule: &Rule) -> proof::Replayed {
-    proof::replay_rule(rule, checker, &OpenShell::new(None), BackendKind::OpenShell)
+    let matcher = std::env::current_exe().unwrap_or_else(|_| checker.to_path_buf());
+    proof::replay_any(
+        rule,
+        checker,
+        &matcher,
+        &OpenShell::new(None),
+        BackendKind::OpenShell,
+    )
 }
 
 /// Prints the verdict, then queues it and its draft. Queueing problems are

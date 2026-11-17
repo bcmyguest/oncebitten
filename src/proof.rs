@@ -268,6 +268,21 @@ pub fn replay_rule(
     }
 }
 
+/// Replays any rule the way its engine proves: a steer rule with the
+/// in-process matcher held by `matcher`, every other rule on `backend`.
+pub fn replay_any(
+    rule: &Rule,
+    checker: &Path,
+    matcher: &Path,
+    backend: &dyn Backend,
+    kind: BackendKind,
+) -> Replayed {
+    if matches!(rule.check, Check::Steer(_)) {
+        return replay_steer(rule, matcher);
+    }
+    replay_rule(rule, checker, backend, kind)
+}
+
 /// Replays a steer rule with the matcher (see [`crate::steer::replay`]). A
 /// proven verdict writes `proof.json` naming `matcher`, the binary that holds
 /// the matcher; a rejected rule loses its proof.

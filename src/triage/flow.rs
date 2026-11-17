@@ -163,7 +163,9 @@ pub fn ask_cluster_with_context(
         timeout,
     )?;
     if let Some(draft) = &answer.draft {
-        if !code.is_empty() && draft.engine != Engine::Diff && !code.quoted_by(&draft.bad.content) {
+        // Diff and steer fixtures hold paths or a recorded event, not code.
+        let holds_code = !matches!(draft.engine, Engine::Diff | Engine::Steer);
+        if !code.is_empty() && holds_code && !code.quoted_by(&draft.bad.content) {
             bail!(
                 "could not run: the drafted bad fixture quotes no changed lines of the code sent to triage"
             );

@@ -43,7 +43,7 @@ The model comes from the target: `triage.default` or `triage.<host>` in configur
 
 ## Steer drafts
 
-When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). It is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Steer fixtures come from the recorded command, so triage does not invent the bad case.
+When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). A user-correction cluster qualifies when a command in its corrected turns is the mistake: the prompt asks for `proposed_fix_kind = "agent-workflow"` and a steer draft on that command. A workflow mistake with no recorded command (a wrong model choice, working past a request to pause) still ends as a finding. It is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Steer fixtures come from the recorded command, so triage does not invent the bad case.
 
 ## Call contract
 

@@ -41,8 +41,11 @@ Validation is as strict as for a hand-written rule: the written `rule.toml` must
 A draft with `engine = "steer"` must have `mode = "steer"`. The reverse is not refused: a steer-mode draft with another engine still parses. Its fixtures come from the cluster's evidence, not the model:
 
 - `bad` is the cluster's latest recorded command, as a `{"event": "tool", "tool", "command"}` event.
+- A user-correction cluster's evidence is a prompt, not a command. Its `bad` is the latest command in the corrected turns (see [triage.md](triage.md#call-contract)) that the model's own `bad` command matches once turned into the trigger below. With no such command nothing is written and triage warns `not queued`.
 - The trigger is `bad`'s tool plus a regex on its program, its first subcommand (a word before any flag) and its first flag, so `git push --force origin main` also fires on `git -C repo push origin dev --force` but not on `git push origin main` or `git push --force-with-lease`. Leading `NAME=value` assignments and a path on the program are ignored.
 - The corpus is up to 5 other successful commands from the same repo in the store. Repo paths compare in canonical form, so a Windows `\\?\` prefix or a macOS `/private` symlink still matches. With none, the model's corpus is kept.
+- A steer draft is proven when it is queued, with the matcher in the running binary. It needs no OpenShell sandbox; every other engine does.
+- A steer draft is exempt from the rule that `bad` must quote the changed code sent to triage: its fixtures are recorded events.
 - Every steer draft writes `action = "inform"`. The draft has no `action` key, so a model request for `deny` fails to parse. Use `accept --deny` to upgrade.
 
 ## Commands

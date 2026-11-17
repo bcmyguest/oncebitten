@@ -140,7 +140,7 @@ fn steer_table(draft: &Draft) -> Option<SteerToml<'_>> {
 /// `NAME=value` assignments are skipped and the program may carry a path, so
 /// `git push --force origin main` becomes a trigger that also matches
 /// `git -C repo push origin dev --force` but not `git push origin main`.
-fn command_trigger(command: &str) -> String {
+pub fn command_trigger(command: &str) -> String {
     let mut words = command
         .split_whitespace()
         .skip_while(|word| is_assignment(word));
@@ -170,6 +170,14 @@ fn steer_event(content: &str) -> Result<SteerEvent> {
 }
 
 impl Draft {
+    /// The command a steer draft's `bad` fixture names, when it names one.
+    pub fn bad_command(&self) -> Option<String> {
+        match steer_event(&self.bad.content).ok()? {
+            SteerEvent::Tool { command, .. } => command,
+            SteerEvent::Prompt { .. } => None,
+        }
+    }
+
     /// Sets a steer draft's fixtures from recorded commands: `command` run with
     /// `tool` is `bad`, and each of `corpus` is a clean event. Empty `corpus`
     /// keeps the model's own corpus.

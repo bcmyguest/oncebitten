@@ -13,7 +13,8 @@ use crate::rules::{self, Failure};
 use crate::signal;
 pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
 use crate::store::{Outcome, Store};
-use crate::triage::draft::{Draft, Engine};
+use crate::triage::draft::{command_trigger, Draft, Engine};
+use crate::triage::flow::corrected_turns;
 use crate::triage::prompt::context_block;
 use crate::triage::verdict::Answer;
 
@@ -318,24 +319,30 @@ pub fn mark_lines(marks: &ProposalMarks) -> Vec<String> {
     lines
 }
 
-/// Fills a steer draft's fixtures from the cluster's latest recorded command,
-/// which becomes `bad`, and from the repo's other successful commands, which
-/// become the corpus. Fails when the cluster's evidence holds no command.
+/// Fills a steer draft's fixtures from a recorded command, which becomes
+/// `bad`, and from the repo's other successful commands, which become the
+/// corpus. Fails when the evidence holds no such command.
 fn steer_fixtures(store: &Store, repo: &Path, cluster: &Cluster, draft: &mut Draft) -> Result<()> {
-    let latest = cluster
-        .occurrences
-        .iter()
-        .map(|occurrence| &occurrence.event)
-        .filter(|event| {
-            event
-                .tool
-                .as_deref()
-                .is_some_and(crate::host::is_command_tool)
-        })
-        .max_by_key(|event| event.id)
-        .context("a steer draft needs a cluster whose evidence is a command")?;
-    let command = latest.summary.clone();
-    let tool = latest.tool.clone().unwrap_or_default();
+    let (tool, command) = if cluster.class == signal::USER_CORRECTION {
+        corrected_command(store, cluster, draft)?
+    } else {
+        let latest = cluster
+            .occurrences
+            .iter()
+            .map(|occurrence| &occurrence.event)
+            .filter(|event| {
+                event
+                    .tool
+                    .as_deref()
+                    .is_some_and(crate::host::is_command_tool)
+            })
+            .max_by_key(|event| event.id)
+            .context("a steer draft needs a cluster whose evidence is a command")?;
+        (
+            latest.tool.clone().unwrap_or_default(),
+            latest.summary.clone(),
+        )
+    };
     let corpus: Vec<String> = store
         .successful_commands(&repo_key(repo), &command, STEER_CORPUS)?
         .into_iter()
@@ -346,6 +353,24 @@ fn steer_fixtures(store: &Store, repo: &Path, cluster: &Cluster, draft: &mut Dra
 
 /// Proves and queues the rule directory `dir`. The caller removes `dir`
 /// unless this returns `Proposed`.
+/// The recorded command a correction's steer draft is about: the latest
+/// command of the corrected turns that the draft's own `bad` command, turned
+/// into a trigger, matches. The model picks the command; the store supplies it.
+fn corrected_command(store: &Store, cluster: &Cluster, draft: &Draft) -> Result<(String, String)> {
+    let named = draft
+        .bad_command()
+        .context("a steer draft's bad fixture needs a command")?;
+    let trigger = regex::Regex::new(&command_trigger(&named))
+        .context("the drafted bad command gives no trigger")?;
+    corrected_turns(store, cluster)?
+        .into_iter()
+        .flat_map(|turn| turn.actions)
+        .rfind(|(tool, summary)| crate::host::is_command_tool(tool) && trigger.is_match(summary))
+        .context(
+            "a steer draft for a correction needs a recorded command in a corrected turn that its bad fixture matches",
+        )
+}
+
 fn queue_written(
     store: &Store,
     inputs: &Inputs,

@@ -56,7 +56,7 @@ A steer rule's fixtures are recorded events in the normalized shape:
 
 ## Drafted by triage
 
-Triage drafts a steer rule when a cluster's evidence is a command. It writes `action = "inform"` and fixtures built from the recorded command (`bad`) and the same repo's other successful commands (corpus). `oncebitten proposals accept <id> --deny` changes the action to `deny` and re-proves the rule. See [proposals.md](proposals.md#steer-drafts).
+Triage drafts a steer rule when a cluster's evidence is a command, or when a user corrected a command the agent ran. It writes `action = "inform"` and fixtures built from the recorded command (`bad`) and the same repo's other successful commands (corpus). Triage proves the draft with the matcher when it queues it. `oncebitten proposals accept <id> --deny` changes the action to `deny` and re-proves the rule. See [proposals.md](proposals.md#steer-drafts).
 
 ## The steer hook
 

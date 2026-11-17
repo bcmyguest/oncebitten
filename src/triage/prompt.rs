@@ -86,6 +86,9 @@ bad {\"event\": \"tool\", \"tool\": \"Bash\", \"command\": \"git push --force or
 fixed {\"event\": \"tool\", \"tool\": \"Bash\", \"command\": \"git push origin main\"}. \
 oncebitten replaces bad with the cluster's latest recorded command and the corpus with the repo's \
 other successful commands, and triggers on the program plus its first flag or subcommand. \
+For a user-correction cluster, when a command listed under corrected turns is the mistake, \
+proposed_fix_kind is agent-workflow and the draft is a steer whose bad command is that command; \
+with no such command the draft is null. \
 Keys the engine does not use are null. \
 bad and fixed are fixture files {name, content}: name is bad.<ext> or fixed.<ext>, \
 bad is a minimal example the check must flag and fixed the corrected version it must pass; \
