@@ -46,6 +46,9 @@ jobs:
 
       - name: Compute next version
         id: ver
+        env:
+          # Unauthenticated API calls from shared runners hit the rate limit (HTTP 403).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag=$(git-cliff --config cliff.toml --bumped-version)
