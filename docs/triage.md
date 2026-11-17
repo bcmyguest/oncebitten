@@ -50,6 +50,7 @@ When the cluster's evidence is a command, the draft may use `engine = "steer"` (
 - Each call runs in a fresh empty temp directory, removed afterwards, with `ONCEBITTEN_TRIAGE=1`. Every `oncebitten capture` call exits 0 at once when that variable is `1`.
 - The prompt goes to the host on stdin, which then closes. Every host reads its prompt from stdin when the command names none. Argv cannot carry it on Windows: npm installs hosts as `.cmd` wrappers, and Rust refuses a multi-line argument to a batch file.
 - The prompt holds at most 12,000 bytes, at most 10 occurrences, and at most 400 bytes per summary. A cut ends with `[truncated]`.
+- For a user-correction cluster the prompt also lists the corrected turn of each occurrence: the stored summaries of the session's tool calls between the previous prompt and the correction, as `- ts=<ts> <tool>: <summary> | ...`. It keeps the last 8 calls of a turn, 120 bytes per call and 400 bytes per turn, inside the 12,000-byte limit. Capture stores no agent message text, so the turn holds tool calls only; a turn without tool calls adds no line.
 - The default timeout is 120 seconds. A call that exceeds it is killed.
 - Opencode may print its answer and keep running. The caller parses the first complete verdict from the JSON event lines and kills the process.
 - The model's output must match the schema. Invalid or missing JSON, a timeout, and a missing binary are "could not run".

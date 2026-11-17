@@ -483,6 +483,28 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// The tool calls of the turn that ended at prompt `before`: the session's
+    /// events after its previous prompt, oldest first. Keeps the last `limit`.
+    pub fn turn_before(
+        &self,
+        host: &str,
+        session_id: &str,
+        before: i64,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, ts, host, session_id, repo, kind, tool, summary, git_head FROM \
+             (SELECT * FROM events WHERE host = ?1 AND session_id = ?2 AND id < ?3 AND kind != ?4 \
+              AND id > COALESCE((SELECT MAX(id) FROM events WHERE host = ?1 AND session_id = ?2 \
+              AND id < ?3 AND kind = ?4), 0) ORDER BY id DESC LIMIT ?5) ORDER BY id",
+        )?;
+        let rows = stmt.query_map(
+            params![host, session_id, before, signal::KIND_PROMPT, limit as i64],
+            |row| stored_event(row, 0),
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// The paths the session's edit tools named, as the hook payloads gave them.
     /// A patch tool's summary lists one path per line.
     pub fn session_edit_paths(&self, host: &str, session_id: &str) -> Result<Vec<String>> {
