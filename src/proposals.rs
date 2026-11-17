@@ -15,7 +15,7 @@ pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
 use crate::store::{Outcome, Store};
 use crate::triage::draft::{command_trigger, Draft, Engine};
 use crate::triage::flow::corrected_turns;
-use crate::triage::prompt::context_block;
+use crate::triage::prompt::{classes_block, context_block, KnownClass};
 use crate::triage::verdict::Answer;
 
 pub const LIST_HINT: &str = "oncebitten proposals list";
@@ -305,6 +305,29 @@ pub fn triage_context(store: &Store, inputs: &Inputs) -> Result<String> {
         .map(|rejection| rejection.reason)
         .collect();
     Ok(context_block(&rules, &rejections))
+}
+
+/// `triage_context` for one cluster, followed by the mistake classes triage
+/// named on other clusters, so the same mistake phrased differently reuses a
+/// class and counts as recurring.
+pub fn triage_context_for(store: &Store, inputs: &Inputs, cluster: &str) -> Result<String> {
+    let classes: Vec<KnownClass> = store
+        .mistake_classes(cluster)?
+        .into_iter()
+        .map(|(class, clusters, verdict)| KnownClass {
+            class,
+            clusters,
+            root_cause: serde_json::from_str::<serde_json::Value>(&verdict)
+                .ok()
+                .and_then(|verdict| verdict["root_cause"].as_str().map(str::to_owned))
+                .unwrap_or_default(),
+        })
+        .collect();
+    Ok(format!(
+        "{}{}",
+        triage_context(store, inputs)?,
+        classes_block(&classes)
+    ))
 }
 
 /// Lines that show a proposal's duplicate marks in `list`, `show` and PR bodies.

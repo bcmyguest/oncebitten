@@ -473,7 +473,7 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
         now,
         store::TriageOutcome::Started,
     )?;
-    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let context = proposals::triage_context_for(&setup.store, &setup.inputs, id)?;
     let answer = ask(&setup, cluster, &context)?;
     println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
     let checker = default_checker()?;
@@ -505,7 +505,7 @@ fn triage_queued(id: &str, host: Option<&str>) -> Result<()> {
     let setup = triage_setup(host)?;
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
-    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let context = proposals::triage_context_for(&setup.store, &setup.inputs, id)?;
     let ask = |cluster: &Cluster| ask(&setup, cluster, &context);
     proposals::triage_queued(&setup.store, &setup.inputs, id, &ask, &prove, now_millis()?)?;
     Ok(())

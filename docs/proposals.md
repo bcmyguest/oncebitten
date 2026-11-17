@@ -74,7 +74,7 @@ Exit 0 on success, 2 on any error.
 
 When a proposal is recorded, it is compared with every row in the `proposals` table except itself, whatever its state. Two checks run, and the first match wins:
 
-1. Equal `mistake_class` (reason `same mistake_class`).
+1. Equal `mistake_class` (reason `same mistake_class`). Triage shows the host the classes already named, so the same mistake reuses one slug; see [triage.md](triage.md).
 2. Text similarity of the rationale at or above 0.5 by normalised token Jaccard (reason `similar text`). Tokens are lowercase alphanumeric runs. The score is `|A ∩ B| / |A ∪ B|`. "never use unwrap in library code" and "stop using unwrap in library code" score 0.5 and match. "never use unwrap in code" and "never run clippy in code" score 0.43 and do not.
 
 A match is shown as `possible duplicate of <id> (<reason>)` in `proposals list`, `proposals show`, and the forge PR body. The match is advisory. Nothing merges or drops automatically. Confirm a duplicate with `proposals reject <id> --duplicate-of <other>`, which shows as `confirmed duplicate of <other>`.

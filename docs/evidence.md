@@ -17,7 +17,7 @@ Each signal maps to a class and a key. Signals with the same key form one cluste
 
 - Normalization is the one `repeat-failure` uses: whitespace collapsed, digits, paths and hex replaced with `<n>`, `<path>` and `<hex>`.
 - A cluster id is the first 12 hex digits of the SHA-256 of its key, so the same mistake has the same id on every machine.
-- A `user-correction` cluster shows the matched phrases as its pattern, never prompt text. Only identical prompts share a cluster.
+- A `user-correction` cluster shows the matched phrases as its pattern, never prompt text. Only identical prompts share a cluster. Triage links differently worded corrections of one mistake through a shared `mistake_class`; see [triage.md](triage.md) and [proposals.md](proposals.md#possible-duplicates).
 
 ## Dedupe and counts
 

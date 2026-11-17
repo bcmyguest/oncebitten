@@ -786,6 +786,22 @@ impl Store {
         Ok(rows.next().transpose()?)
     }
 
+    /// Each mistake class triage has named on a cluster other than `except`,
+    /// with its cluster count and latest verdict JSON; most clusters first.
+    pub fn mistake_classes(&self, except: &str) -> Result<Vec<(String, usize, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mistake_class, COUNT(*), \
+             (SELECT verdict FROM proposals AS latest WHERE latest.mistake_class = p.mistake_class \
+              AND latest.cluster != ?1 ORDER BY ts DESC, cluster LIMIT 1) \
+             FROM proposals AS p WHERE mistake_class IS NOT NULL AND cluster != ?1 \
+             GROUP BY mistake_class ORDER BY COUNT(*) DESC, MAX(ts) DESC, mistake_class",
+        )?;
+        let rows = stmt.query_map(params![except], |row| {
+            Ok((row.get(0)?, row.get::<_, i64>(1)? as usize, row.get(2)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Every queued row's class and rationale, oldest first. The duplicate
     /// check compares a new proposal against these.
     pub fn mark_candidates(&self) -> Result<Vec<MarkCandidate>> {
