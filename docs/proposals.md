@@ -14,7 +14,7 @@ Triage turns an evidence cluster into a queued result (see [triage.md](triage.md
 - A verdict is rule-shaped when `repeatable` is true, `proposed_fix_kind` is not `none` and `generality` is not `one-off`. A draft beside any other verdict is dropped; the verdict queues as a finding.
 - An invalid draft rejects the whole answer as "could not run": nothing is printed or written.
 - The draft lands in the repo's project layer, `.oncebitten/rules/<id>/`, the repo being the git root of the triage working directory. A draft whose id matches a loaded rule, or that breaks the rule set, is not written.
-- Replay runs as `oncebitten replay` does: a proven verdict writes `proof.json`. Without a sandbox, or when replay rejects the rule or cannot run, the proposal stays unproven and its reason is kept.
+- Replay runs as `oncebitten replay` does: a proven verdict writes `proof.json`. Without a sandbox, or when replay rejects the rule or cannot run, the proposal stays unproven and its reason is kept. When `openshell` is not on `PATH`, `oncebitten triage <id>` adds one stderr line saying so; see [doctor.md](doctor.md).
 - A cluster queues at most once. A rejected cluster is never queued.
 
 ## Draft

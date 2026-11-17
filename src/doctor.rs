@@ -45,6 +45,9 @@ const OPENSHELL: &str = "openshell";
 const OPENSHELL_INSTALL: &str =
     "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh \
      (https://docs.nvidia.com/openshell/latest/about/installation)";
+/// Printed when a rule that replays in OpenShell is drafted without the CLI.
+pub const OPENSHELL_MISSING: &str = "openshell is not on PATH: this rule stays unproven until \
+     oncebitten replay runs it in OpenShell; see oncebitten doctor";
 const DOCKER: &str = "docker";
 /// Install commands for programs oncebitten or its rules run, from each
 /// tool's official install page.
@@ -626,6 +629,16 @@ fn evidence_store(inputs: &Inputs) -> Line {
             format!("move {shown} aside; capture starts a new store"),
         ),
     }
+}
+
+/// The stderr line for a draft that needs OpenShell: a PATH lookup, no process.
+pub fn openshell_notice(needs_sandbox: bool, on_path: bool) -> Option<&'static str> {
+    (needs_sandbox && !on_path).then_some(OPENSHELL_MISSING)
+}
+
+/// Whether the OpenShell CLI is on `PATH`.
+pub fn openshell_on_path() -> bool {
+    find_on_path(OPENSHELL).is_some()
 }
 
 fn openshell(gateway: Option<&str>) -> Line {

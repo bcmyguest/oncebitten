@@ -491,7 +491,14 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
             eprintln!("proposed a proven rule: oncebitten proposals show {id}")
         }
         Ok(Recorded::Proposed { proven: false }) => {
-            eprintln!("proposed an unproven rule: oncebitten proposals show {id}")
+            eprintln!("proposed an unproven rule: oncebitten proposals show {id}");
+            let sandboxed = answer
+                .draft
+                .as_ref()
+                .is_some_and(|d| d.engine != oncebitten::triage::draft::Engine::Steer);
+            if let Some(notice) = doctor::openshell_notice(sandboxed, doctor::openshell_on_path()) {
+                eprintln!("{notice}");
+            }
         }
         Ok(Recorded::Finding) => eprintln!("queued as a finding without a rule draft"),
         Ok(Recorded::AlreadyQueued) => eprintln!("{id} is already queued; nothing written"),
