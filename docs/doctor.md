@@ -48,4 +48,6 @@ A host counts as installed when its executable is on `PATH` or its user director
 
 `--gateway` passes `--gateway-endpoint <endpoint>` to `openshell status`; without it the CLI uses its own gateway. OpenShell runs on Windows only inside WSL 2, so on Windows the `openshell` fix says to install WSL 2 and run OpenShell and oncebitten inside it. Replay needs OpenShell; `check` and `gate` do not.
 
+`oncebitten triage <id>` reports a missing OpenShell without `doctor`: when it drafts an unproven rule that replays in OpenShell (any engine but `steer`) and `openshell` is not on `PATH`, it prints one line on stderr, `openshell is not on PATH: this rule stays unproven until oncebitten replay runs it in OpenShell; see oncebitten doctor`. The check is a `PATH` lookup; it starts no process and capture does not run it.
+
 On Windows, `doctor` finds `pre-commit` and `openshell` through `PATH` and `PATHEXT`, so `.cmd` and `.exe` shims resolve.

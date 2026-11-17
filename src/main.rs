@@ -439,9 +439,17 @@ fn ask(setup: &TriageSetup, cluster: &Cluster, context: &str) -> Result<Answer> 
     )
 }
 
-/// Replays a new proposal in the OpenShell sandbox; without one it stays unproven.
+/// Replays a new proposal: a steer rule with the matcher, any other in the
+/// OpenShell sandbox, without which it stays unproven.
 fn prove_in_sandbox(checker: &Path, rule: &Rule) -> proof::Replayed {
-    proof::replay_rule(rule, checker, &OpenShell::new(None), BackendKind::OpenShell)
+    let matcher = std::env::current_exe().unwrap_or_else(|_| checker.to_path_buf());
+    proof::replay_any(
+        rule,
+        checker,
+        &matcher,
+        &OpenShell::new(None),
+        BackendKind::OpenShell,
+    )
 }
 
 /// Prints the verdict, then queues it and its draft. Queueing problems are
@@ -465,7 +473,7 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
         now,
         store::TriageOutcome::Started,
     )?;
-    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let context = proposals::triage_context_for(&setup.store, &setup.inputs, id)?;
     let answer = ask(&setup, cluster, &context)?;
     println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
     let checker = default_checker()?;
@@ -483,7 +491,14 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
             eprintln!("proposed a proven rule: oncebitten proposals show {id}")
         }
         Ok(Recorded::Proposed { proven: false }) => {
-            eprintln!("proposed an unproven rule: oncebitten proposals show {id}")
+            eprintln!("proposed an unproven rule: oncebitten proposals show {id}");
+            let sandboxed = answer
+                .draft
+                .as_ref()
+                .is_some_and(|d| d.engine != oncebitten::triage::draft::Engine::Steer);
+            if let Some(notice) = doctor::openshell_notice(sandboxed, doctor::openshell_on_path()) {
+                eprintln!("{notice}");
+            }
         }
         Ok(Recorded::Finding) => eprintln!("queued as a finding without a rule draft"),
         Ok(Recorded::AlreadyQueued) => eprintln!("{id} is already queued; nothing written"),
@@ -497,7 +512,7 @@ fn triage_queued(id: &str, host: Option<&str>) -> Result<()> {
     let setup = triage_setup(host)?;
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
-    let context = proposals::triage_context(&setup.store, &setup.inputs)?;
+    let context = proposals::triage_context_for(&setup.store, &setup.inputs, id)?;
     let ask = |cluster: &Cluster| ask(&setup, cluster, &context);
     proposals::triage_queued(&setup.store, &setup.inputs, id, &ask, &prove, now_millis()?)?;
     Ok(())

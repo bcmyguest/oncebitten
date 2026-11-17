@@ -691,3 +691,12 @@ mod cli {
         );
     }
 }
+
+#[test]
+fn openshell_notice_covers_only_a_sandboxed_draft_without_the_cli() {
+    use oncebitten::doctor::{openshell_notice, OPENSHELL_MISSING};
+    assert_eq!(openshell_notice(true, false), Some(OPENSHELL_MISSING));
+    assert_eq!(openshell_notice(true, true), None);
+    assert_eq!(openshell_notice(false, false), None);
+    assert!(!OPENSHELL_MISSING.contains('\n'));
+}

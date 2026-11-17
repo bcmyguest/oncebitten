@@ -17,6 +17,8 @@ The host must return these five keys plus an optional `draft`: a proposed rule, 
 
 The prompt carries a context block before the cluster details: the ids and descriptions of the loaded rules, and the past rejection reasons. The block holds at most 30 items and 4 KiB, of which up to 10 items and 1 KiB are held for past rejections, so many rules cannot crowd them out. A rule that fails to load is left out of the block. Proposals use `mistake_class` and the rationale to flag possible duplicates; see [proposals.md](proposals.md#possible-duplicates). An invalid draft rejects the whole answer. Only a rule-shaped verdict keeps its draft; the draft fields are in [proposals.md](proposals.md#draft). The printed verdict omits the draft.
 
+After that block the prompt lists the known mistake classes: each `mistake_class` triage named on another cluster, as `- <slug> (clusters=<n>): <latest root cause>`, most clusters first, at most 15 lines and 2 KiB. The host is told to answer with a listed slug when the cluster is the same mistake, and that such a mistake recurred, so `repeatable` is true. This is how one mistake corrected in different words accumulates: each correction prompt stays its own cluster (see [evidence.md](evidence.md)), and the shared class links them. A cluster's own earlier verdict is not counted.
+
 ## Hosts
 
 | Host | Status | Command | Hooks off |
@@ -43,13 +45,14 @@ The model comes from the target: `triage.default` or `triage.<host>` in configur
 
 ## Steer drafts
 
-When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). It is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Steer fixtures come from the recorded command, so triage does not invent the bad case.
+When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). A user-correction cluster qualifies when a command in its corrected turns is the mistake: the prompt asks for `proposed_fix_kind = "agent-workflow"` and a steer draft on that command. A workflow mistake with no recorded command (a wrong model choice, working past a request to pause) still ends as a finding. It is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Steer fixtures come from the recorded command, so triage does not invent the bad case.
 
 ## Call contract
 
 - Each call runs in a fresh empty temp directory, removed afterwards, with `ONCEBITTEN_TRIAGE=1`. Every `oncebitten capture` call exits 0 at once when that variable is `1`.
 - The prompt goes to the host on stdin, which then closes. Every host reads its prompt from stdin when the command names none. Argv cannot carry it on Windows: npm installs hosts as `.cmd` wrappers, and Rust refuses a multi-line argument to a batch file.
 - The prompt holds at most 12,000 bytes, at most 10 occurrences, and at most 400 bytes per summary. A cut ends with `[truncated]`.
+- For a user-correction cluster the prompt also lists the corrected turn of each occurrence: the stored summaries of the session's tool calls between the previous prompt and the correction, as `- ts=<ts> <tool>: <summary> | ...`. It keeps the last 8 calls of a turn, 120 bytes per call and 400 bytes per turn, inside the 12,000-byte limit. Capture stores no agent message text, so the turn holds tool calls only; a turn without tool calls adds no line.
 - The default timeout is 120 seconds. A call that exceeds it is killed.
 - Opencode may print its answer and keep running. The caller parses the first complete verdict from the JSON event lines and kills the process.
 - The model's output must match the schema. Invalid or missing JSON, a timeout, and a missing binary are "could not run".

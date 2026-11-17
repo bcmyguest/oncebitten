@@ -14,7 +14,7 @@ Triage turns an evidence cluster into a queued result (see [triage.md](triage.md
 - A verdict is rule-shaped when `repeatable` is true, `proposed_fix_kind` is not `none` and `generality` is not `one-off`. A draft beside any other verdict is dropped; the verdict queues as a finding.
 - An invalid draft rejects the whole answer as "could not run": nothing is printed or written.
 - The draft lands in the repo's project layer, `.oncebitten/rules/<id>/`, the repo being the git root of the triage working directory. A draft whose id matches a loaded rule, or that breaks the rule set, is not written.
-- Replay runs as `oncebitten replay` does: a proven verdict writes `proof.json`. Without a sandbox, or when replay rejects the rule or cannot run, the proposal stays unproven and its reason is kept.
+- Replay runs as `oncebitten replay` does: a proven verdict writes `proof.json`. Without a sandbox, or when replay rejects the rule or cannot run, the proposal stays unproven and its reason is kept. When `openshell` is not on `PATH`, `oncebitten triage <id>` adds one stderr line saying so; see [doctor.md](doctor.md).
 - A cluster queues at most once. A rejected cluster is never queued.
 
 ## Draft
@@ -41,8 +41,11 @@ Validation is as strict as for a hand-written rule: the written `rule.toml` must
 A draft with `engine = "steer"` must have `mode = "steer"`. The reverse is not refused: a steer-mode draft with another engine still parses. Its fixtures come from the cluster's evidence, not the model:
 
 - `bad` is the cluster's latest recorded command, as a `{"event": "tool", "tool", "command"}` event.
+- A user-correction cluster's evidence is a prompt, not a command. Its `bad` is the latest command in the corrected turns (see [triage.md](triage.md#call-contract)) that the model's own `bad` command matches once turned into the trigger below. With no such command nothing is written and triage warns `not queued`.
 - The trigger is `bad`'s tool plus a regex on its program, its first subcommand (a word before any flag) and its first flag, so `git push --force origin main` also fires on `git -C repo push origin dev --force` but not on `git push origin main` or `git push --force-with-lease`. Leading `NAME=value` assignments and a path on the program are ignored.
 - The corpus is up to 5 other successful commands from the same repo in the store. Repo paths compare in canonical form, so a Windows `\\?\` prefix or a macOS `/private` symlink still matches. With none, the model's corpus is kept.
+- A steer draft is proven when it is queued, with the matcher in the running binary. It needs no OpenShell sandbox; every other engine does.
+- A steer draft is exempt from the rule that `bad` must quote the changed code sent to triage: its fixtures are recorded events.
 - Every steer draft writes `action = "inform"`. The draft has no `action` key, so a model request for `deny` fails to parse. Use `accept --deny` to upgrade.
 
 ## Commands
@@ -71,7 +74,7 @@ Exit 0 on success, 2 on any error.
 
 When a proposal is recorded, it is compared with every row in the `proposals` table except itself, whatever its state. Two checks run, and the first match wins:
 
-1. Equal `mistake_class` (reason `same mistake_class`).
+1. Equal `mistake_class` (reason `same mistake_class`). Triage shows the host the classes already named, so the same mistake reuses one slug; see [triage.md](triage.md).
 2. Text similarity of the rationale at or above 0.5 by normalised token Jaccard (reason `similar text`). Tokens are lowercase alphanumeric runs. The score is `|A ∩ B| / |A ∪ B|`. "never use unwrap in library code" and "stop using unwrap in library code" score 0.5 and match. "never use unwrap in code" and "never run clippy in code" score 0.43 and do not.
 
 A match is shown as `possible duplicate of <id> (<reason>)` in `proposals list`, `proposals show`, and the forge PR body. The match is advisory. Nothing merges or drops automatically. Confirm a duplicate with `proposals reject <id> --duplicate-of <other>`, which shows as `confirmed duplicate of <other>`.

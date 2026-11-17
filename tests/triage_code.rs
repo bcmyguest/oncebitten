@@ -225,6 +225,34 @@ fn a_draft_whose_bad_fixture_quotes_changed_code_is_kept() {
 }
 
 #[test]
+fn a_steer_draft_is_kept_though_its_recorded_event_quotes_no_code() {
+    let (_root, _repo, store, cluster) = edited_session();
+    let verdict = serde_json::json!({
+        "repeatable": true, "user_correction": true, "root_cause": "force push",
+        "proposed_fix_kind": "agent-workflow", "generality": "project",
+        "draft": {
+            "id": "no-force-push", "description": "no force pushes",
+            "mode": "steer", "engine": "steer",
+            "bad": {"name": "bad.json", "content": r#"{"event":"tool","tool":"Bash","command":"git push --force"}"#},
+            "fixed": {"name": "fixed.json", "content": r#"{"event":"tool","tool":"Bash","command":"git push"}"#},
+            "rationale": "force pushes rewrite shared history"
+        }
+    });
+    let runner = Recording::new(&verdict.to_string());
+    let answer = ask_cluster(
+        &runner,
+        Host::Opencode,
+        "plan",
+        &store,
+        &cluster,
+        &Triage::default(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert!(answer.draft.is_some());
+}
+
+#[test]
 fn the_prompt_carries_the_hunks_by_default() {
     let (_root, _repo, store, cluster) = edited_session();
     let runner = Recording::new(VERDICT_NO_DRAFT);

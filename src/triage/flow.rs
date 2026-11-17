@@ -5,11 +5,15 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::config::{Host, Triage};
 use crate::evidence::Cluster;
+use crate::signal;
 use crate::store::Store;
 use crate::triage::code::{self, Code};
 use crate::triage::draft::Engine;
 use crate::triage::host::{answer_from, control_invocation, invocation};
-use crate::triage::prompt::{build_prompt_full, Occurrence, PromptInput};
+use crate::triage::prompt::{
+    build_prompt_turns, turns_block, Occurrence, PromptInput, Turn, MAX_OCCURRENCES,
+    MAX_TURN_ACTIONS,
+};
 use crate::triage::proof::{prove, requires_proof, workdir_sentinels};
 use crate::triage::run::Runner;
 use crate::triage::verdict::{Answer, Verdict};
@@ -58,6 +62,31 @@ pub fn prompt_input(cluster: &Cluster) -> PromptInput {
             })
             .collect(),
     }
+}
+
+/// The turn each of a user-correction cluster's prompts answered, for the
+/// occurrences the prompt lists. Other classes have no corrected turn.
+pub fn corrected_turns(store: &Store, cluster: &Cluster) -> Result<Vec<Turn>> {
+    if cluster.class != signal::USER_CORRECTION {
+        return Ok(Vec::new());
+    }
+    cluster
+        .occurrences
+        .iter()
+        .take(MAX_OCCURRENCES)
+        .map(|occurrence| {
+            let event = &occurrence.event;
+            let actions = store
+                .turn_before(&event.host, &event.session_id, event.id, MAX_TURN_ACTIONS)?
+                .into_iter()
+                .map(|action| (action.tool.unwrap_or(action.kind), action.summary))
+                .collect();
+            Ok(Turn {
+                ts: event.ts,
+                actions,
+            })
+        })
+        .collect()
 }
 
 /// A fresh empty directory, unique per call, removed when dropped.
@@ -122,17 +151,21 @@ pub fn ask_cluster_with_context(
     } else {
         Code::default()
     };
+    let turns = turns_block(&corrected_turns(store, cluster)?);
     let answer = run_answer_full(
         runner,
         host,
         agent,
         &prompt_input(cluster),
         context,
+        &turns,
         &code,
         timeout,
     )?;
     if let Some(draft) = &answer.draft {
-        if !code.is_empty() && draft.engine != Engine::Diff && !code.quoted_by(&draft.bad.content) {
+        // Diff and steer fixtures hold paths or a recorded event, not code.
+        let holds_code = !matches!(draft.engine, Engine::Diff | Engine::Steer);
+        if !code.is_empty() && holds_code && !code.quoted_by(&draft.bad.content) {
             bail!(
                 "could not run: the drafted bad fixture quotes no changed lines of the code sent to triage"
             );
@@ -161,7 +194,7 @@ pub fn run_answer_with_code(
     code: &Code,
     timeout: Duration,
 ) -> Result<Answer> {
-    run_answer_full(runner, host, agent, input, "", code, timeout)
+    run_answer_full(runner, host, agent, input, "", "", code, timeout)
 }
 
 /// `run_answer` with a context block (existing rules, past rejections) placed
@@ -180,24 +213,27 @@ pub fn run_answer_with_context(
         agent,
         input,
         context,
+        "",
         &Code::default(),
         timeout,
     )
 }
 
-/// `run_answer` with both a context block and the changed code.
+/// `run_answer` with a context block, the corrected turns and the changed code.
+#[allow(clippy::too_many_arguments)]
 fn run_answer_full(
     runner: &dyn Runner,
     host: Host,
     agent: &str,
     input: &PromptInput,
     context: &str,
+    turns: &str,
     code: &Code,
     timeout: Duration,
 ) -> Result<Answer> {
     let workdir = Workdir::create()?;
     let dir = workdir.path();
-    let prompt = build_prompt_full(input, context, &code.diff);
+    let prompt = build_prompt_turns(input, context, turns, &code.diff);
     let triage = invocation(host, agent, &prompt, dir)?;
     let captured = if requires_proof(host) {
         let sentinels = workdir_sentinels(host, dir, &dir.join("markers"));
