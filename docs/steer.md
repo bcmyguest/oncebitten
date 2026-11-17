@@ -72,7 +72,7 @@ The hook reads the host's payload from stdin, maps a pre-tool or prompt event to
 
 | Host | Hook | Deny a tool call | Inform before a tool call | Inform on a prompt | Verified |
 |---|---|---|---|---|---|
-| claude | `PreToolUse`, `UserPromptSubmit` in `.claude/settings.json` | `hookSpecificOutput.permissionDecision = "deny"` with `permissionDecisionReason` | `hookSpecificOutput.additionalContext` | `hookSpecificOutput.additionalContext` | deny, by a real `claude -p` run |
+| claude | `PreToolUse`, `UserPromptSubmit` in `.claude/settings.json` | `hookSpecificOutput.permissionDecision = "deny"` with `permissionDecisionReason` | `hookSpecificOutput.additionalContext` | `hookSpecificOutput.additionalContext` | deny, by a real `claude -p` run; `scripts/e2e-live.sh` repeats it with the shipped `no-sudo` rule |
 | codex | `PreToolUse`, `UserPromptSubmit` in `.codex/hooks.json` | as claude | as claude | as claude | deny, by a real `codex exec` run. Codex runs a new hook only after you trust it (or with `--dangerously-bypass-hook-trust`). |
 | cursor | `preToolUse` in `.cursor/hooks.json` | `{"permission": "deny", "user_message", "agent_message"}` | no | no | from docs |
 | copilot | `preToolUse` in `oncebitten-steer.json` beside the capture file | `{"permissionDecision": "deny", "permissionDecisionReason"}` | no | no | from docs |

@@ -30,6 +30,15 @@ The commands follow [docs/research/spike-triage.md](research/spike-triage.md). T
 
 Pi has no verified headless call. Cursor is not a triage host.
 
+What has run for real, as of 2026-11-16:
+
+| Host | Evidence |
+|---|---|
+| claude | `scripts/e2e-live.sh` on Linux with Claude Code: two sessions, each corrected once, produce a cluster; background triage queues a proven ast-grep proposal; `proposals accept` activates it; `gate pr` passes the existing code and fails a new copy of the rule's bad fixture. |
+| codex | The same script with `codex:<model>`: refused by the hooks-off proof (see [Hooks-off proof](#hooks-off-proof)); `proposals list` reports the failure. |
+| opencode | Fake-host tests only. |
+| Windows | CI runs `oncebitten triage` and background triage against a fake host installed as `claude.cmd` on `PATH`, with the prompt on stdin (`tests/triage_cli_host.rs`). No real host has run on Windows. |
+
 The model comes from the target: `triage.default` or `triage.<host>` in configuration (`<host>:<agent>`). `default` as the agent omits the model flag.
 
 ## Steer drafts
