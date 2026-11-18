@@ -19,7 +19,6 @@ sed -i -E '0,/"version": "[^"]*"/s//"version": "'"$version"'"/' \
     packaging/copilot/.github/plugin/plugin.json \
     packaging/cursor/.cursor-plugin/plugin.json \
     packaging/npm/oncebitten/package.json
-sed -i -E 's/("oncebitten-[a-z0-9]+-[a-z0-9]+": ")[^"]*"/\1'"$version"'"/' packaging/npm/oncebitten/package.json
 
 sed -i -E 's/^version=.*/version='"$version"'/' packaging/*/bin/oncebitten
 sed -i -E 's#(/oncebitten/)v[0-9.]+(/install\.sh)#\1v'"$version"'\2#; s/(ONCEBITTEN_VERSION=)[0-9.]+ /\1'"$version"' /' templates/*.yml

@@ -1,22 +1,32 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { TARGETS, mainManifest, platformManifest } from './npm-package.mjs';
+import { fileURLToPath } from 'node:url';
+import { mainManifest } from './npm-package.mjs';
 
 const template = JSON.parse(readFileSync(new URL('../packaging/npm/oncebitten/package.json', import.meta.url), 'utf8'));
 
-test('every platform package is an optional dependency of the main package', () => {
-  const names = TARGETS.map((entry) => platformManifest(entry, '1.2.3').name).sort();
-  assert.deepEqual(Object.keys(template.optionalDependencies).sort(), names);
+test('the manifest has no dependencies of any kind', () => {
+  assert.deepEqual(Object.keys(template).filter((key) => /dependencies$/i.test(key)), []);
 });
 
-test('the main manifest pins every platform package to its own version', () => {
-  const manifest = mainManifest(template, '1.2.3');
-  assert.equal(manifest.version, '1.2.3');
-  assert.ok(Object.values(manifest.optionalDependencies).every((v) => v === '1.2.3'));
+test('the main manifest takes the release version', () => {
+  assert.equal(mainManifest(template, '1.2.3').version, '1.2.3');
 });
 
-test('a platform manifest restricts os and cpu and ships only bin', () => {
-  const manifest = platformManifest(TARGETS[4], '1.2.3');
-  assert.deepEqual([manifest.os, manifest.cpu, manifest.files], [['win32'], ['x64'], ['bin']]);
+test('packing yields one tarball without the launcher tests', () => {
+  const out = mkdtempSync(join(tmpdir(), 'oncebitten-pack-'));
+  try {
+    const script = fileURLToPath(new URL('./npm-package.mjs', import.meta.url));
+    execFileSync(process.execPath, [script, '1.2.3', 'unused', out, '--all'], { stdio: 'ignore' });
+    assert.deepEqual(readdirSync(out), ['oncebitten-1.2.3.tgz']);
+    const files = execFileSync('tar', ['-tzf', join(out, 'oncebitten-1.2.3.tgz')]).toString();
+    assert.ok(files.includes('package/lib/launch.js') && files.includes('package/lib/fetch.js'));
+    assert.ok(!files.includes('launch.test.js'));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });

@@ -96,7 +96,7 @@ jobs:
       - name: Pack
         run: |
           version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
-          node --test scripts/npm-package.test.mjs
+          node --test scripts/npm-package.test.mjs packaging/npm/oncebitten/lib/launch.test.js
           node scripts/npm-package.mjs "$version" artifacts npm-packages --all
           ls -l npm-packages
       - uses: actions/upload-artifact@v7
