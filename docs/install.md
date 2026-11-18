@@ -116,22 +116,22 @@ Pin one version so every machine and CI run behaves the same.
 ```toml
 # pyproject.toml
 [dependency-groups]
-dev = ["oncebitten==0.1.1"]
+dev = ["oncebitten==0.2.0"]
 ```
 
 ```sh
-uv add --dev oncebitten==0.1.1 && uv run oncebitten --version
+uv add --dev oncebitten==0.2.0 && uv run oncebitten --version
 ```
 
 ```sh
-npm install --save-dev --save-exact oncebitten@0.1.1 && npx oncebitten --version
+npm install --save-dev --save-exact oncebitten@0.2.0 && npx oncebitten --version
 ```
 
 ```yaml
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/bcmyguest/oncebitten
-    rev: v0.1.1
+    rev: v0.2.0
     hooks:
       - id: oncebitten-gate-python
 ```

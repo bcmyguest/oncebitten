@@ -9,7 +9,7 @@ oncebitten-gate:
     GIT_DEPTH: "0"
   script:
     # Pin the release for reproducible gates.
-    - curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.1.1/install.sh | ONCEBITTEN_VERSION=0.1.1 sh
+    - curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.2.0/install.sh | ONCEBITTEN_VERSION=0.2.0 sh
     - export PATH="$HOME/.local/bin:$PATH"
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - oncebitten rules sync --frozen

@@ -3,7 +3,7 @@
 # plugin's version, installing it into the plugin data dir on first use.
 set -u
 
-version=0.1.1
+version=0.2.0
 data="${CLAUDE_PLUGIN_DATA:-${PLUGIN_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/oncebitten}}"
 dir="$data/bin/$version"
 here="$(cd "$(dirname "$0")" && pwd)"

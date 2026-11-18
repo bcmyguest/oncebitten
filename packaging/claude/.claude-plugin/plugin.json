@@ -1,6 +1,6 @@
 {
   "name": "oncebitten",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Records prompts and tool outcomes so repeated agent mistakes can be turned into rules.",
   "author": {
     "name": "bcmyguest"
