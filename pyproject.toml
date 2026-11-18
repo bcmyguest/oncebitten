@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oncebitten-pre-commit"
-version = "0.3.0"
+version = "0.4.0"
 description = "pre-commit hook environment for oncebitten"
 license = "Apache-2.0"
 

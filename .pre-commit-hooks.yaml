@@ -29,4 +29,4 @@
 - <<: *system
   id: oncebitten-gate-python
   language: python
-  additional_dependencies: ["oncebitten==0.3.0"]
+  additional_dependencies: ["oncebitten==0.4.0"]
