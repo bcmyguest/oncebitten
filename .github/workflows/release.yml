@@ -95,6 +95,10 @@ jobs:
             spec="$(tar -xzOf "$tgz" package/package.json | jq -r '.name + "@" + .version')"
             if npm view "$spec" version > /dev/null 2>&1; then
               echo "::notice::$spec is already on npm."
+            elif ! npm view "${spec%@*}" name > /dev/null 2>&1; then
+              # Trusted publishing cannot create a package.
+              echo "::error::${spec%@*} does not exist on npm; run scripts/npm-bootstrap.sh once."
+              exit 1
             else
               npm publish "$tgz" --provenance --access public
             fi
