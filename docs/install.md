@@ -19,7 +19,7 @@ The repository is a plugin marketplace for four hosts and a pi package. Each hos
 /plugin install oncebitten@oncebitten
 ```
 
-Marketplace file `.claude-plugin/marketplace.json`, plugin `packaging/claude`. In Claude Code the plugin's `bin/` is on the agent's Bash `PATH`, so the agent can run `oncebitten evidence list` and the other commands.
+Marketplace file `.claude-plugin/marketplace.json`, plugin `packaging/claude`. In Claude Code the plugin's `bin/` is on the agent's Bash `PATH`, so the agent can run `oncebitten evidence list` and the other commands. The plugin ships one skill, `/oncebitten:new-rule` (`packaging/claude/skills/new-rule/SKILL.md`): it writes a rule directory by hand, with fixtures and a replay proof. The other hosts' plugins ship no skill.
 
 ### Codex
 
