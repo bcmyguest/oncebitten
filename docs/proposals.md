@@ -15,7 +15,7 @@ Triage turns an evidence cluster into a queued result (see [triage.md](triage.md
 - An invalid draft rejects the whole answer as "could not run": nothing is printed or written.
 - The draft lands in the repo's project layer, `.oncebitten/rules/<id>/`, the repo being the git root of the triage working directory. A draft whose id matches a loaded rule, or that breaks the rule set, is not written.
 - Replay runs as `oncebitten replay` does: a proven verdict writes `proof.json`. Without a sandbox, or when replay rejects the rule or cannot run, the proposal stays unproven and its reason is kept. When `openshell` is not on `PATH`, `oncebitten triage <id>` adds one stderr line saying so; see [doctor.md](doctor.md).
-- A cluster queues at most once. A rejected cluster is never queued.
+- A cluster queues at most once, with one exception: a manual `oncebitten triage <id>` on a cluster whose row is a waiting finding asks the host again and, when the answer carries a valid draft, replaces the finding with the proposal in one transaction. Without a draft the finding stays. Background triage never replaces a row, and a queued proposal or a decided cluster is never replaced. A rejected cluster is never queued.
 
 ## Draft
 
@@ -31,6 +31,7 @@ The draft is the optional `draft` key of the triage answer, `null` when no rule 
 | `check` | ast-grep only: the `check.yml` text |
 | `command`, `fired_exit_codes`, `fired_output_contains` | native only |
 | `when_changed`, `require_changed` | diff only, non-empty glob arrays |
+| `prompt` | prompt steer only: a regex on the user's prompt, at most 1000 characters |
 | `bad`, `fixed` | `{name, content}`; named `bad.<ext>` and `fixed.<ext>` (diff: `.diff`), at most 64 KiB each |
 | `corpus` | up to 10 `{name, content}` files the check must pass; replay needs at least one |
 
@@ -38,7 +39,7 @@ Validation is as strict as for a hand-written rule: the written `rule.toml` must
 
 ### Steer drafts
 
-A draft with `engine = "steer"` must have `mode = "steer"`. The reverse is not refused: a steer-mode draft with another engine still parses. Its fixtures come from the cluster's evidence, not the model:
+A draft with `engine = "steer"` must have `mode = "steer"`. The reverse is not refused: a steer-mode draft with another engine still parses. A steer draft is a command steer, or a prompt steer when `prompt` is set; see [Prompt steer drafts](#prompt-steer-drafts). A command steer's fixtures come from the cluster's evidence, not the model:
 
 - `bad` is the cluster's latest recorded command, as a `{"event": "tool", "tool", "command"}` event.
 - A user-correction cluster's evidence is a prompt, not a command. Its `bad` is the latest command in the corrected turns (see [triage.md](triage.md#call-contract)) that the model's own `bad` command matches once turned into the trigger below. With no such command nothing is written and triage warns `not queued`.
@@ -46,7 +47,32 @@ A draft with `engine = "steer"` must have `mode = "steer"`. The reverse is not r
 - The corpus is up to 5 other successful commands from the same repo in the store. Repo paths compare in canonical form, so a Windows `\\?\` prefix or a macOS `/private` symlink still matches. With none, the model's corpus is kept.
 - A steer draft is proven when it is queued, with the matcher in the running binary. It needs no OpenShell sandbox; every other engine does.
 - A steer draft is exempt from the rule that `bad` must quote the changed code sent to triage: its fixtures are recorded events.
-- Every steer draft writes `action = "inform"`. The draft has no `action` key, so a model request for `deny` fails to parse. Use `accept --deny` to upgrade.
+- Every steer draft writes `action = "inform"`. The draft has no `action` key, so a model request for `deny` fails to parse. Use `accept --deny` to upgrade a command steer.
+
+### Prompt steer drafts
+
+A steer draft with `prompt` set triggers on the user's prompt and speaks when the agent tries to finish the turn. It covers agent behaviour that no check on changed files and no single command catches. The model supplies everything:
+
+```json
+{
+  "id": "address-review-comments",
+  "description": "check every review comment before finishing",
+  "mode": "steer",
+  "engine": "steer",
+  "prompt": "(?i)review comments?|feedback",
+  "bad": {"name": "bad.json", "content": "{\"event\": \"prompt\", \"prompt\": \"address the review comments on my PR\"}"},
+  "fixed": {"name": "fixed.json", "content": "{\"event\": \"prompt\", \"prompt\": \"review this function for bugs\"}"},
+  "corpus": [{"name": "tests.json", "content": "{\"event\": \"prompt\", \"prompt\": \"run the tests\"}"}],
+  "rationale": "Before you finish, check that every review comment is addressed."
+}
+```
+
+- The written rule has `mode = "steer"`, `engine = "steer"`, `[steer] action = "inform"`, `at = "stop"`, `message` set to the draft's `rationale`, and `[steer.trigger] prompt` set to the regex. See [steer.md](steer.md#at-stop).
+- `bad` is one user prompt that must trigger, `fixed` one prompt on a nearby topic that must not, and `corpus` up to 10 ordinary prompts that must not. Each is a `{"event": "prompt", "prompt"}` event in a `.json` file. oncebitten keeps them as the model wrote them.
+- The regex must compile with the Rust `regex` crate, must not match the empty string, must match `bad` and must match neither `fixed` nor any corpus prompt. The matcher replay checks this when the answer is parsed; a failure is "could not run" and nothing is written.
+- A draft with `prompt` set whose fixture records a tool event is rejected: a draft is a command steer or a prompt steer, never both. `prompt` on another engine is rejected too.
+- It is proven with the matcher when queued and exempt from quoting changed code, as a command steer is.
+- `accept --deny` refuses it: deny needs a tool trigger.
 
 ## Commands
 
@@ -63,7 +89,7 @@ Proposals are keyed by their evidence cluster id.
 - `list` prints `cluster  state  kind  rule  proof  hits  repo` per queued result. State is `waiting`, `accepted` or `rejected`; kind is `proposal` or `finding`; proof is `proven`, `unproven` or `-`; hits is `N hits in M files` or `-`.
 - `show` adds the rule directory, the hits with up to three sample lines (`path:line: text`), rationale, proof note, verdict JSON and the occurrence event ids that produced it. After a decision it prints the kept counts instead, because the events are gone.
 - `accept` flips `status = "proposed"` to `status = "active"` only when the rule has a valid proof. Otherwise it exits 2 with the reason: no proof, a stale proof, or a finding. Commit the rule directory with its `proof.json`. On activation, `accept` also writes, in the proposal's own repo whatever the cwd, one `.oncebitten/baseline.json` entry per existing hit of that rule, and keeps the entries of other rules. Later commits that touch those lines pass the gate; a new hit fails it.
-- `accept --deny` sets a steer proposal's `[steer]` action to `deny`, re-proves it with the running binary, then activates it. It exits 2 for a non-steer proposal.
+- `accept --deny` sets a steer proposal's `[steer]` action to `deny`, re-proves it with the running binary, then activates it. It exits 2 for a non-steer proposal and for a prompt steer proposal, which can only inform.
 - `reject` records the rejection in the evidence store (as `evidence reject` does) and removes the rule directory if it is still proposed. The cluster is never proposed again.
 - `reject --duplicate-of <other>` rejects the cluster as a duplicate of `<other>`, which must be a queued or rejected proposal other than the cluster itself. It rejects the cluster with the reason `duplicate of <other>`, then stores the link in the `duplicate_of` column; a failed reject stores no link. It never merges or drops another proposal.
 - `accept` and `reject` delete the cluster's captured events and keep one provenance record: outcome, rule, reason, occurrence and session counts, first and last seen, decision time. The `rejections` table, not the events, keeps a rejected cluster from returning.
@@ -88,6 +114,10 @@ A match is shown as `possible duplicate of <id> (<reason>)` in `proposals list`,
 ```
 
 The notice never changes the gate's exit code, and the gate never creates the evidence store.
+
+## Session-start notice
+
+On claude and codex the steer hook answers `SessionStart` with the count and ids of the rule proposals waiting for the session's repository, and tells the agent to show each to the user, ask whether to accept or reject it, and run `proposals accept` or `proposals reject`. Findings do not count. The hook prints nothing when no proposal waits, and never creates the evidence store. `oncebitten hooks install` and the claude and codex plugins install it. See [steer.md](steer.md#session-start-notice).
 
 ## Background triage
 

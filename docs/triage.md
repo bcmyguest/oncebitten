@@ -2,6 +2,8 @@
 
 `oncebitten triage <cluster-id> [--host <host>]` asks a headless agent host for a one-shot JSON verdict on one evidence cluster (see [evidence.md](evidence.md)). It prints the verdict to stdout as JSON, then queues it with any rule it drafted (see [proposals.md](proposals.md)). A queueing problem prints a warning to stderr and leaves the exit code at 0.
 
+Run on a cluster queued only as a waiting finding, it asks the host again: an answer with a valid draft replaces the finding with the proposal, and an answer without one prints `<id> stays a finding: the answer drafted no rule; nothing written` to stderr. On a cluster with a queued proposal or a decision it still prints the verdict and then `<id> is already queued; nothing written`.
+
 ## Verdict
 
 | Field | Type | Values |
@@ -45,7 +47,9 @@ The model comes from the target: `triage.default` or `triage.<host>` in configur
 
 ## Steer drafts
 
-When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). A user-correction cluster qualifies when a command in its corrected turns is the mistake: the prompt asks for `proposed_fix_kind = "agent-workflow"` and a steer draft on that command. A workflow mistake with no recorded command (a wrong model choice, working past a request to pause) still ends as a finding. It is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Steer fixtures come from the recorded command, so triage does not invent the bad case.
+When the cluster's evidence is a command, the draft may use `engine = "steer"` (see [proposals.md](proposals.md#steer-drafts)). A user-correction cluster qualifies when a command in its corrected turns is the mistake: the prompt asks for `proposed_fix_kind = "agent-workflow"` and a steer draft on that command. A command steer is inform-only: triage writes `action = "inform"`, and `oncebitten proposals accept <id> --deny` is the only path to deny. Its fixtures come from the recorded command, so triage does not invent the bad case.
+
+A workflow mistake with no recorded command ("most of my comments were not addressed") can get a prompt steer draft instead. The prompt asks for one when the verdict is repeatable, the mistake is agent behaviour that no check on changed files and no single command catches, and a topic in the user's request predicts it. The model writes the trigger: a case-insensitive regex in the draft's `prompt` key that names the topic of the request preceding the mistake (review comments, feedback) and stays narrow enough that ordinary prompts do not match. It also writes the fixtures, as prompt events, and the message in `rationale`: one imperative sentence telling the agent what to verify before it finishes. The written rule has `action = "inform"` and `at = "stop"` (see [steer.md](steer.md#at-stop)); `accept --deny` refuses it. A workflow mistake with no predicting topic still ends as a finding.
 
 ## Call contract
 

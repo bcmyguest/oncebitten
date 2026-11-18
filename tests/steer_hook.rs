@@ -4,8 +4,10 @@ use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
 use common::{both, code, Repo};
-use oncebitten::host::{normalize_steer, Host, ALL_HOSTS};
+use oncebitten::host::{normalize_boundary, normalize_steer, Boundary, Host, ALL_HOSTS};
+use oncebitten::proposals::repo_key;
 use oncebitten::steer::{render, Decision, SteerEvent};
+use oncebitten::store::{Kind, ProposalRow, State, Store};
 use serde_json::{json, Value};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
@@ -364,4 +366,316 @@ fn a_rule_that_fails_to_load_disables_only_itself() {
     assert_eq!(value["hookSpecificOutput"]["permissionDecision"], "deny");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("half-written"), "{stderr}");
+}
+
+const REVIEW_RULE: &str = "id = \"review-comments\"\ndescription = \"Address every review comment.\"\n\
+mode = \"steer\"\nstatus = \"active\"\nengine = \"steer\"\n[steer]\nat = \"stop\"\n\
+message = \"Check that every review comment is addressed.\"\n[steer.trigger]\nprompt = \"(?i)review\"\n";
+const REVIEW_LINE: &str =
+    "oncebitten review-comments: Check that every review comment is addressed.";
+
+fn db(repo: &Repo) -> std::path::PathBuf {
+    repo.root
+        .path()
+        .join("data")
+        .join("oncebitten")
+        .join("events.db")
+}
+
+fn repo_with_review_rule() -> Repo {
+    let repo = Repo::new();
+    write_review_rule(&repo, REVIEW_RULE);
+    repo
+}
+
+fn write_review_rule(repo: &Repo, toml: &str) {
+    let dir = ".oncebitten/rules/review-comments";
+    repo.write(&format!("{dir}/rule.toml"), toml);
+    repo.write(
+        &format!("{dir}/fixtures/bad.json"),
+        r#"{"event": "prompt", "prompt": "address the review"}"#,
+    );
+    repo.write(
+        &format!("{dir}/fixtures/fixed.json"),
+        r#"{"event": "prompt", "prompt": "fix the build"}"#,
+    );
+}
+
+fn hook_payload(repo: &Repo, session: &str, event: &str, extra: Value) -> String {
+    let mut payload = json!({
+        "session_id": session,
+        "cwd": repo.project().display().to_string(),
+        "hook_event_name": event,
+    });
+    payload
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    payload.to_string()
+}
+
+fn prompt_payload(repo: &Repo, session: &str, text: &str) -> String {
+    hook_payload(repo, session, "UserPromptSubmit", json!({"prompt": text}))
+}
+
+fn stop_payload(repo: &Repo, session: &str, continued: bool) -> String {
+    hook_payload(
+        repo,
+        session,
+        "Stop",
+        json!({"stop_hook_active": continued}),
+    )
+}
+
+fn silent(output: &Output) {
+    assert_eq!(code(output), 0, "{}", both(output));
+    assert!(output.stdout.is_empty(), "{}", both(output));
+}
+
+fn held(repo: &Repo, session: &str) -> Vec<String> {
+    let conn = rusqlite::Connection::open(db(repo)).unwrap();
+    let mut statement = conn
+        .prepare("SELECT rule FROM steer_pending WHERE session = ?1")
+        .unwrap();
+    let rules = statement
+        .query_map([session], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<Vec<String>, _>>()
+        .unwrap();
+    rules
+}
+
+fn queue(repo: &Repo, cluster: &str, kind: Kind, state: State) {
+    let store = Store::open(&db(repo)).unwrap();
+    let row = ProposalRow {
+        cluster: cluster.to_owned(),
+        ts: 1,
+        repo: repo_key(&repo.project()),
+        kind,
+        state,
+        rule: None,
+        dir: None,
+        proven: false,
+        note: None,
+        verdict: "{}".to_owned(),
+        rationale: None,
+        occurrences: Vec::new(),
+        target: None,
+        commit: None,
+        pr_url: None,
+        hits: None,
+    };
+    assert!(store.insert_proposal(&row).unwrap());
+}
+
+#[test]
+fn stop_and_session_start_payloads_normalize_to_boundaries() {
+    let stop = normalize_boundary(
+        r#"{"session_id":"s","cwd":"/w","hook_event_name":"Stop","stop_hook_active":true}"#,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(stop.boundary, Boundary::Stop { continued: true });
+    assert_eq!(stop.session.as_deref(), Some("s"));
+    assert_eq!(stop.cwd.as_deref(), Some("/w"));
+
+    let first = normalize_boundary(r#"{"session_id":"s","hook_event_name":"Stop"}"#)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.boundary, Boundary::Stop { continued: false });
+
+    let start = normalize_boundary(
+        r#"{"session_id":"s","hook_event_name":"SessionStart","source":"startup"}"#,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(start.boundary, Boundary::SessionStart);
+
+    assert_eq!(
+        normalize_boundary(&fixture("codex/PreToolUse.json")).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_prompt_matching_an_at_stop_rule_is_held_and_prints_nothing() {
+    let repo = repo_with_review_rule();
+
+    for host in ["claude", "codex"] {
+        let session = format!("{host}-session");
+        let payload = prompt_payload(&repo, &session, "address the review comments");
+        silent(&steer(&repo, host, &payload, &[]));
+        silent(&steer(&repo, host, &payload, &[]));
+        assert_eq!(held(&repo, &session), ["review-comments"], "{host}");
+    }
+}
+
+#[test]
+fn a_prompt_that_matches_no_at_stop_rule_leaves_no_store() {
+    let repo = repo_with_review_rule();
+
+    silent(&steer(
+        &repo,
+        "claude",
+        &prompt_payload(&repo, "s", "fix the build"),
+        &[],
+    ));
+    silent(&steer(&repo, "claude", &sudo_payload(&repo, "ls"), &[]));
+    silent(&steer(
+        &repo,
+        "claude",
+        &stop_payload(&repo, "s", false),
+        &[],
+    ));
+
+    assert!(!db(&repo).exists());
+}
+
+#[test]
+fn stop_blocks_once_with_the_held_message_then_clears() {
+    let repo = repo_with_review_rule();
+    let prompt = prompt_payload(&repo, "s", "address the review comments");
+
+    for host in ["claude", "codex"] {
+        silent(&steer(&repo, host, &prompt, &[]));
+        let other_session = steer(&repo, host, &stop_payload(&repo, "other", false), &[]);
+        silent(&other_session);
+
+        let output = steer(&repo, host, &stop_payload(&repo, "s", false), &[]);
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            value,
+            json!({"decision": "block", "reason": REVIEW_LINE}),
+            "{host}"
+        );
+        assert!(held(&repo, "s").is_empty(), "{host}");
+
+        silent(&steer(&repo, host, &stop_payload(&repo, "s", false), &[]));
+    }
+}
+
+#[test]
+fn a_continued_stop_prints_nothing_and_clears() {
+    let repo = repo_with_review_rule();
+    let prompt = prompt_payload(&repo, "s", "address the review comments");
+    silent(&steer(&repo, "claude", &prompt, &[]));
+
+    silent(&steer(
+        &repo,
+        "claude",
+        &stop_payload(&repo, "s", true),
+        &[],
+    ));
+
+    assert!(held(&repo, "s").is_empty());
+    silent(&steer(
+        &repo,
+        "claude",
+        &stop_payload(&repo, "s", false),
+        &[],
+    ));
+}
+
+#[test]
+fn stop_drops_a_rule_that_is_retired_or_gone() {
+    let repo = repo_with_review_rule();
+    let prompt = prompt_payload(&repo, "s", "address the review comments");
+
+    silent(&steer(&repo, "claude", &prompt, &[]));
+    write_review_rule(
+        &repo,
+        &REVIEW_RULE.replace("status = \"active\"", "status = \"retired\""),
+    );
+    silent(&steer(
+        &repo,
+        "claude",
+        &stop_payload(&repo, "s", false),
+        &[],
+    ));
+    assert!(held(&repo, "s").is_empty());
+
+    write_review_rule(&repo, REVIEW_RULE);
+    silent(&steer(&repo, "claude", &prompt, &[]));
+    std::fs::remove_dir_all(repo.rule_dir("review-comments")).unwrap();
+    silent(&steer(
+        &repo,
+        "claude",
+        &stop_payload(&repo, "s", false),
+        &[],
+    ));
+    assert!(held(&repo, "s").is_empty());
+}
+
+#[test]
+fn hosts_without_a_stop_hook_ignore_at_stop_rules() {
+    let repo = repo_with_review_rule();
+    let prompt = prompt_payload(&repo, "s", "address the review comments");
+
+    for host in ["cursor", "copilot", "opencode", "pi"] {
+        silent(&steer(&repo, host, &prompt, &[]));
+        silent(&steer(&repo, host, &stop_payload(&repo, "s", false), &[]));
+    }
+
+    assert!(!db(&repo).exists());
+}
+
+#[test]
+fn session_start_announces_waiting_proposals_of_the_repo() {
+    let repo = Repo::new();
+    std::fs::create_dir_all(db(&repo).parent().unwrap()).unwrap();
+    queue(&repo, "tool-failure-aaaa", Kind::Proposal, State::Waiting);
+    queue(&repo, "tool-failure-bbbb", Kind::Proposal, State::Waiting);
+    queue(&repo, "tool-failure-cccc", Kind::Proposal, State::Accepted);
+    queue(&repo, "tool-failure-dddd", Kind::Finding, State::Waiting);
+    let payload = hook_payload(&repo, "s", "SessionStart", json!({"source": "startup"}));
+
+    for host in ["claude", "codex"] {
+        let output = steer(&repo, host, &payload, &[]);
+
+        assert_eq!(code(&output), 0, "{}", both(&output));
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let output = &value["hookSpecificOutput"];
+        assert_eq!(output["hookEventName"], "SessionStart", "{host}");
+        let context = output["additionalContext"].as_str().unwrap();
+        assert!(
+            context.starts_with(
+                "oncebitten: 2 rule suggestion(s) wait for review in this repository."
+            ),
+            "{context}"
+        );
+        assert!(
+            context.contains("`oncebitten proposals accept <id>`"),
+            "{context}"
+        );
+        assert!(
+            context.ends_with("Ids: tool-failure-aaaa, tool-failure-bbbb"),
+            "{context}"
+        );
+    }
+
+    let elsewhere = Repo::new();
+    let elsewhere_payload = hook_payload(&elsewhere, "s", "SessionStart", json!({}));
+    silent(&steer(&repo, "claude", &elsewhere_payload, &[]));
+    silent(&steer(&repo, "cursor", &payload, &[]));
+}
+
+#[test]
+fn session_start_is_silent_when_only_findings_wait() {
+    let repo = Repo::new();
+    std::fs::create_dir_all(db(&repo).parent().unwrap()).unwrap();
+    queue(&repo, "tool-failure-dddd", Kind::Finding, State::Waiting);
+    let payload = hook_payload(&repo, "s", "SessionStart", json!({"source": "startup"}));
+
+    silent(&steer(&repo, "claude", &payload, &[]));
+}
+
+#[test]
+fn session_start_without_a_store_is_silent_and_creates_none() {
+    let repo = Repo::new();
+    let payload = hook_payload(&repo, "s", "SessionStart", json!({"source": "startup"}));
+
+    silent(&steer(&repo, "claude", &payload, &[]));
+
+    assert!(!db(&repo).exists());
 }

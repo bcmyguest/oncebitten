@@ -47,7 +47,7 @@ Per engine:
 - `ast-grep`: `check.yml` is an ast-grep rule (`id`, `language`, `severity: error`, `message`, `rule`). Fixtures are source files. A `files:` glob must also match the fixture paths, so write `**/*.py`, not `src/**/*.py`.
 - `diff`: add `when_changed` and `require_changed` glob arrays to `rule.toml`. Fixtures are `bad.diff` and `fixed.diff`: changed paths, one per line.
 - `native`: add `command` (array), `fired_exit_codes`, and `fired_output_contains` when the tool uses the same exit code for a crash. It has no replay; fixtures are still required.
-- `steer`: add `[steer]` with `message`, `action` (`inform`, or `deny` to refuse the tool call) and one `[steer.trigger]`: `tool` (+ `command` regex), `paths`, or `prompt`. Fixtures are `bad.json` and `fixed.json`, one normalized event each, such as `{"event": "tool", "tool": "Bash", "command": "sudo apt-get install jq"}`. Tool names differ per host; write the glob `{bash,shell,run_shell_command}`.
+- `steer`: add `[steer]` with `message`, `action` (`inform`, or `deny` to refuse the tool call) and one `[steer.trigger]`: `tool` (+ `command` regex), `paths`, or `prompt` (with `at = "stop"`, a prompt rule delivers its message when the agent tries to finish the turn instead of with the prompt). Fixtures are `bad.json` and `fixed.json`, one normalized event each, such as `{"event": "tool", "tool": "Bash", "command": "sudo apt-get install jq"}`. Tool names differ per host; write the glob `{bash,shell,run_shell_command}`.
 
 Put in `corpus/` at least one real file from this repository that resembles the mistake and is correct.
 

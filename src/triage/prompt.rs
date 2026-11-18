@@ -77,11 +77,12 @@ Fields: repeatable (the mistake is likely to recur), user_correction (a user cor
 root_cause (one sentence), proposed_fix_kind (harness, agent-workflow, lint, test, test-practice, \
 invariant or none), generality (general, project or one-off), draft. \
 Also set mistake_class: a short lowercase kebab-case slug naming the mistake, not the task. \
-Set draft to null unless a check on the changed files, or a steer on the agent's commands, would catch the mistake; \
+Set draft to null unless a check on the changed files, a steer on the agent's commands, \
+or a steer on the topic of the user's request would catch the mistake; \
 it must be null when repeatable is false, generality is one-off or proposed_fix_kind is none. \
 A draft has: id (lowercase kebab-case), description, mode (block or steer), \
 engine (ast-grep, diff, native or steer), language, check, command, fired_exit_codes, \
-fired_output_contains, when_changed, require_changed, bad, fixed, corpus, rationale. \
+fired_output_contains, when_changed, require_changed, prompt, bad, fixed, corpus, rationale. \
 ast-grep: check is the full ast-grep rule YAML (id, language, rule, message, severity) and language names it. \
 diff: when_changed and require_changed are glob lists; a change matching when_changed \
 must also change a path matching require_changed. \
@@ -96,7 +97,18 @@ oncebitten replaces bad with the cluster's latest recorded command and the corpu
 other successful commands, and triggers on the program plus its first flag or subcommand. \
 For a user-correction cluster, when a command listed under corrected turns is the mistake, \
 proposed_fix_kind is agent-workflow and the draft is a steer whose bad command is that command; \
-with no such command the draft is null. \
+with no such command the draft is a prompt steer or null. \
+prompt steer: write one when the verdict is repeatable, the mistake is agent behaviour that no check on changed files \
+and no single command catches, and a topic in the user's request predicts it; a command steer is preferred \
+when a recorded command is the mistake. It is a steer draft with prompt set: a case-insensitive regex, starting (?i), \
+on the user's prompt. The regex names the topic of the request that precedes the mistake \
+(for unaddressed review comments: review comments, feedback), stays narrow enough that ordinary prompts do not match, \
+and never matches the empty string. Its bad, fixed and corpus contents are prompt events named <name>.json, for example \
+bad {\"event\": \"prompt\", \"prompt\": \"address the review comments on my PR\"}: \
+bad is one user prompt that must trigger, fixed one prompt on a nearby topic that must not, \
+and corpus up to ten ordinary prompts that must not; oncebitten keeps them as written. \
+Its rationale is the message the agent reads when it tries to finish: one imperative sentence \
+telling it what to verify before it finishes. prompt is null in every other draft. \
 Keys the engine does not use are null. \
 bad and fixed are fixture files {name, content}: name is bad.<ext> or fixed.<ext>, \
 bad is a minimal example the check must flag and fixed the corrected version it must pass; \

@@ -40,14 +40,14 @@ scripts/e2e-live.sh   # real Claude Code sessions: capture, background triage, a
 - `src/attachments.rs`: pure matcher for attachment links in PR text; `gate pr` uses it for diff rules. `tests/gate_attachments.rs`.
 - `src/main.rs`: CLI (`config show`, `config path`, `rules sync|list|validate|retire|rollback`, `check`, `replay`, `gate`, `baseline update`, `exception add|list`, `doctor`, `capture`, `hooks install|uninstall`, `evidence list|show|reject`).
 - `src/lib.rs`: library root.
-- `src/store.rs`: SQLite event store (`events`, `signals`, `rejections`, `proposals`, `decisions`). Events expire; see `docs/evidence.md`.
+- `src/store.rs`: SQLite event store (`events`, `signals`, `rejections`, `proposals`, `decisions`, `steer_pending`). Events expire; see `docs/evidence.md`.
 - `src/evidence.rs`: clusters signals into mistake classes, independent session counts, rejection memory. Backs `evidence list|show|reject`.
 - `src/signal.rs`: signal kinds and pure derivation from an event and its session history.
 - `src/host.rs`: per-host hook payload to normalized event (claude, codex, cursor, copilot, opencode, pi).
 - `src/capture.rs`: capture pipeline behind `oncebitten capture`.
 - `src/hooks.rs`: installs and removes capture and steer hooks for every host.
 - `src/intent.rs`: experimental prompt-intent classifier, compiled only with the cargo feature `intent` and called by nothing in the binary. `bench/intent` and `docs/research/intent-classifier.md` hold its measurements; regex signals in `src/signal.rs` stay the capture path.
-- `src/steer.rs`: steer rules: normalized event, trigger matcher, replay, per-host output, `oncebitten steer`. `src/host.rs` `normalize_steer` maps payloads onto its events.
+- `src/steer.rs`: steer rules: normalized event, trigger matcher, replay, per-host output, `oncebitten steer`, `at = "stop"` reminders held in the store until the host's stop event, and the session-start notice of waiting proposals. `src/host.rs` `normalize_steer` maps payloads onto its events and `normalize_boundary` maps session-start and stop payloads.
 - `docs/steer.md`: steer rule format, fixtures, the steer hook and what each host supports. Keep it in step with `src/steer.rs`, `src/host.rs` and `src/hooks.rs`.
 - `tests/steer.rs`, `tests/steer_gate.rs`, `tests/steer_hook.rs`, `tests/hooks_steer.rs`: steer schema, matcher, proof, gate, hook output and install tests.
 - `tests/config.rs`: loader tests (precedence, merge, validation). `tests/cli.rs`: binary tests.

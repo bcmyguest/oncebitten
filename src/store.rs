@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS triage_runs (
 ";
 /// Columns `proposals deliver` fills. Databases created before delivery lack
 /// them; `add_delivery_columns` adds each missing one on open.
+/// Messages of `at = "stop"` steer rules held until the session's next stop.
+const STEER_PENDING: &str = "
+CREATE TABLE IF NOT EXISTS steer_pending (
+    session TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    PRIMARY KEY (session, rule)
+);
+";
 const DELIVERY_COLUMNS: [&str; 3] = ["target", "commit_sha", "pr_url"];
 /// Columns `proposals list` and `show` read the baseline hits from. Databases
 /// created before they existed get each one on open, as `add_hits_columns`.
@@ -399,6 +408,7 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         migrate(&conn)?;
         conn.execute_batch(QUEUE)?;
+        conn.execute_batch(STEER_PENDING)?;
         add_delivery_columns(&conn)?;
         add_hits_columns(&conn)?;
         add_mark_columns(&conn)?;
@@ -694,41 +704,55 @@ impl Store {
             &format!("DELETE FROM events WHERE id IN ({expired})"),
             [before],
         )?;
+        tx.execute("DELETE FROM steer_pending WHERE ts < ?1", [before])?;
         tx.commit()?;
         Ok(deleted)
     }
 
+    /// Holds each rule's message for `session` until its next stop. A rule
+    /// already held stays as it is.
+    pub fn hold_steer(&self, session: &str, rules: &[&str], ts: i64) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for rule in rules {
+            tx.execute(
+                "INSERT OR IGNORE INTO steer_pending (session, rule, ts) VALUES (?1, ?2, ?3)",
+                params![session, rule, ts],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes and returns the rule ids held for `session`, oldest first.
+    pub fn take_held_steer(&self, session: &str) -> Result<Vec<String>> {
+        let tx = self.conn.unchecked_transaction()?;
+        let rules = tx
+            .prepare("SELECT rule FROM steer_pending WHERE session = ?1 ORDER BY ts, rule")?
+            .query_map([session], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        tx.execute("DELETE FROM steer_pending WHERE session = ?1", [session])?;
+        tx.commit()?;
+        Ok(rules)
+    }
+
     /// Queues a triage result. Returns false when the cluster already has one.
     pub fn insert_proposal(&self, row: &ProposalRow) -> Result<bool> {
-        let inserted = self.conn.execute(
-            &format!(
-                "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}, hits_count, hits_files, hits_samples) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
-            ),
-            params![
-                row.cluster,
-                row.ts,
-                row.repo,
-                row.kind.as_str(),
-                row.state.as_str(),
-                row.rule,
-                row.dir
-                    .as_ref()
-                    .map(|dir| dir.to_string_lossy().into_owned()),
-                row.proven,
-                row.note,
-                row.verdict,
-                row.rationale,
-                serde_json::to_string(&row.occurrences)?,
-                row.hits.as_ref().map(|hits| hits.count),
-                row.hits.as_ref().map(|hits| hits.files),
-                row.hits
-                    .as_ref()
-                    .map(|hits| serde_json::to_string(&hits.samples))
-                    .transpose()?,
-            ],
+        Ok(insert_proposal_row(&self.conn, row)? == 1)
+    }
+
+    /// Replaces the cluster's waiting finding with `row`. Returns false, and
+    /// changes nothing, when the cluster's row is anything else.
+    pub fn replace_finding(&self, row: &ProposalRow) -> Result<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        let removed = tx.execute(
+            "DELETE FROM proposals WHERE cluster = ?1 AND kind = ?2 AND state = ?3",
+            params![row.cluster, Kind::Finding.as_str(), State::Waiting.as_str()],
         )?;
-        Ok(inserted == 1)
+        if removed == 0 || insert_proposal_row(&tx, row)? == 0 {
+            return Ok(false);
+        }
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn proposal(&self, cluster: &str) -> Result<Option<ProposalRow>> {
@@ -1255,6 +1279,38 @@ fn normalised_repo(repo: &str) -> PathBuf {
         Ok(canonical) => canonical,
         Err(_) => PathBuf::from(strip_verbatim(repo)),
     }
+}
+
+/// Inserts `row` unless its cluster is queued; the number of rows inserted.
+fn insert_proposal_row(conn: &Connection, row: &ProposalRow) -> Result<usize> {
+    Ok(conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO proposals ({PROPOSAL_COLUMNS}, hits_count, hits_files, hits_samples) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+        ),
+        params![
+            row.cluster,
+            row.ts,
+            row.repo,
+            row.kind.as_str(),
+            row.state.as_str(),
+            row.rule,
+            row.dir
+                .as_ref()
+                .map(|dir| dir.to_string_lossy().into_owned()),
+            row.proven,
+            row.note,
+            row.verdict,
+            row.rationale,
+            serde_json::to_string(&row.occurrences)?,
+            row.hits.as_ref().map(|hits| hits.count),
+            row.hits.as_ref().map(|hits| hits.files),
+            row.hits
+                .as_ref()
+                .map(|hits| serde_json::to_string(&hits.samples))
+                .transpose()?,
+        ],
+    )?)
 }
 
 /// Drops a Windows verbatim prefix: `\\?\UNC\server` -> `\\server` and

@@ -62,9 +62,11 @@ oncebitten hooks install --host opencode --scope user
 
 - Each plugin ships the same `bin/oncebitten` launcher and `scripts/install.sh`. The launcher runs the release binary that matches its version from `<data>/bin/<version>/`, where `<data>` is `$CLAUDE_PLUGIN_DATA`, else `$PLUGIN_DATA` (Codex), else `$XDG_DATA_HOME/oncebitten` or `~/.local/share/oncebitten`. A missing binary is installed with SHA-256 verification.
 - A `SessionStart` hook (cursor `sessionStart`) runs the launcher once with `--version`, so the download happens before any capture.
+- The claude and codex plugins also run `oncebitten steer --host <host>` on `UserPromptSubmit`, `PreToolUse`, `Stop` and `SessionStart` with a 10 s timeout: steer rules work without `hooks install`, and a session start announces waiting rule proposals (see [steer.md](steer.md)). The cursor and copilot plugins ship capture only; `oncebitten hooks install` adds their steer hook.
+- A `capture` or `steer` call that finds no binary yet drains stdin, starts the download in the background and exits 0, so a hook never waits on a download and never blocks the agent.
 - The launcher is a POSIX `sh` script. On Windows it needs Git Bash (or another `sh` on `PATH`); otherwise use `install.ps1` and `oncebitten hooks install`.
 - Verified here: `claude plugin validate` on the marketplace and plugin; the launcher and the pi package against a local release with the real Linux binary. The Codex, Copilot and Cursor marketplace formats come from their CLIs and docs, not from a live install.
-- Do not also run `oncebitten hooks install` for a host whose plugin is installed: each event would then be captured twice, and the store drops a duplicate only when both captures land in the same millisecond. Plugins and the command line share one events database.
+- Do not also run `oncebitten hooks install` for a host whose plugin is installed: each event would then be captured twice, and the store drops a duplicate only when both captures land in the same millisecond. On claude and codex the steer hook would run twice as well and repeat each message. Plugins and the command line share one events database.
 
 
 ## Command line

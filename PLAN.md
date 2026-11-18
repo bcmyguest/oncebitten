@@ -21,7 +21,7 @@
 
 - Evidence store: SQLite (rusqlite, bundled), one database in the user data dir.
 - Host hooks: installable at user or project scope (`--scope user|project`).
-- Triage findings queue in the evidence store and surface at pre-push/PR, not mid-session.
+- Triage findings queue in the evidence store and surface at pre-push/PR. Waiting proposals are also announced at session start (decided 2026-11-17).
 - Git hooks ship as a `.pre-commit-hooks.yaml` entry; oncebitten writes no `.git/hooks` itself. The pre-commit framework is a hard requirement: README and install docs must say so up front.
 - Forges: GitHub (`gh`), GitLab (`glab`), Azure DevOps (`az repos`), behind one forge trait.
 - Existing violations: a committed baseline (`.oncebitten/baseline.json`) records violations present when a rule turns active; `check` and the gate fail only on violations not in the baseline.

@@ -4,8 +4,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::{astgrep, diff};
-use crate::rule::{self, is_fixture_named, is_kebab_case, Mode, Status};
-use crate::steer::SteerEvent;
+use crate::replay::Verdict;
+use crate::rule::{self, is_fixture_named, is_kebab_case, Check, Mode, Status};
+use crate::steer::{self, SteerEvent};
 
 pub const MAX_ID_CHARS: usize = 64;
 pub const MAX_TEXT_CHARS: usize = 1000;
@@ -19,6 +20,7 @@ const RULE_FILE: &str = "rule.toml";
 const CHECK_FILE: &str = "check.yml";
 const FIXTURES_DIR: &str = "fixtures";
 const CORPUS_DIR: &str = "corpus";
+const EVENT_EXTENSION: &str = "json";
 
 /// The rule a triage call drafts beside its verdict. Every optional key may be
 /// absent or `null`; the schema lists them all so strict hosts accept it.
@@ -44,6 +46,9 @@ pub struct Draft {
     pub when_changed: Option<Vec<String>>,
     #[serde(default, deserialize_with = "empty_vec_as_none")]
     pub require_changed: Option<Vec<String>>,
+    /// A prompt steer draft's trigger regex, matched against the user's prompt.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
+    pub prompt: Option<String>,
     pub bad: DraftFile,
     pub fixed: DraftFile,
     #[serde(default, deserialize_with = "empty_vec_as_none")]
@@ -99,22 +104,34 @@ struct RuleToml<'a> {
 #[derive(Serialize)]
 struct SteerToml<'a> {
     action: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    at: Option<&'a str>,
     message: &'a str,
-    trigger: TriggerToml,
+    trigger: TriggerToml<'a>,
 }
 
 #[derive(Serialize)]
-struct TriggerToml {
-    tool: String,
-    command: String,
+#[serde(untagged)]
+enum TriggerToml<'a> {
+    Tool { tool: String, command: String },
+    Prompt { prompt: &'a str },
 }
 
-/// The `[steer]` table for a steer draft: the recorded command's tool, and a
-/// regex matching its program plus distinguishing arguments, so near-variants
-/// of the command fire too. `None` for other engines.
+/// The `[steer]` table for a steer draft. A prompt draft triggers on its own
+/// regex and speaks at stop. A command draft takes the recorded command's
+/// tool, and a regex matching its program plus distinguishing arguments, so
+/// near-variants of the command fire too. `None` for other engines.
 fn steer_table(draft: &Draft) -> Option<SteerToml<'_>> {
     if draft.engine != Engine::Steer {
         return None;
+    }
+    if let Some(prompt) = &draft.prompt {
+        return Some(SteerToml {
+            action: "inform",
+            at: Some("stop"),
+            message: draft.rationale.trim(),
+            trigger: TriggerToml::Prompt { prompt },
+        });
     }
     let event = steer_event(&draft.bad.content).ok()?;
     let SteerEvent::Tool {
@@ -127,8 +144,9 @@ fn steer_table(draft: &Draft) -> Option<SteerToml<'_>> {
     };
     Some(SteerToml {
         action: "inform",
+        at: None,
         message: draft.rationale.trim(),
-        trigger: TriggerToml {
+        trigger: TriggerToml::Tool {
             tool,
             command: command_trigger(&command),
         },
@@ -246,6 +264,14 @@ impl Draft {
         if loaded.status != Status::Proposed {
             bail!("a drafted rule must be proposed");
         }
+        if let (Some(_), Check::Steer(steer)) = (&self.prompt, &loaded.check) {
+            match steer::replay(&dir, steer) {
+                Verdict::Proven => {}
+                Verdict::Rejected(reason) | Verdict::CouldNotRun(reason) => {
+                    bail!("the drafted prompt regex fails its fixtures: {reason}")
+                }
+            }
+        }
         Ok(())
     }
 
@@ -299,6 +325,34 @@ impl Draft {
         Ok(())
     }
 
+    /// The fixtures of a prompt steer draft are the model's: all prompt events.
+    /// Replay reads only `.json` corpus files, so any other name would pass
+    /// unchecked.
+    fn check_prompt_steer(&self, pattern: &str) -> Result<()> {
+        bounded_text("prompt", pattern)?;
+        let regex = regex::Regex::new(pattern)
+            .with_context(|| format!("draft prompt regex `{pattern}` does not compile"))?;
+        if regex.is_match("") {
+            bail!("draft prompt regex `{pattern}` matches the empty string");
+        }
+        let corpus = self.corpus.as_deref().unwrap_or_default();
+        for file in corpus {
+            let json = Path::new(&file.name)
+                .extension()
+                .is_some_and(|ext| ext == EVENT_EXTENSION);
+            if !json {
+                bail!(
+                    "a prompt steer draft's corpus file `{}` must be named <name>.json",
+                    file.name
+                );
+            }
+        }
+        for file in [&self.bad, &self.fixed].into_iter().chain(corpus) {
+            prompt_event(file)?;
+        }
+        Ok(())
+    }
+
     fn check_engine_keys(&self) -> Result<()> {
         let globs = self.when_changed.is_some() || self.require_changed.is_some();
         let native_keys = self.command.is_some()
@@ -307,10 +361,16 @@ impl Draft {
         if matches!(self.engine, Engine::Steer) && !matches!(self.mode, Mode::Steer) {
             bail!("engine = \"steer\" needs mode = \"steer\"");
         }
+        if self.prompt.is_some() && !matches!(self.engine, Engine::Steer) {
+            bail!("only a steer draft takes `prompt`");
+        }
         match self.engine {
             Engine::Steer => {
                 if self.check.is_some() || globs || native_keys {
                     bail!("a steer draft takes only its recorded fixtures");
+                }
+                if let Some(pattern) = &self.prompt {
+                    return self.check_prompt_steer(pattern);
                 }
                 let event = steer_event(&self.bad.content)?;
                 match event {
@@ -362,6 +422,20 @@ impl Draft {
             }
         }
         Ok(())
+    }
+}
+
+fn prompt_event(file: &DraftFile) -> Result<()> {
+    match steer_event(&file.content) {
+        Ok(SteerEvent::Prompt { .. }) => Ok(()),
+        Ok(SteerEvent::Tool { .. }) => bail!(
+            "a draft is a command steer or a prompt steer, never both: `prompt` is set and `{}` records a tool event",
+            file.name
+        ),
+        Err(_) => bail!(
+            "a prompt steer draft's `{}` must be a prompt event",
+            file.name
+        ),
     }
 }
 

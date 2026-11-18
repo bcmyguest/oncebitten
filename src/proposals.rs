@@ -8,7 +8,7 @@ use crate::evidence::{self, Cluster};
 use crate::hits;
 use crate::proof::{self, Replayed, Validity};
 use crate::replay::Verdict;
-use crate::rule::{self, Check, Rule, Status};
+use crate::rule::{self, Check, Rule, Status, Trigger};
 use crate::rules::{self, Failure};
 use crate::signal;
 pub use crate::store::{Kind, ProposalMarks, ProposalRow, State};
@@ -55,6 +55,8 @@ pub enum Recorded {
     Proposed { proven: bool },
     /// The verdict drafted no rule; it waits in the queue as a finding.
     Finding,
+    /// A manual triage drafted no rule either; the queued finding stays.
+    FindingKept,
     /// The cluster already has a queued result; nothing was written.
     AlreadyQueued,
     /// The cluster was rejected; nothing was written.
@@ -210,12 +212,47 @@ pub fn record(
     prove: &dyn Fn(&Rule) -> Replayed,
     ts: i64,
 ) -> Result<Recorded> {
+    record_answer(store, inputs, cluster, answer, prove, ts, false)
+}
+
+/// `record` for a triage the user ran by hand: a cluster queued only as a
+/// waiting finding takes the answer's draft as its proposal, replacing the
+/// finding. Without a draft the finding stays.
+pub fn record_upgrading(
+    store: &Store,
+    inputs: &Inputs,
+    cluster: &Cluster,
+    answer: &Answer,
+    prove: &dyn Fn(&Rule) -> Replayed,
+    ts: i64,
+) -> Result<Recorded> {
+    record_answer(store, inputs, cluster, answer, prove, ts, true)
+}
+
+fn record_answer(
+    store: &Store,
+    inputs: &Inputs,
+    cluster: &Cluster,
+    answer: &Answer,
+    prove: &dyn Fn(&Rule) -> Replayed,
+    ts: i64,
+    upgrade: bool,
+) -> Result<Recorded> {
     if cluster.rejection.is_some() {
         return Ok(Recorded::Rejected);
     }
-    if store.proposal(&cluster.id)?.is_some() {
-        return Ok(Recorded::AlreadyQueued);
-    }
+    let replaces = match store.proposal(&cluster.id)? {
+        None => false,
+        Some(queued)
+            if upgrade && queued.kind == Kind::Finding && queued.state == State::Waiting =>
+        {
+            if answer.draft.is_none() {
+                return Ok(Recorded::FindingKept);
+            }
+            true
+        }
+        Some(_) => return Ok(Recorded::AlreadyQueued),
+    };
     let repo = config::repo_root(&inputs.cwd).context("not inside a git repository")?;
     let row = ProposalRow {
         cluster: cluster.id.clone(),
@@ -249,7 +286,7 @@ pub fn record(
         return Ok(Recorded::Finding);
     };
     let mut steered = answered.clone();
-    if steered.engine == Engine::Steer {
+    if steered.engine == Engine::Steer && steered.prompt.is_none() {
         steer_fixtures(store, &repo, cluster, &mut steered)?;
     }
     let draft = &steered;
@@ -258,7 +295,7 @@ pub fn record(
         bail!("a rule named `{}` already exists", draft.id);
     }
     let dir = draft.write(&PROJECT_RULES.iter().fold(repo, |dir, part| dir.join(part)))?;
-    let queued = queue_written(store, inputs, draft, &dir, row, prove);
+    let queued = queue_written(store, inputs, draft, &dir, row, prove, replaces);
     if !matches!(queued, Ok(Recorded::Proposed { .. })) {
         let _ = std::fs::remove_dir_all(&dir);
     } else {
@@ -342,9 +379,9 @@ pub fn mark_lines(marks: &ProposalMarks) -> Vec<String> {
     lines
 }
 
-/// Fills a steer draft's fixtures from a recorded command, which becomes
-/// `bad`, and from the repo's other successful commands, which become the
-/// corpus. Fails when the evidence holds no such command.
+/// Fills a command steer draft's fixtures from a recorded command, which
+/// becomes `bad`, and from the repo's other successful commands, which become
+/// the corpus. Fails when the evidence holds no such command.
 fn steer_fixtures(store: &Store, repo: &Path, cluster: &Cluster, draft: &mut Draft) -> Result<()> {
     let (tool, command) = if cluster.class == signal::USER_CORRECTION {
         corrected_command(store, cluster, draft)?
@@ -401,6 +438,7 @@ fn queue_written(
     dir: &Path,
     mut row: ProposalRow,
     prove: &dyn Fn(&Rule) -> Replayed,
+    replaces: bool,
 ) -> Result<Recorded> {
     if let Err(error) = load_rules(inputs) {
         return Err(error.context(format!("proposal `{}` breaks the rule set", draft.id)));
@@ -416,7 +454,12 @@ fn queue_written(
     // A rule whose hits fail to count stays unmeasured; it never blocks a proposal.
     row.hits = config::repo_root(&inputs.cwd)
         .and_then(|repo| hits::measure(inputs, &repo, dir).ok().flatten());
-    if !store.insert_proposal(&row)? {
+    let queued = if replaces {
+        store.replace_finding(&row)?
+    } else {
+        store.insert_proposal(&row)?
+    };
+    if !queued {
         return Ok(Recorded::AlreadyQueued);
     }
     Ok(Recorded::Proposed { proven })
@@ -489,8 +532,11 @@ where
         .clone()
         .context("the proposal names no rule directory")?;
     let rule = rule::load_rule(&dir)?;
-    if !matches!(rule.check, Check::Steer(_)) {
+    let Check::Steer(steer) = &rule.check else {
         bail!("`{id}` is not a steer rule; --deny applies only to steer proposals");
+    };
+    if matches!(steer.trigger, Trigger::Prompt { .. }) {
+        bail!("`{id}` is a prompt steer rule; --deny needs a tool trigger, and a prompt rule can only inform");
     }
     if rule.status != Status::Proposed {
         bail!(
@@ -588,19 +634,35 @@ fn reject_with_reason(store: &Store, id: &str, reason: &str, ts: i64) -> Result<
     )
 }
 
+/// The rule proposals waiting in `repo`, oldest first. Findings do not count.
+pub fn waiting(store: &Store, repo: &Path) -> Result<Vec<ProposalRow>> {
+    let key = repo_key(repo);
+    let mut rows = store.proposals()?;
+    rows.retain(|row| row.kind == Kind::Proposal && row.state == State::Waiting && row.repo == key);
+    Ok(rows)
+}
+
+/// `waiting` for the repository holding `inputs.cwd`. Empty outside a
+/// repository and when no store exists yet; it never creates one.
+pub fn waiting_here(inputs: &Inputs) -> Result<Vec<ProposalRow>> {
+    let path = crate::store::events_db_path_for(&inputs.vars, config::Platform::current())?;
+    let Some(repo) = config::repo_root(&inputs.cwd).filter(|_| path.is_file()) else {
+        return Ok(Vec::new());
+    };
+    waiting(&Store::open(&path)?, &repo)
+}
+
 /// The non-blocking line the gate prints when proposals wait in `repo`.
 pub fn notice(store: &Store, repo: &Path) -> Result<Option<String>> {
-    let key = repo_key(repo);
-    let waiting = store
-        .proposals()?
-        .into_iter()
-        .filter(|row| row.kind == Kind::Proposal && row.state == State::Waiting && row.repo == key)
-        .count();
-    Ok(match waiting {
+    Ok(notice_line(waiting(store, repo)?.len()))
+}
+
+pub fn notice_line(waiting: usize) -> Option<String> {
+    match waiting {
         0 => None,
         1 => Some(format!("1 rule proposal waiting: {LIST_HINT}")),
         n => Some(format!("{n} rule proposals waiting: {LIST_HINT}")),
-    })
+    }
 }
 
 /// The key a repo is queued under: its canonical path when it resolves.

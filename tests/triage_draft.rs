@@ -452,3 +452,159 @@ fn the_prompt_documents_the_steer_engine_and_its_fixture_events() {
     let parsed: Draft = serde_json::from_value(draft).unwrap();
     parsed.validate().unwrap();
 }
+
+fn prompt_event(prompt: &str) -> serde_json::Value {
+    serde_json::json!({"event": "prompt", "prompt": prompt})
+        .to_string()
+        .into()
+}
+
+fn prompt_draft() -> serde_json::Value {
+    serde_json::json!({
+        "id": "address-review-comments",
+        "description": "check every review comment before finishing",
+        "mode": "steer",
+        "engine": "steer",
+        "prompt": "(?i)review comments?|feedback",
+        "bad": {"name": "bad.json", "content": prompt_event("address the review comments on my PR")},
+        "fixed": {"name": "fixed.json", "content": prompt_event("review this function for bugs")},
+        "corpus": [
+            {"name": "tests.json", "content": prompt_event("run the tests")},
+            {"name": "rename.json", "content": prompt_event("rename the config module")}
+        ],
+        "rationale": "Before you finish, check that every review comment is addressed."
+    })
+}
+
+#[test]
+fn a_prompt_steer_draft_writes_a_stop_rule_with_its_own_fixtures() {
+    let answer = verdict::parse_answer(&answer(&prompt_draft().to_string())).unwrap();
+    let parent = TempDir::new().unwrap();
+    let dir = answer.draft.expect("draft").write(parent.path()).unwrap();
+    let text = std::fs::read_to_string(dir.join("rule.toml")).unwrap();
+    let toml: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(
+        toml,
+        toml::toml! {
+            id = "address-review-comments"
+            description = "check every review comment before finishing"
+            mode = "steer"
+            status = "proposed"
+            engine = "steer"
+
+            [steer]
+            action = "inform"
+            at = "stop"
+            message = "Before you finish, check that every review comment is addressed."
+
+            [steer.trigger]
+            prompt = "(?i)review comments?|feedback"
+        }
+        .into(),
+        "{text}"
+    );
+    for (file, prompt) in [
+        ("fixtures/bad.json", "address the review comments on my PR"),
+        ("fixtures/fixed.json", "review this function for bugs"),
+        ("corpus/tests.json", "run the tests"),
+        ("corpus/rename.json", "rename the config module"),
+    ] {
+        let event: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join(file)).unwrap()).unwrap();
+        assert_eq!(
+            event,
+            serde_json::json!({"event": "prompt", "prompt": prompt}),
+            "{file}"
+        );
+    }
+    let rule = rule::load_rule(&dir).unwrap();
+    let Check::Steer(steer) = &rule.check else {
+        panic!("expected a steer rule, got {:?}", rule.check);
+    };
+    assert_eq!(steer.at, rule::At::Stop);
+    assert_eq!(
+        oncebitten::steer::replay(&dir, steer),
+        oncebitten::replay::Verdict::Proven
+    );
+}
+
+#[test]
+fn a_prompt_regex_that_fails_its_fixtures_rejects_the_answer() {
+    let cases = [
+        (
+            "does not compile",
+            with(prompt_draft(), "prompt", "(?i)review(".into()),
+        ),
+        (
+            "matches fixed",
+            with(prompt_draft(), "prompt", "(?i)review".into()),
+        ),
+        (
+            "matches a corpus prompt",
+            with(
+                prompt_draft(),
+                "prompt",
+                "(?i)review comments?|tests".into(),
+            ),
+        ),
+        (
+            "misses bad",
+            with(prompt_draft(), "prompt", "(?i)changelog".into()),
+        ),
+        (
+            "matches the empty string",
+            with(prompt_draft(), "prompt", "(?i)(review comments?)?".into()),
+        ),
+    ];
+    for (why, draft) in cases {
+        let text = answer(&draft.to_string());
+        assert!(verdict::parse_answer(&text).is_err(), "accepted: {why}");
+    }
+}
+
+#[test]
+fn the_empty_match_is_rejected_for_itself() {
+    let draft = with(prompt_draft(), "prompt", "(?i)(review comments?)?".into());
+    let error = verdict::parse_answer(&answer(&draft.to_string())).unwrap_err();
+    assert!(format!("{error:#}").contains("empty string"), "{error:#}");
+}
+
+#[test]
+fn a_draft_with_a_command_and_a_prompt_is_rejected() {
+    let draft = with(
+        prompt_draft(),
+        "bad",
+        serde_json::json!({"name": "bad.json", "content": steer_event("Bash", "git push --force")}),
+    );
+    let error = verdict::parse_answer(&answer(&draft.to_string())).unwrap_err();
+    assert!(format!("{error:#}").contains("never both"), "{error:#}");
+    let block = with(diff_draft(), "prompt", "(?i)review comments?".into());
+    assert!(verdict::parse_answer(&answer(&block.to_string())).is_err());
+}
+
+#[test]
+fn a_prompt_steer_corpus_file_must_be_a_json_prompt_event() {
+    for file in [
+        serde_json::json!({"name": "tests.txt", "content": prompt_event("run the tests")}),
+        serde_json::json!({"name": "tests.json", "content": "run the tests"}),
+    ] {
+        let draft = with(prompt_draft(), "corpus", serde_json::json!([file]));
+        let text = answer(&draft.to_string());
+        assert!(verdict::parse_answer(&text).is_err(), "accepted: {file}");
+    }
+}
+
+#[test]
+fn the_prompt_documents_the_prompt_steer_draft() {
+    let prompt = oncebitten::triage::prompt::INSTRUCTIONS;
+    let bad = r#"{"event": "prompt", "prompt": "address the review comments on my PR"}"#;
+    assert!(prompt.contains(bad), "{prompt}");
+    assert!(prompt.contains("prompt steer"), "{prompt}");
+    let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+    let draft = &schema["properties"]["draft"]["anyOf"][0];
+    assert!(draft["properties"]["prompt"].is_object(), "{schema:#}");
+    assert!(draft["required"]
+        .as_array()
+        .unwrap()
+        .contains(&"prompt".into()));
+}

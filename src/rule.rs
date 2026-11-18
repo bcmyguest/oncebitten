@@ -77,6 +77,17 @@ impl Action {
     }
 }
 
+/// When a prompt steer rule delivers its message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum At {
+    /// With the prompt that matched.
+    #[default]
+    Prompt,
+    /// When the agent tries to finish the turn the prompt started.
+    Stop,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRule {
@@ -103,6 +114,8 @@ struct RawRule {
 struct RawSteer {
     #[serde(default)]
     action: Action,
+    #[serde(default)]
+    at: At,
     message: String,
     trigger: RawTrigger,
 }
@@ -156,6 +169,7 @@ pub enum Check {
 pub struct Steer {
     pub trigger: Trigger,
     pub action: Action,
+    pub at: At,
     pub message: String,
 }
 
@@ -427,9 +441,18 @@ fn build_steer(file: &Path, raw: RawSteer) -> Result<Steer> {
             "action = \"deny\" needs a tool trigger; path and prompt triggers can only inform",
         ));
     }
+    if raw.at == At::Stop
+        && !(matches!(trigger, Trigger::Prompt { .. }) && raw.action == Action::Inform)
+    {
+        return Err(invalid(
+            file,
+            "at = \"stop\" needs a prompt trigger and action = \"inform\"",
+        ));
+    }
     let steer = Steer {
         trigger,
         action: raw.action,
+        at: raw.at,
         message: raw.message,
     };
     crate::steer::Matcher::new(&steer).map_err(|error| invalid(file, error))?;

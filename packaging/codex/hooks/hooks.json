@@ -7,6 +7,11 @@
             "type": "command",
             "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" --version > /dev/null",
             "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" steer --host codex",
+            "timeout": 10
           }
         ]
       }
@@ -17,6 +22,33 @@
           {
             "type": "command",
             "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" capture --host codex",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" steer --host codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" steer --host codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/oncebitten\" steer --host codex",
             "timeout": 10
           }
         ]

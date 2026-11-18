@@ -24,11 +24,13 @@ const OPENCODE_TEMPLATE: &str = include_str!("../packaging/opencode/oncebitten.j
 const PI_TEMPLATE: &str = include_str!("../packaging/pi/oncebitten.js");
 const OPENCODE_STEER_TEMPLATE: &str = include_str!("../packaging/opencode/oncebitten-steer.js");
 const PI_STEER_TEMPLATE: &str = include_str!("../packaging/pi/oncebitten-steer.js");
-// Steer hooks run before a tool call or prompt. Cursor's beforeSubmitPrompt and
-// Copilot's userPromptSubmitted cannot add context, so those hosts get only the
-// pre-tool hook; see docs/steer.md.
-const CLAUDE_STEER_EVENTS: &[&str] = &["PreToolUse", "UserPromptSubmit"];
-const CODEX_STEER_EVENTS: &[&str] = &["PreToolUse", "UserPromptSubmit"];
+// Steer hooks run before a tool call or prompt; on Claude Code and Codex also
+// when the turn stops (`at = "stop"` rules) and the session starts (waiting
+// proposals). Cursor's beforeSubmitPrompt and Copilot's userPromptSubmitted
+// cannot add context, so those hosts get only the pre-tool hook; see
+// docs/steer.md.
+const CLAUDE_STEER_EVENTS: &[&str] = &["PreToolUse", "UserPromptSubmit", "Stop", "SessionStart"];
+const CODEX_STEER_EVENTS: &[&str] = &["PreToolUse", "UserPromptSubmit", "Stop", "SessionStart"];
 const CURSOR_STEER_EVENTS: &[&str] = &["preToolUse"];
 const COPILOT_STEER_EVENTS: &[&str] = &["preToolUse"];
 const STEER_JSON_FILE: &str = "oncebitten-steer.json";
@@ -530,18 +532,22 @@ pub fn steer_target(
 }
 
 /// What the host's hooks cannot do with a steer rule, for `hooks install` to
-/// print. `None` when the host supports deny and inform on tools and prompts.
+/// print. `None` when the host supports deny and inform on tools and prompts,
+/// and `at = "stop"`.
 pub fn steer_limits(host: Host) -> Option<&'static str> {
     match host {
-        Host::Claude | Host::Codex | Host::OpenCode => None,
+        Host::Claude | Host::Codex => None,
+        Host::OpenCode => Some(
+            "the opencode steer plugin has no stop hook: steer rules with at = \"stop\" do nothing",
+        ),
         Host::Cursor => Some(
-            "cursor hooks cannot add context before a tool call or prompt: steer rules with action = \"inform\" do nothing; deny works on tool calls",
+            "cursor hooks cannot add context before a tool call or prompt: steer rules with action = \"inform\" or at = \"stop\" do nothing; deny works on tool calls",
         ),
         Host::Copilot => Some(
-            "copilot file hooks cannot add context before a tool call and drop userPromptSubmitted output: steer rules with action = \"inform\" do nothing; deny works on tool calls",
+            "copilot file hooks cannot add context before a tool call and drop userPromptSubmitted output: steer rules with action = \"inform\" or at = \"stop\" do nothing; deny works on tool calls",
         ),
         Host::Pi => Some(
-            "pi cannot add context to a pending tool call: inform on a tool call arrives after the turn's tool calls run",
+            "pi cannot add context to a pending tool call: inform on a tool call arrives after the turn's tool calls run; the pi steer extension has no stop hook, so steer rules with at = \"stop\" do nothing",
         ),
     }
 }

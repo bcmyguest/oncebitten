@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use oncebitten::replay::Verdict;
-use oncebitten::rule::{load_rule, Action, Check, Mode, Rule, Steer, Trigger};
+use oncebitten::rule::{load_rule, Action, At, Check, Mode, Rule, Steer, Trigger};
 use oncebitten::steer::{self, Matcher, SteerEvent};
 use tempfile::TempDir;
 
@@ -66,6 +66,7 @@ fn steer_rule_loads_its_tool_trigger_action_and_message() {
                 command: Some(r"^\s*sudo\b".to_owned()),
             },
             action: Action::Deny,
+            at: At::Prompt,
             message: "Ask the user to run sudo.".to_owned(),
         }
     );
@@ -352,4 +353,70 @@ fn shipped_no_sudo_example_matches_sudo_as_any_compound_command() {
     ] {
         assert!(!run(command), "{command}");
     }
+}
+
+fn prompt_table(keys: &str) -> String {
+    format!("{HEAD}[steer]\n{keys}message = \"m\"\n[steer.trigger]\nprompt = \"(?i)review\"\n")
+}
+
+#[test]
+fn at_defaults_to_prompt_and_accepts_stop_on_a_prompt_inform_rule() {
+    assert_eq!(steer_of(&load(&prompt_table(""))).at, At::Prompt);
+    assert_eq!(
+        steer_of(&load(&prompt_table("at = \"prompt\"\n"))).at,
+        At::Prompt
+    );
+    assert_eq!(
+        steer_of(&load(&prompt_table("at = \"stop\"\n"))).at,
+        At::Stop
+    );
+    assert_eq!(
+        steer_of(&load(&prompt_table("action = \"inform\"\nat = \"stop\"\n"))).at,
+        At::Stop
+    );
+}
+
+#[test]
+fn at_stop_needs_a_prompt_trigger_and_inform() {
+    for table in [
+        "[steer]\nat = \"stop\"\nmessage = \"m\"\n[steer.trigger]\ntool = \"bash\"\n",
+        "[steer]\nat = \"stop\"\nmessage = \"m\"\n[steer.trigger]\npaths = [\"gen/**\"]\n",
+        "[steer]\nat = \"stop\"\naction = \"deny\"\nmessage = \"m\"\n[steer.trigger]\ntool = \"bash\"\n",
+    ] {
+        let message = error_of(&format!("{HEAD}{table}"));
+        assert!(
+            message.contains("at = \"stop\" needs a prompt trigger"),
+            "{message}"
+        );
+        assert!(message.contains("rule.toml"), "{message}");
+    }
+}
+
+#[test]
+fn at_rejects_an_unknown_value() {
+    let message = error_of(&prompt_table("at = \"later\"\n"));
+    assert!(message.contains("rule.toml"), "{message}");
+    assert!(message.contains("later"), "{message}");
+}
+
+#[test]
+fn an_at_stop_rule_is_held_and_not_decided() {
+    let rule = load(&prompt_table("at = \"stop\"\n"));
+    let rules = [("review", steer_of(&rule))];
+    let matching = event(r#"{"event": "prompt", "prompt": "address the review comments"}"#);
+    let other = event(r#"{"event": "prompt", "prompt": "fix the build"}"#);
+
+    assert!(steer::decide(&matching, rules).is_empty());
+    assert_eq!(steer::held(&matching, rules), vec!["review"]);
+    assert!(steer::held(&other, rules).is_empty());
+}
+
+#[test]
+fn an_at_stop_rule_replays_against_prompt_fixtures() {
+    let verdict = replay(
+        &prompt_table("at = \"stop\"\n"),
+        r#"{"event": "prompt", "prompt": "address the review comments"}"#,
+        r#"{"event": "prompt", "prompt": "fix the build"}"#,
+    );
+    assert_eq!(verdict, Verdict::Proven);
 }

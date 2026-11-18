@@ -37,7 +37,7 @@ Directories whose names start with `.` are skipped, so a source clone's `.git` i
 | `fired_output_contains` | `native` only, with `fired_exit_codes` | non-empty text; a substring the output must contain |
 | `when_changed` | `diff` only | non-empty array of glob strings |
 | `require_changed` | `diff` only | non-empty array of glob strings |
-| `[steer]` | `steer` only | `action`, `message` and a `[steer.trigger]` table; see [steer.md](steer.md) |
+| `[steer]` | `steer` only | `action`, `at` (`prompt` or `stop`, prompt rules only), `message` and a `[steer.trigger]` table; see [steer.md](steer.md) |
 
 Engines:
 
@@ -111,7 +111,7 @@ Git runs through the `git` binary.
 | `oncebitten doctor [--gateway <endpoint>]` | Read-only checks of the installation and the repository (see [doctor.md](doctor.md)) | 0 no check failed; 1 a check failed |
 | `oncebitten replay --stale [--checker <path>] [--gateway <endpoint>] [--local]` | Replay every project rule with status `active` or `proposed` whose proof is missing or stale; print `<id>: proven`, `<id>: rejected: <reason>` or `<id>: could not run: <reason>` per rule | 0 all proven or none needed; 1 any rejected; 2 any could not run (2 wins) |
 | `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep or diff rule and write `proof.json` when an OpenShell replay proves it; replay a steer rule with the matcher and write `proof.json` when it proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
-| `oncebitten steer --host <host>` | Agent hook: match the payload on stdin against active steer rules and print the host's output (see [steer.md](steer.md)) | always 0 |
+| `oncebitten steer --host <host>` | Agent hook: match the payload on stdin against active steer rules and print the host's output; on claude and codex also deliver `at = "stop"` messages at the stop and announce waiting proposals at session start (see [steer.md](steer.md)) | always 0 |
 | `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs (for active steer rules too), apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |
 | `oncebitten baseline update` | Replace `.oncebitten/baseline.json` with the current violations of active block rules in every tracked file | 0 written; 2 a rule could not run (nothing written) |
 | `oncebitten check [--base <rev>]` | Run each `active` block rule against changes since `<rev>` (default `HEAD`), drop findings a live exception covers, print each finding as `<id>: <path>[:<line>]: <message>` (no path: `<id>: <message>`) | 0 clean; 1 any rule fired; 2 any rule could not run, or the rules did not load (2 wins over 1) |

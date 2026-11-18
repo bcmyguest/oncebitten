@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use oncebitten::config::Inputs;
 use oncebitten::evidence::{self, Cluster};
 use oncebitten::proof::{self, BackendKind, Replayed, Validity};
-use oncebitten::proposals::{self, Recorded};
+use oncebitten::proposals::{self, Kind, Recorded, State};
 use oncebitten::replay::{Backend, RawRun, ReplaySpec};
 use oncebitten::rule::{self, Check, Rule};
 use oncebitten::signal;
@@ -260,4 +260,125 @@ fn a_block_rule_still_needs_the_sandbox() {
         proposals::record(&store, &sandbox.inputs(), &cluster, &answer, &prove, 10).unwrap();
 
     assert_eq!(recorded, Recorded::Proposed { proven: false });
+}
+
+fn prompt_answer() -> Answer {
+    let event = |prompt: &str| serde_json::json!({"event": "prompt", "prompt": prompt}).to_string();
+    let draft = serde_json::json!({
+        "id": "use-uv",
+        "description": "check every review comment before finishing",
+        "mode": "steer",
+        "engine": "steer",
+        "prompt": "(?i)review comments?|feedback",
+        "bad": {"name": "bad.json", "content": event("address the review comments on my PR")},
+        "fixed": {"name": "fixed.json", "content": event("review this function for bugs")},
+        "corpus": [{"name": "tests.json", "content": event("run the tests")}],
+        "rationale": "Before you finish, check that every review comment is addressed."
+    });
+    triage_verdict::parse_answer(&format!("{{{VERDICT},\"draft\":{draft}}}")).unwrap()
+}
+
+fn no_draft() -> Answer {
+    triage_verdict::parse_answer(&format!("{{{VERDICT}}}")).unwrap()
+}
+
+#[test]
+fn a_prompt_steer_draft_is_queued_proven_with_the_models_fixtures() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = corrected(&store, &sandbox.repo(), &[]);
+
+    let recorded = proposals::record(
+        &store,
+        &sandbox.inputs(),
+        &cluster,
+        &prompt_answer(),
+        &prove,
+        10,
+    )
+    .unwrap();
+
+    assert_eq!(recorded, Recorded::Proposed { proven: true });
+    let rule = written_rule(&sandbox);
+    assert_eq!(proof::validity(&rule), Validity::Valid);
+    let bad = fs::read_to_string(rule.file.with_file_name("fixtures").join("bad.json")).unwrap();
+    assert!(bad.contains("address the review comments"), "{bad}");
+    let row = store.proposal(&cluster.id).unwrap().unwrap();
+    assert_eq!(row.kind, Kind::Proposal);
+    assert!(row.proven);
+}
+
+#[test]
+fn a_manual_triage_upgrades_a_waiting_finding_to_a_proposal() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = corrected(&store, &sandbox.repo(), &[]);
+    let inputs = sandbox.inputs();
+    let first = proposals::record(&store, &inputs, &cluster, &no_draft(), &prove, 10).unwrap();
+    assert_eq!(first, Recorded::Finding);
+
+    let upgraded =
+        proposals::record_upgrading(&store, &inputs, &cluster, &prompt_answer(), &prove, 20)
+            .unwrap();
+
+    assert_eq!(upgraded, Recorded::Proposed { proven: true });
+    let rows = store.proposals().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, Kind::Proposal);
+    assert_eq!(rows[0].state, State::Waiting);
+    assert_eq!(rows[0].rule.as_deref(), Some("use-uv"));
+    assert_eq!(rows[0].ts, 20);
+    assert_eq!(proof::validity(&written_rule(&sandbox)), Validity::Valid);
+}
+
+#[test]
+fn a_manual_triage_without_a_draft_keeps_the_finding() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = corrected(&store, &sandbox.repo(), &[]);
+    let inputs = sandbox.inputs();
+    proposals::record(&store, &inputs, &cluster, &no_draft(), &prove, 10).unwrap();
+
+    let kept =
+        proposals::record_upgrading(&store, &inputs, &cluster, &no_draft(), &prove, 20).unwrap();
+
+    assert_eq!(kept, Recorded::FindingKept);
+    let row = store.proposal(&cluster.id).unwrap().unwrap();
+    assert_eq!(row.kind, Kind::Finding);
+    assert_eq!(row.ts, 10);
+    assert!(!sandbox.repo().join(".oncebitten").exists());
+}
+
+#[test]
+fn a_background_answer_never_replaces_a_finding() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = corrected(&store, &sandbox.repo(), &[]);
+    let inputs = sandbox.inputs();
+    proposals::record(&store, &inputs, &cluster, &no_draft(), &prove, 10).unwrap();
+
+    let again = proposals::record(&store, &inputs, &cluster, &prompt_answer(), &prove, 20).unwrap();
+
+    assert_eq!(again, Recorded::AlreadyQueued);
+    assert_eq!(
+        store.proposal(&cluster.id).unwrap().unwrap().kind,
+        Kind::Finding
+    );
+    assert!(!sandbox.repo().join(".oncebitten").exists());
+}
+
+#[test]
+fn a_manual_triage_leaves_a_queued_proposal_alone() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = corrected(&store, &sandbox.repo(), &[]);
+    let inputs = sandbox.inputs();
+    proposals::record(&store, &inputs, &cluster, &prompt_answer(), &prove, 10).unwrap();
+
+    let again =
+        proposals::record_upgrading(&store, &inputs, &cluster, &prompt_answer(), &prove, 20)
+            .unwrap();
+
+    assert_eq!(again, Recorded::AlreadyQueued);
+    assert_eq!(store.proposal(&cluster.id).unwrap().unwrap().ts, 10);
 }

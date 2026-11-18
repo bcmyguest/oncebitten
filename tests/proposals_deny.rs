@@ -125,3 +125,36 @@ fn accept_deny_refuses_a_path_trigger_and_keeps_the_file() {
     assert_eq!(rule_text(&repo), toml);
     assert_eq!(store.proposal("c1").unwrap().unwrap().state, State::Waiting);
 }
+
+#[test]
+fn accept_deny_refuses_a_prompt_steer_proposal_and_keeps_the_file() {
+    let toml = STEER_TOML
+        .replace(
+            "[steer.trigger]\ntool = \"Bash\"\ncommand = '^\\s*sudo\\b'\n",
+            "[steer.trigger]\nprompt = '(?i)review comments?'\n",
+        )
+        .replace(
+            "action = \"inform\"\n",
+            "action = \"inform\"\nat = \"stop\"\n",
+        );
+    let (_root, repo, store) = queued(&toml);
+    let fixtures = repo.join(".oncebitten/rules/no-sudo/fixtures");
+    fs::write(
+        fixtures.join("bad.json"),
+        r#"{"event": "prompt", "prompt": "address the review comments"}"#,
+    )
+    .unwrap();
+    fs::write(
+        fixtures.join("fixed.json"),
+        r#"{"event": "prompt", "prompt": "run the tests"}"#,
+    )
+    .unwrap();
+    assert_eq!(prove(&loaded(&repo)).verdict, Verdict::Proven);
+    let before = rule_text(&repo);
+    let error = proposals::accept_deny(&store, "c1", prove).unwrap_err();
+    let text = format!("{error:#}");
+    assert!(text.contains("prompt steer"), "{text}");
+    assert!(text.contains("--deny needs a tool trigger"), "{text}");
+    assert_eq!(rule_text(&repo), before);
+    assert_eq!(store.proposal("c1").unwrap().unwrap().state, State::Waiting);
+}

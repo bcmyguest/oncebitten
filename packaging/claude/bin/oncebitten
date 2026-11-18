@@ -17,12 +17,14 @@ fetch() {
 }
 
 if [ ! -f "$dir/oncebitten$exe" ]; then
-    if [ "${1:-}" = capture ]; then
-        # A hook must not wait on a download: drop this event, fetch in the background.
-        cat >/dev/null
-        fetch >/dev/null 2>&1 &
-        exit 0
-    fi
+    case "${1:-}" in
+        capture | steer)
+            # A hook must not wait on a download: drop this event, fetch in the background.
+            cat >/dev/null
+            fetch >/dev/null 2>&1 &
+            exit 0
+            ;;
+    esac
     fetch || exit 2
 fi
 exec "$dir/oncebitten$exe" "$@"

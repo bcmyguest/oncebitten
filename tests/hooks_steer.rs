@@ -61,8 +61,14 @@ fn steer_command_quotes_the_exe_per_shell() {
 #[test]
 fn json_hosts_get_pre_tool_steer_hooks() {
     let cases = [
-        (Host::Claude, vec!["PreToolUse", "UserPromptSubmit"]),
-        (Host::Codex, vec!["PreToolUse", "UserPromptSubmit"]),
+        (
+            Host::Claude,
+            vec!["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"],
+        ),
+        (
+            Host::Codex,
+            vec!["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"],
+        ),
         (Host::Cursor, vec!["preToolUse"]),
         (Host::Copilot, vec!["preToolUse"]),
     ];
@@ -169,5 +175,34 @@ fn hosts_that_cannot_inform_say_so() {
     assert_eq!(steer_limits(Host::Codex), None);
     for host in [Host::Cursor, Host::Copilot] {
         assert!(steer_limits(host).unwrap().contains("inform"), "{host:?}");
+    }
+}
+
+#[test]
+fn claude_and_codex_steer_also_runs_on_stop_and_session_start() {
+    for host in [Host::Claude, Host::Codex] {
+        let dir = TempDir::new().unwrap();
+        let path = steer_path(host, &dir);
+        assert!(install_steer_exe(host, &path, Path::new(EXE), Platform::Unix).unwrap());
+        let mut events = events_running(&read(&path), "steer --host");
+        events.sort();
+        assert_eq!(
+            events,
+            ["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"],
+            "{host:?}"
+        );
+        assert!(!install_steer_exe(host, &path, Path::new(EXE), Platform::Unix).unwrap());
+        assert!(uninstall_steer(host, &path).unwrap(), "{host:?}");
+        assert!(!fs::read_to_string(&path).unwrap().contains("steer --host"));
+    }
+}
+
+#[test]
+fn hosts_without_a_stop_hook_say_so() {
+    for host in [Host::Cursor, Host::Copilot, Host::OpenCode, Host::Pi] {
+        assert!(
+            steer_limits(host).unwrap().contains("at = \"stop\""),
+            "{host:?}"
+        );
     }
 }

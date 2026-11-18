@@ -478,7 +478,7 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&answer.verdict)?);
     let checker = default_checker()?;
     let prove = |rule: &Rule| prove_in_sandbox(&checker, rule);
-    let recorded = proposals::record(
+    let recorded = proposals::record_upgrading(
         &setup.store,
         &setup.inputs,
         cluster,
@@ -501,6 +501,9 @@ fn triage_now(id: &str, host: Option<&str>) -> Result<()> {
             }
         }
         Ok(Recorded::Finding) => eprintln!("queued as a finding without a rule draft"),
+        Ok(Recorded::FindingKept) => {
+            eprintln!("{id} stays a finding: the answer drafted no rule; nothing written")
+        }
         Ok(Recorded::AlreadyQueued) => eprintln!("{id} is already queued; nothing written"),
         Ok(Recorded::Rejected) => eprintln!("{id} was rejected; nothing written"),
         Err(error) => eprintln!("warning: not queued: {error:#}"),
@@ -714,13 +717,7 @@ fn decided_line(decision: &Decision) -> String {
 /// The proposals notice for the gate. It never fails the gate and never
 /// creates a store that does not exist yet.
 fn proposals_notice(inputs: &Inputs) -> Option<String> {
-    let path = store::events_db_path_for(&inputs.vars, Platform::current()).ok()?;
-    if !path.is_file() {
-        return None;
-    }
-    let repo = config::repo_root(&inputs.cwd)?;
-    let store = Store::open(&path).ok()?;
-    proposals::notice(&store, &repo).ok().flatten()
+    proposals::notice_line(proposals::waiting_here(inputs).ok()?.len())
 }
 
 fn run_evidence(action: EvidenceAction) -> Result<()> {

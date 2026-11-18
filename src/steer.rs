@@ -1,9 +1,11 @@
 //! Steer rules: guidance for lessons git cannot see. A steer rule matches a
 //! normalized hook event (a tool call or a user prompt) and either adds its
-//! message to the agent's context or refuses the tool call.
+//! message to the agent's context or refuses the tool call. A prompt rule with
+//! `at = "stop"` holds its message until the agent tries to finish the turn.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use globset::{GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
@@ -11,11 +13,14 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::config::Inputs;
-use crate::host::{self, Host};
+use crate::config::{Inputs, Platform};
+use crate::host::{self, Boundary, Host};
+use crate::proposals;
+use crate::registry::Resolved;
 use crate::replay::{Verdict, CORPUS_DIR, FIXTURES_DIR};
-use crate::rule::{Action, Check, Status, Steer, Trigger};
+use crate::rule::{Action, At, Check, Status, Steer, Trigger};
 use crate::rules::{self, Failure};
+use crate::store::{self, Store};
 
 const BAD_FIXTURE: &str = "bad.json";
 const FIXED_FIXTURE: &str = "fixed.json";
@@ -195,7 +200,8 @@ impl Decision {
 }
 
 /// Matches `event` against `rules` (id and steer table). A deny rule on a
-/// prompt event cannot load, so deny lines only come from tool events.
+/// prompt event cannot load, so deny lines only come from tool events. An
+/// `at = "stop"` rule adds nothing here; see [`held`].
 pub fn decide<'a>(
     event: &SteerEvent,
     rules: impl IntoIterator<Item = (&'a str, &'a Steer)>,
@@ -205,16 +211,45 @@ pub fn decide<'a>(
         let Ok(matcher) = Matcher::new(steer) else {
             continue;
         };
-        if !matcher.matches(event) {
+        if steer.at == At::Stop || !matcher.matches(event) {
             continue;
         }
-        let line = format!("oncebitten {id}: {}", steer.message.trim());
         match steer.action {
-            Action::Deny => decision.deny.push(line),
-            Action::Inform => decision.inform.push(line),
+            Action::Deny => decision.deny.push(line(id, steer)),
+            Action::Inform => decision.inform.push(line(id, steer)),
         }
     }
     decision
+}
+
+/// The ids of the `at = "stop"` rules that `event` matches: their messages
+/// wait for the session's next stop.
+pub fn held<'a>(
+    event: &SteerEvent,
+    rules: impl IntoIterator<Item = (&'a str, &'a Steer)>,
+) -> Vec<&'a str> {
+    rules
+        .into_iter()
+        .filter(|(_, steer)| {
+            steer.at == At::Stop && Matcher::new(steer).is_ok_and(|matcher| matcher.matches(event))
+        })
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// The stop hook output that hands the agent the held messages of `rules`,
+/// or `None` when there are none. Claude Code and Codex read the same shape.
+pub fn render_stop<'a>(rules: impl IntoIterator<Item = (&'a str, &'a Steer)>) -> Option<String> {
+    let lines: Vec<String> = rules
+        .into_iter()
+        .map(|(id, steer)| line(id, steer))
+        .collect();
+    (!lines.is_empty())
+        .then(|| json!({ "decision": "block", "reason": lines.join("\n") }).to_string())
+}
+
+fn line(id: &str, steer: &Steer) -> String {
+    format!("oncebitten {id}: {}", steer.message.trim())
 }
 
 /// The hook output `host` reads, or `None` when there is nothing to say or
@@ -277,38 +312,128 @@ pub fn render(host: Host, event: &SteerEvent, decision: &Decision) -> Option<Str
 /// Runs the steer hook for one payload: normalizes it, loads the active steer
 /// rules for the agent's working directory and renders the host's output.
 pub fn run(host: Host, payload: &str, inputs: &Inputs) -> Result<Option<String>> {
+    if has_boundaries(host) {
+        if let Some(input) = host::normalize_boundary(payload)? {
+            let inputs = at_cwd(inputs, input.cwd.as_deref());
+            return match input.boundary {
+                Boundary::SessionStart => session_start(&inputs),
+                Boundary::Stop { continued } => stop(&inputs, input.session.as_deref(), continued),
+            };
+        }
+    }
     let Some(input) = host::normalize_steer(payload)? else {
         return Ok(None);
     };
+    let inputs = at_cwd(inputs, input.cwd.as_deref());
+    let rules = load(&inputs)?;
+    let active = active(&rules);
+    let held = held(&input.event, active.iter().copied());
+    if has_boundaries(host) && !held.is_empty() {
+        let session = input
+            .session
+            .context("hook payload has no session id to hold a stop reminder for")?;
+        Store::open(&db_path(&inputs)?)?.hold_steer(&session, &held, now_millis()?)?;
+    }
+    let decision = decide(&input.event, active);
+    Ok(render(host, &input.event, &decision))
+}
+
+/// Whether the steer hook is installed on the host's session-start and stop
+/// events and their output contract is confirmed; see docs/steer.md.
+fn has_boundaries(host: Host) -> bool {
+    matches!(host, Host::Claude | Host::Codex)
+}
+
+fn stop(inputs: &Inputs, session: Option<&str>, continued: bool) -> Result<Option<String>> {
+    let path = db_path(inputs)?;
+    let Some(session) = session.filter(|_| path.is_file()) else {
+        return Ok(None);
+    };
+    let held = Store::open(&path)?.take_held_steer(session)?;
+    // A stop the hook already continued is let through, so no rule can loop the agent.
+    if continued || held.is_empty() {
+        return Ok(None);
+    }
+    let rules = load(inputs)?;
+    Ok(render_stop(
+        active(&rules)
+            .into_iter()
+            .filter(|(id, _)| held.iter().any(|rule| rule == id)),
+    ))
+}
+
+fn session_start(inputs: &Inputs) -> Result<Option<String>> {
+    let waiting = proposals::waiting_here(inputs)?;
+    if waiting.is_empty() {
+        return Ok(None);
+    }
+    let ids: Vec<&str> = waiting.iter().map(|row| row.cluster.as_str()).collect();
+    let context = format!(
+        "oncebitten: {} rule suggestion(s) wait for review in this repository. Tell the user, \
+         show each with `oncebitten proposals show <id>`, and ask whether to accept or reject it; \
+         apply the answer with `oncebitten proposals accept <id>` or \
+         `oncebitten proposals reject <id> --reason <text>`. Ids: {}",
+        ids.len(),
+        ids.join(", ")
+    );
+    Ok(Some(
+        json!({
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": context,
+            }
+        })
+        .to_string(),
+    ))
+}
+
+fn at_cwd(inputs: &Inputs, cwd: Option<&str>) -> Inputs {
     let mut inputs = inputs.clone();
-    if let Some(dir) = input.cwd.as_deref().map(PathBuf::from) {
+    if let Some(dir) = cwd.map(PathBuf::from) {
         if dir.is_dir() {
             inputs.cwd = dir;
         }
     }
-    let rules = match rules::load_skipping_broken(&inputs) {
+    inputs
+}
+
+fn load(inputs: &Inputs) -> Result<Vec<Resolved>> {
+    match rules::load_skipping_broken(inputs) {
         Ok((rules, skipped)) => {
             for error in skipped {
                 eprintln!("oncebitten steer: skipped rule: {error:#}");
             }
-            rules
+            Ok(rules)
         }
         Err(Failure::Invalid(errors)) => {
             let errors: Vec<String> = errors.iter().map(|error| format!("{error:#}")).collect();
             bail!("invalid rules: {}", errors.join("; "))
         }
-        Err(Failure::CouldNotRun(error)) => return Err(error),
-    };
-    let active = rules
+        Err(Failure::CouldNotRun(error)) => Err(error),
+    }
+}
+
+fn active(rules: &[Resolved]) -> Vec<(&str, &Steer)> {
+    rules
         .iter()
         .filter_map(|resolved| match &resolved.rule.check {
             Check::Steer(steer) if resolved.rule.status == Status::Active => {
                 Some((resolved.id.as_str(), steer))
             }
             _ => None,
-        });
-    let decision = decide(&input.event, active);
-    Ok(render(host, &input.event, &decision))
+        })
+        .collect()
+}
+
+fn db_path(inputs: &Inputs) -> Result<PathBuf> {
+    store::events_db_path_for(&inputs.vars, Platform::current())
+}
+
+fn now_millis() -> Result<i64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before the unix epoch")?
+        .as_millis() as i64)
 }
 
 /// `oncebitten steer --host <host>`: reads the payload from stdin and prints

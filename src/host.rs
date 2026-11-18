@@ -45,6 +45,8 @@ const PROMPT_EVENTS: &[&str] = &[
     "before_agent_start",
     "prompt",
 ];
+const SESSION_START_EVENT: &str = "sessionstart";
+const STOP_EVENT: &str = "stop";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Host {
@@ -212,6 +214,46 @@ fn classify(value: &Value) -> Option<Outcome> {
 pub struct SteerInput {
     pub event: SteerEvent,
     pub cwd: Option<String>,
+    pub session: Option<String>,
+}
+
+/// A session or turn boundary, as Claude Code and Codex report it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Boundary {
+    SessionStart,
+    /// The agent is about to finish its turn. `continued` is the payload's
+    /// `stop_hook_active`: a stop hook already kept this turn going.
+    Stop {
+        continued: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryInput {
+    pub boundary: Boundary,
+    pub cwd: Option<String>,
+    pub session: Option<String>,
+}
+
+/// Maps a `SessionStart` or `Stop` hook payload onto a boundary. Every other
+/// event maps to `None`.
+pub fn normalize_boundary(payload: &str) -> Result<Option<BoundaryInput>> {
+    let value: Value = serde_json::from_str(payload).context("hook payload is not JSON")?;
+    let boundary = match first_string(&value, EVENT_KEYS)
+        .map(|name| name.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some(SESSION_START_EVENT) => Boundary::SessionStart,
+        Some(STOP_EVENT) => Boundary::Stop {
+            continued: value["stop_hook_active"] == true,
+        },
+        _ => return Ok(None),
+    };
+    Ok(Some(BoundaryInput {
+        boundary,
+        cwd: cwd(&value),
+        session: first_string(&value, SESSION_KEYS),
+    }))
 }
 
 /// Maps a pre-tool or prompt hook payload onto a steer event. Every other
@@ -249,7 +291,11 @@ pub fn normalize_steer(payload: &str) -> Result<Option<SteerInput>> {
     } else {
         return Ok(None);
     };
-    Ok(Some(SteerInput { event, cwd }))
+    Ok(Some(SteerInput {
+        event,
+        cwd,
+        session: first_string(&value, SESSION_KEYS),
+    }))
 }
 
 /// The tool's input object. Copilot's camelCase payload sends it as a JSON

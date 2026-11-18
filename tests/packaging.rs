@@ -8,6 +8,9 @@ const HOSTS: [(&str, &str, &str); 4] = [
     ("cursor", "hooks/hooks.json", "CURSOR_PLUGIN_ROOT"),
     ("copilot", "hooks/hooks.json", "PLUGIN_ROOT"),
 ];
+const STEER_HOSTS: [&str; 2] = ["claude", "codex"];
+const STEER_EVENTS: [&str; 4] = ["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"];
+const STEER_TIMEOUT_SECS: u64 = 10;
 
 fn commands(value: &Value) -> Vec<String> {
     let mut found = Vec::new();
@@ -35,12 +38,54 @@ fn plugin_hooks_use_the_plugin_root_variable_and_the_right_host() {
         let found = commands(&value);
         assert!(!found.is_empty(), "{host}");
         let fetch = format!("\"${{{var}}}/bin/oncebitten\" --version > /dev/null");
-        for command in found.into_iter().filter(|c| *c != fetch) {
+        let steer = steer_command(host, var);
+        let ships_steer = STEER_HOSTS.contains(&host);
+        for command in found
+            .into_iter()
+            .filter(|c| *c != fetch && !(ships_steer && *c == steer))
+        {
             assert_eq!(
                 command,
                 format!("\"${{{var}}}/bin/oncebitten\" capture --host {host}")
             );
             assert!(!command.contains(":-"), "{host}: POSIX-only default syntax");
+        }
+    }
+}
+
+fn steer_command(host: &str, var: &str) -> String {
+    format!("\"${{{var}}}/bin/oncebitten\" steer --host {host}")
+}
+
+#[test]
+fn claude_and_codex_plugins_ship_the_steer_hook_on_four_events() {
+    for (host, file, var) in HOSTS {
+        let path = format!("{}/packaging/{host}/{file}", env!("CARGO_MANIFEST_DIR"));
+        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let steer = steer_command(host, var);
+        let mut events = Vec::new();
+        for (event, groups) in value["hooks"].as_object().unwrap() {
+            for hook in groups
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
+                .filter(|hook| {
+                    hook["command"]
+                        .as_str()
+                        .is_some_and(|c| c.contains(" steer "))
+                })
+            {
+                assert_eq!(hook["command"], steer.as_str(), "{host} {event}");
+                assert_eq!(hook["timeout"], STEER_TIMEOUT_SECS, "{host} {event}");
+                events.push(event.as_str());
+            }
+        }
+        events.sort_unstable();
+        if STEER_HOSTS.contains(&host) {
+            assert_eq!(events, STEER_EVENTS, "{host}");
+        } else {
+            assert!(events.is_empty(), "{host}: {events:?}");
         }
     }
 }
@@ -322,6 +367,23 @@ mod release {
         let out = run(
             &launcher,
             &["capture", "--host", "claude"],
+            &env,
+            "file:///missing",
+            "{}",
+        );
+        assert!(out.status.success());
+        assert!(out.stdout.is_empty());
+    }
+
+    #[test]
+    fn launcher_steer_never_waits_for_a_download_or_blocks() {
+        let dir = TempDir::new().unwrap();
+        let data = dir.path().join("data");
+        let launcher = script("packaging/claude/bin/oncebitten");
+        let env = [("CLAUDE_PLUGIN_DATA", data.as_path())];
+        let out = run(
+            &launcher,
+            &["steer", "--host", "claude"],
             &env,
             "file:///missing",
             "{}",

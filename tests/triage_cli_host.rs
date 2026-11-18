@@ -248,3 +248,160 @@ fn a_later_answer_clears_the_failure_note() {
     assert!(!stderr.contains("triage failed"), "{stderr}");
     assert!(stdout(&listed).contains(&id));
 }
+
+fn reply_with(fix_kind: &str, draft: Value) -> String {
+    serde_json::json!({
+        "type": "result",
+        "is_error": false,
+        "structured_output": {
+            "repeatable": true,
+            "user_correction": true,
+            "root_cause": "The agent ignored an explicit stop request.",
+            "proposed_fix_kind": fix_kind,
+            "generality": "general",
+            "draft": draft,
+        },
+    })
+    .to_string()
+}
+
+fn prompt_draft(regex: &str) -> Value {
+    let event = |prompt: &str| serde_json::json!({"event": "prompt", "prompt": prompt}).to_string();
+    serde_json::json!({
+        "id": "stop-means-stop",
+        "description": "stop when the user says stop",
+        "mode": "steer",
+        "engine": "steer",
+        "prompt": regex,
+        "bad": {"name": "bad.json", "content": event("run the whole test suite")},
+        "fixed": {"name": "fixed.json", "content": event("run the linter")},
+        "corpus": [{"name": "rename.json", "content": event("rename the config module")}],
+        "rationale": "Before you finish, confirm the user did not ask you to stop.",
+    })
+}
+
+/// A repo whose correction cluster is queued as a finding, and its id.
+fn queued_finding(host: &FakeHost) -> (Repo, String) {
+    let repo = Repo::new();
+    write_user_config(&repo, BACKGROUND_OFF);
+    host.set_reply(REPLY);
+    let env = host.env();
+    let captured = capture_correction(&repo, &env);
+    assert_eq!(code(&captured), 0, "{}", both(&captured));
+    let id = cluster_id(&repo, &env);
+    let out = repo.run(&["triage", &id, "--host", "claude"], &env.pairs());
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    assert!(list_line(&repo, &env, &id).contains("finding"));
+    (repo, id)
+}
+
+fn list_line(repo: &Repo, env: &HostEnv, id: &str) -> String {
+    let out = repo.run(&["proposals", "list"], &env.pairs());
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    stdout(&out)
+        .lines()
+        .find(|line| line.split_whitespace().next() == Some(id))
+        .unwrap_or_else(|| panic!("no row for {id}:\n{}", both(&out)))
+        .to_owned()
+}
+
+fn rules_dir(repo: &Repo) -> PathBuf {
+    repo.project().join(".oncebitten").join("rules")
+}
+
+#[test]
+fn a_manual_triage_upgrades_a_finding_to_a_proven_prompt_steer_proposal() {
+    let host = FakeHost::new();
+    let (repo, id) = queued_finding(&host);
+    let env = host.env();
+
+    host.set_reply(&reply_with(
+        "agent-workflow",
+        prompt_draft("(?i)test suite"),
+    ));
+    let out = repo.run(&["triage", &id, "--host", "claude"], &env.pairs());
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(stderr.contains("proposed a proven rule"), "{stderr}");
+
+    let line = list_line(&repo, &env, &id);
+    assert!(line.contains("stop-means-stop"), "{line}");
+    assert!(!line.contains("finding"), "{line}");
+    let text =
+        fs::read_to_string(rules_dir(&repo).join("stop-means-stop").join("rule.toml")).unwrap();
+    assert!(text.contains("at = \"stop\""), "{text}");
+    assert!(text.contains("prompt = \"(?i)test suite\""), "{text}");
+}
+
+#[test]
+fn a_manual_triage_without_a_draft_keeps_the_finding_and_says_so() {
+    let host = FakeHost::new();
+    let (repo, id) = queued_finding(&host);
+    let env = host.env();
+
+    let out = repo.run(&["triage", &id, "--host", "claude"], &env.pairs());
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(stderr.contains("stays a finding"), "{stderr}");
+    assert!(list_line(&repo, &env, &id).contains("finding"));
+    assert!(!rules_dir(&repo).exists());
+}
+
+#[test]
+fn a_background_triage_of_a_queued_finding_does_nothing() {
+    let host = FakeHost::new();
+    let (repo, id) = queued_finding(&host);
+    let env = host.env();
+    let calls = host.call_count();
+
+    host.set_reply(&reply_with(
+        "agent-workflow",
+        prompt_draft("(?i)test suite"),
+    ));
+    let out = repo.run(
+        &["triage", &id, "--host", "claude", "--queue"],
+        &env.pairs(),
+    );
+    assert_eq!(code(&out), 0, "{}", both(&out));
+    assert_eq!(host.call_count(), calls, "the host was asked");
+    assert!(list_line(&repo, &env, &id).contains("finding"));
+    assert!(!rules_dir(&repo).exists());
+}
+
+#[test]
+fn a_prompt_draft_that_fails_validation_could_not_run_and_writes_nothing() {
+    let host = FakeHost::new();
+    let (repo, id) = queued_finding(&host);
+    let env = host.env();
+    let both_kinds = {
+        let mut draft = prompt_draft("(?i)test suite");
+        draft["bad"]["content"] =
+            serde_json::json!({"event": "tool", "tool": "Bash", "command": "cargo test"})
+                .to_string()
+                .into();
+        draft
+    };
+    let cases = [
+        ("does not compile", prompt_draft("(?i)test suite(")),
+        ("matches fixed", prompt_draft("(?i)run the")),
+        (
+            "matches a corpus prompt",
+            prompt_draft("(?i)test suite|rename"),
+        ),
+        ("misses bad", prompt_draft("(?i)changelog")),
+        (
+            "matches the empty string",
+            prompt_draft("(?i)(test suite)?"),
+        ),
+        ("a command and a prompt", both_kinds),
+    ];
+    for (why, draft) in cases {
+        host.set_reply(&reply_with("agent-workflow", draft));
+        let out = repo.run(&["triage", &id, "--host", "claude"], &env.pairs());
+        assert_eq!(code(&out), 2, "{why}: {}", both(&out));
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(stderr.contains("could not run"), "{why}: {stderr}");
+        assert!(!rules_dir(&repo).exists(), "{why}");
+        assert!(list_line(&repo, &env, &id).contains("finding"), "{why}");
+    }
+}
