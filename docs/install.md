@@ -89,7 +89,10 @@ npx oncebitten --version        # run once
 npm install -g oncebitten       # install
 ```
 
-`oncebitten` is a small launcher; the binary comes from the platform package in its `optionalDependencies` (`oncebitten-linux-x64`, `oncebitten-linux-arm64`, `oncebitten-darwin-x64`, `oncebitten-darwin-arm64`, `oncebitten-win32-x64`). npm installs only the one that matches your machine, so do not install with `--omit=optional`.
+`oncebitten` is one package holding a small launcher. On first run it downloads the release tarball for your platform from the GitHub Release, verifies its SHA-256, caches it under `~/.cache/oncebitten/<version>/` (`$XDG_CACHE_HOME/oncebitten`, `%LOCALAPPDATA%\oncebitten\cache` on Windows) and runs it. Nothing runs at install time, so `--ignore-scripts` works; the first run needs network access. Capture and steer hooks never wait on that download: they exit 0 and fetch in the background.
+
+- `ONCEBITTEN_RELEASE_URL`: releases base URL, `https://` or `file://` (default: the GitHub releases page).
+- `ONCEBITTEN_CACHE_DIR`: cache directory.
 
 ### Shell scripts
 
@@ -155,8 +158,8 @@ The build compiles tree-sitter grammars and SQLite, so it needs a C compiler.
 ## Releasing
 
 1. Run the **Prepare release** workflow (Actions tab) on `main`. `git-cliff` picks the next version from the Conventional Commits since the last tag; `scripts/set-version.sh` pins it in `Cargo.toml`, `pyproject.toml`, `package.json`, the `packaging/*` manifests, the launcher, `templates/` and `.pre-commit-hooks.yaml`; the workflow commits, tags `v<version>` and dispatches **Release**. Tick `dry_run` to see the version only.
-2. **Release** builds the five targets once (`build.yml`) and feeds the GitHub Release (tarballs and checksums), PyPI (trusted publishing) and npm (trusted publishing with provenance), then installs the published packages on Linux, macOS and Windows (`smoke.yml`). It fails if the tag does not match `Cargo.toml`.
+2. **Release** builds the five targets once (`build.yml`) and feeds the GitHub Release (tarballs and checksums), PyPI (trusted publishing) and npm (one launcher package, trusted publishing with provenance), then installs the published packages on Linux, macOS and Windows (`smoke.yml`). It fails if the tag does not match `Cargo.toml`.
 
-npm trusted publishing cannot create a package. Before the first release, and after adding a platform, run `scripts/npm-bootstrap.sh` once, signed in to npm as an owner: it publishes a `0.0.0` placeholder for each missing package and trusts `release.yml` to publish it. After that, rerun **Release** on the tag to publish the versions npm lacks.
+The npm package is published last, after the GitHub Release exists, because its launcher downloads the binary from that release. Rerun **Release** on the tag to publish a version npm lacks.
 
-`tests/packaging.rs` and `tests/gate.rs` fail if the pinned versions differ. `scripts/fresh-project.sh` is the install smoke test: `scripts/fresh-project.sh artifacts <dir>` for local wheel and tarballs, `scripts/fresh-project.sh published <version>` for the registries.
+`tests/packaging.rs` and `tests/gate.rs` fail if the pinned versions differ. `scripts/fresh-project.sh` is the install smoke test: `scripts/fresh-project.sh artifacts <dir>` for the local wheel, npm tarball and release tarball, `scripts/fresh-project.sh published <version>` for the registries.

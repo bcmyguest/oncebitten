@@ -72,4 +72,4 @@ jobs:
         with:
           node-version: "24"
       - name: npm package manifests
-        run: node --test scripts/npm-package.test.mjs
+        run: node --test scripts/npm-package.test.mjs packaging/npm/oncebitten/lib/launch.test.js

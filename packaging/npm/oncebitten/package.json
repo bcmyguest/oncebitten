@@ -15,17 +15,11 @@
   },
   "files": [
     "bin",
-    "lib",
+    "lib/launch.js",
+    "lib/fetch.js",
     "README.md"
   ],
   "engines": {
     "node": ">=18"
-  },
-  "optionalDependencies": {
-    "oncebitten-linux-x64": "0.4.0",
-    "oncebitten-linux-arm64": "0.4.0",
-    "oncebitten-darwin-x64": "0.4.0",
-    "oncebitten-darwin-arm64": "0.4.0",
-    "oncebitten-win32-x64": "0.4.0"
   }
 }

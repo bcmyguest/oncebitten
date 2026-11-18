@@ -5,8 +5,9 @@
 #   scripts/fresh-project.sh artifacts <dir>      local wheel and npm tarballs
 #   scripts/fresh-project.sh published <version>  PyPI and npm, after a release
 #
-# <dir> holds exactly one wheel, the main npm tarball oncebitten-<v>.tgz and the
-# platform tarball oncebitten-<os>-<cpu>-<v>.tgz of this machine.
+# <dir> holds exactly one wheel, the npm tarball oncebitten-<v>.tgz and the
+# release tarball oncebitten-<target>.tar.gz with its .sha256 for this machine;
+# the npm launcher fetches that release tarball from a file:// release layout.
 # CHANNELS selects what to test (default "pip npm"). Needs git, uv, node and npm.
 # Every install lands in a temporary directory; nothing touches the real user
 # config, uv tool dir or global npm prefix.
@@ -60,23 +61,28 @@ install_pip() {
     echo "$UV_TOOL_BIN_DIR"
 }
 
+# Runs in this shell, not a subshell: the launcher reads the exported variables.
+serve_release() {
+    local release version archive url
+    archive="$(find_one 'oncebitten-*.tar.gz')"
+    version="$(tar -xzOf "$(find_one 'oncebitten-[0-9]*.tgz')" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')"
+    release="$work/release/download/v$version"
+    mkdir -p "$release"
+    cp "$archive" "$archive.sha256" "$release/"
+    url="$(native "$work/release")"
+    case "$url" in /*) ;; *) url="/$url" ;; esac
+    ONCEBITTEN_RELEASE_URL="file://$url"
+    ONCEBITTEN_CACHE_DIR="$(native "$work/npm-cache")"
+    export ONCEBITTEN_RELEASE_URL ONCEBITTEN_CACHE_DIR
+}
+
 install_npm() {
-    local project="$work/npm-project" platform
+    local project="$work/npm-project"
     mkdir -p "$project"
-    platform="$(node -p 'process.platform + "-" + process.arch')"
+    echo '{"name":"fresh","private":true}' >"$project/package.json"
     if [ "$mode" = artifacts ]; then
-        (cd "$project" && node -e '
-            const [main, name, plat] = process.argv.slice(1);
-            const manifest = {
-                name: "fresh", private: true,
-                dependencies: { oncebitten: "file:" + main },
-                overrides: { [name]: "file:" + plat },
-            };
-            require("fs").writeFileSync("package.json", JSON.stringify(manifest));
-        ' "$(find_one 'oncebitten-[0-9]*.tgz')" "oncebitten-$platform" "$(find_one "oncebitten-$platform-[0-9]*.tgz")")
-        (cd "$project" && npm install --no-audit --no-fund >&2)
+        (cd "$project" && npm install --no-audit --no-fund "$(find_one 'oncebitten-[0-9]*.tgz')" >&2)
     else
-        echo '{"name":"fresh","private":true}' >"$project/package.json"
         (cd "$project" && npm install --no-audit --no-fund "oncebitten@$arg" >&2)
     fi
     echo "$project/node_modules/.bin"
@@ -131,7 +137,10 @@ want=""
 for channel in $channels; do
     case "$channel" in
         pip) smoke pip "$(install_pip)" "$want" ;;
-        npm) smoke npm "$(install_npm)" "$want" ;;
+        npm)
+            [ "$mode" = artifacts ] && serve_release
+            smoke npm "$(install_npm)" "$want"
+            ;;
         *) fail "unknown channel $channel" ;;
     esac
 done

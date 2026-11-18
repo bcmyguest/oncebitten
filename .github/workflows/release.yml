@@ -71,7 +71,8 @@ jobs:
 
   publish-npm:
     name: Publish to npm (trusted publishing)
-    needs: build
+    # The launcher downloads from the GitHub Release, so the assets must exist first.
+    needs: [build, github-release]
     runs-on: ubuntu-latest
     environment: npm
     permissions:
@@ -90,19 +91,13 @@ jobs:
       - name: npm publish (skips a version already on the registry)
         run: |
           set -euo pipefail
-          # Platform packages first: the main package depends on them.
-          for tgz in $(ls ./npm-packages/oncebitten-*-*.tgz) ./npm-packages/oncebitten-[0-9]*.tgz; do
-            spec="$(tar -xzOf "$tgz" package/package.json | jq -r '.name + "@" + .version')"
-            if npm view "$spec" version > /dev/null 2>&1; then
-              echo "::notice::$spec is already on npm."
-            elif ! npm view "${spec%@*}" name > /dev/null 2>&1; then
-              # Trusted publishing cannot create a package.
-              echo "::error::${spec%@*} does not exist on npm; run scripts/npm-bootstrap.sh once."
-              exit 1
-            else
-              npm publish "$tgz" --provenance --access public
-            fi
-          done
+          tgz="$(ls ./npm-packages/oncebitten-[0-9]*.tgz)"
+          spec="$(tar -xzOf "$tgz" package/package.json | jq -r '.name + "@" + .version')"
+          if npm view "$spec" version > /dev/null 2>&1; then
+            echo "::notice::$spec is already on npm."
+          else
+            npm publish "$tgz" --provenance --access public
+          fi
 
   github-release:
     name: GitHub Release
