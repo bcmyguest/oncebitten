@@ -153,6 +153,79 @@ fn list_prints_each_rule_with_its_origin() {
 }
 
 #[test]
+fn list_shows_a_local_rule_with_origin_local() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+    write_rule(
+        &s.project.join(".oncebitten/rules.local"),
+        "mine",
+        "block",
+        "active",
+    );
+
+    let output = s.fx.oncebitten(&s.project, &["rules", "list"]);
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("local/mine  block  active  local"), "{out}");
+}
+
+#[test]
+fn ci_never_reads_the_local_layer() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+    let broken = s.project.join(".oncebitten/rules.local/broken");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("rule.toml"), "id = \"broken\"\n").unwrap();
+
+    let list = s.fx.oncebitten(&s.project, &["rules", "list", "--ci"]);
+    assert_eq!(code(&list), 0, "{}", stderr(&list));
+    assert!(!stdout(&list).contains("local/"), "{}", stdout(&list));
+
+    let validate = s.fx.oncebitten(&s.project, &["rules", "validate", "--ci"]);
+    assert_eq!(code(&validate), 0, "{}", stderr(&validate));
+
+    let local = s.fx.oncebitten(&s.project, &["rules", "validate"]);
+    assert_eq!(code(&local), 1, "{}", stderr(&local));
+}
+
+#[test]
+fn sync_writes_the_local_gitignore_once() {
+    let s = setup();
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+    let gitignore = s.project.join(".oncebitten/.gitignore");
+    assert_eq!(
+        fs::read_to_string(&gitignore).unwrap(),
+        "rules.local/\nbaseline.local.json\n"
+    );
+
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+    assert_eq!(
+        fs::read_to_string(&gitignore).unwrap(),
+        "rules.local/\nbaseline.local.json\n"
+    );
+}
+
+#[test]
+fn sync_keeps_existing_local_gitignore_lines() {
+    let s = setup();
+    fs::write(
+        s.project.join(".oncebitten/.gitignore"),
+        "baseline.json\nno-newline-at-eof",
+    )
+    .unwrap();
+
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+    assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);
+
+    let text = fs::read_to_string(s.project.join(".oncebitten/.gitignore")).unwrap();
+    assert_eq!(
+        text,
+        "baseline.json\nno-newline-at-eof\nrules.local/\nbaseline.local.json\n"
+    );
+}
+
+#[test]
 fn validate_names_the_broken_file_and_exits_1() {
     let s = setup();
     assert_eq!(code(&s.fx.oncebitten(&s.project, &["rules", "sync"])), 0);

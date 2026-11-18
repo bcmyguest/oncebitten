@@ -12,6 +12,10 @@ use crate::proof::text_sha256;
 use crate::rule::Check;
 
 pub const BASELINE_FILE: &str = "baseline.json";
+/// Gitignored; holds only the entries of local rules.
+pub const LOCAL_BASELINE_FILE: &str = "baseline.local.json";
+/// The id prefix of a local rule.
+pub const LOCAL_PREFIX: &str = "local/";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,15 +41,40 @@ pub fn path(repo: &Path) -> PathBuf {
     repo.join(".oncebitten").join(BASELINE_FILE)
 }
 
-/// The repo's baseline; empty when the file does not exist.
+pub fn local_path(repo: &Path) -> PathBuf {
+    repo.join(".oncebitten").join(LOCAL_BASELINE_FILE)
+}
+
+/// The repo's shared baseline; empty when the file does not exist.
 pub fn read(repo: &Path) -> Result<Baseline> {
-    let path = path(repo);
+    read_file(&path(repo))
+}
+
+/// The repo's local baseline; empty when the file does not exist.
+pub fn read_local(repo: &Path) -> Result<Baseline> {
+    read_file(&local_path(repo))
+}
+
+/// The shared baseline, plus the local one unless `ci`.
+pub fn read_all(repo: &Path, ci: bool) -> Result<Baseline> {
+    let mut all = read(repo)?;
+    if !ci {
+        all.entries.extend(read_local(repo)?.entries);
+    }
+    Ok(all)
+}
+
+fn read_file(path: &Path) -> Result<Baseline> {
     if !path.exists() {
         return Ok(Baseline::default());
     }
     let text =
-        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
+fn is_local(entry: &Entry) -> bool {
+    entry.rule.starts_with(LOCAL_PREFIX)
 }
 
 /// The baseline entry for a finding, or `None` for a finding that is never
@@ -75,12 +104,96 @@ impl Baseline {
 /// Writes the baseline as pretty JSON with entries sorted by rule, path and
 /// hash, so a change to it reads as a short diff.
 pub fn write(repo: &Path, baseline: &Baseline) -> Result<PathBuf> {
-    let path = path(repo);
+    write_file(&path(repo), baseline)
+}
+
+/// Writes the local-rule entries of `all` to the local file and the rest to
+/// the shared one. The local file is left alone when it does not exist and
+/// has no entries to hold. Returns the shared path and the local path when
+/// written.
+pub fn write_split(repo: &Path, all: &Baseline) -> Result<(PathBuf, Option<PathBuf>)> {
+    let (local, shared): (BTreeSet<Entry>, BTreeSet<Entry>) =
+        all.entries.iter().cloned().partition(is_local);
+    let shared_path = write(repo, &Baseline { entries: shared })?;
+    let local_path = local_path(repo);
+    if local.is_empty() && !local_path.exists() {
+        return Ok((shared_path, None));
+    }
+    let written = write_local(repo, &Baseline { entries: local })?;
+    Ok((shared_path, Some(written)))
+}
+
+/// Replaces `rule_id`'s entries in the file that matches its layer with
+/// `entries`. Returns the file written.
+pub fn replace_rule(repo: &Path, rule_id: &str, entries: Vec<Entry>) -> Result<PathBuf> {
+    let local = rule_id.starts_with(LOCAL_PREFIX);
+    let mut merged = if local {
+        read_local(repo)?
+    } else {
+        read(repo)?
+    };
+    merged.entries.retain(|entry| entry.rule != rule_id);
+    merged.entries.extend(entries);
+    if local {
+        write_local(repo, &merged)
+    } else {
+        write(repo, &merged)
+    }
+}
+
+/// Writes the local file and makes sure git ignores it.
+fn write_local(repo: &Path, baseline: &Baseline) -> Result<PathBuf> {
+    crate::rules::ensure_local_ignored(repo)?;
+    write_file(&local_path(repo), baseline)
+}
+
+/// Moves the local file's entries for `local/<id>` into the shared file as
+/// `<id>`. Returns the entries moved, under their new id, or `None`.
+pub fn promote(repo: &Path, id: &str) -> Result<Option<Vec<Entry>>> {
+    let local_id = format!("{LOCAL_PREFIX}{id}");
+    let mut local = read_local(repo)?;
+    let moved: Vec<Entry> = local
+        .entries
+        .iter()
+        .filter(|entry| entry.rule == local_id)
+        .cloned()
+        .collect();
+    if moved.is_empty() {
+        return Ok(None);
+    }
+    local.entries.retain(|entry| entry.rule != local_id);
+    let moved: Vec<Entry> = moved
+        .into_iter()
+        .map(|entry| Entry {
+            rule: id.to_owned(),
+            ..entry
+        })
+        .collect();
+    let mut shared = read(repo)?;
+    shared.entries.extend(moved.iter().cloned());
+    write(repo, &shared)?;
+    write_local(repo, &local)?;
+    Ok(Some(moved))
+}
+
+/// A baseline file's text as `write` lays it out.
+pub fn render(baseline: &Baseline) -> Result<String> {
+    let mut text = serde_json::to_string_pretty(baseline)?;
+    text.push('\n');
+    Ok(text)
+}
+
+/// Parses a baseline file's text.
+pub fn parse(text: &str) -> Result<Baseline> {
+    Ok(serde_json::from_str(text)?)
+}
+
+fn write_file(path: &Path, baseline: &Baseline) -> Result<PathBuf> {
+    let path = path.to_path_buf();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    let mut text = serde_json::to_string_pretty(baseline)?;
-    text.push('\n');
+    let text = render(baseline)?;
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }

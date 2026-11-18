@@ -6,9 +6,11 @@ use anyhow::{anyhow, Result};
 use crate::rule::{load_rule, Rule};
 
 const EXAMPLES_SOURCE: &str = "examples";
+const LOCAL_SOURCE: &str = "local";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Layers {
+    pub local: Option<PathBuf>,
     pub project: Option<PathBuf>,
     pub sources: Vec<(String, PathBuf)>,
     pub examples: Option<PathBuf>,
@@ -16,6 +18,7 @@ pub struct Layers {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Layer {
+    Local,
     Project,
     Source(String),
     Example,
@@ -24,6 +27,7 @@ pub enum Layer {
 impl Layer {
     pub fn label(&self) -> &str {
         match self {
+            Layer::Local => LOCAL_SOURCE,
             Layer::Project => "project",
             Layer::Source(name) => name,
             Layer::Example => EXAMPLES_SOURCE,
@@ -57,6 +61,10 @@ fn resolve_with(
 ) -> Result<(Vec<Resolved>, Vec<anyhow::Error>), Vec<anyhow::Error>> {
     let mut errors = Vec::new();
     let mut broken = Vec::new();
+    let local = match &layers.local {
+        Some(dir) => take(load_dir(dir), &mut broken),
+        None => Vec::new(),
+    };
     let project = match &layers.project {
         Some(dir) => take(load_dir(dir), &mut broken),
         None => Vec::new(),
@@ -82,6 +90,14 @@ fn resolve_with(
             rule,
         });
     }
+    let locals: Vec<Resolved> = local
+        .into_iter()
+        .map(|rule| Resolved {
+            id: format!("{LOCAL_SOURCE}/{}", rule.id),
+            layer: Layer::Local,
+            rule,
+        })
+        .collect();
     let skipped = if skip_broken {
         broken
     } else {
@@ -93,7 +109,7 @@ fn resolve_with(
     }
 
     let mut owners: BTreeMap<&str, &Resolved> = BTreeMap::new();
-    for candidate in &candidates {
+    for candidate in locals.iter().chain(&candidates) {
         if let Some(first) = owners.insert(candidate.id.as_str(), candidate) {
             errors.push(anyhow!(
                 "`{}` is defined twice: {} and {}",
@@ -104,8 +120,32 @@ fn resolve_with(
         }
     }
 
+    let project_ids: BTreeSet<String> = project.iter().map(|rule| rule.id.clone()).collect();
+    let source_ids: BTreeSet<String> = candidates
+        .iter()
+        .filter(|c| c.layer != Layer::Example)
+        .map(|c| c.rule.id.clone())
+        .collect();
+    // A local rule that repeats a shared rule's bare id yields to it, unless
+    // it overrides a rule with that same bare id on purpose.
+    let kept: Vec<Resolved> = locals
+        .into_iter()
+        .filter(|resolved| {
+            let id = resolved.rule.id.as_str();
+            let clashes = project_ids.contains(id) || source_ids.contains(id);
+            let overrides_same_id = resolved
+                .rule
+                .overrides
+                .as_ref()
+                .and_then(|o| o.target.split_once('/'))
+                .is_some_and(|(_, bare)| bare == id);
+            !clashes || overrides_same_id
+        })
+        .collect();
+    let local_ids: BTreeSet<String> = kept.iter().map(|r| r.rule.id.clone()).collect();
+
     let mut replaced: BTreeSet<String> = BTreeSet::new();
-    for rule in &project {
+    for rule in kept.iter().map(|l| &l.rule).chain(&project) {
         let Some(overrides) = &rule.overrides else {
             continue;
         };
@@ -139,26 +179,19 @@ fn resolve_with(
         return Err(errors);
     }
 
-    let project_ids: BTreeSet<String> = project.iter().map(|rule| rule.id.clone()).collect();
-    let source_ids: BTreeSet<String> = candidates
-        .iter()
-        .filter(|c| c.layer != Layer::Example)
-        .map(|c| c.rule.id.clone())
-        .collect();
-    let mut out: Vec<Resolved> = project
-        .into_iter()
-        .map(|rule| Resolved {
-            id: rule.id.clone(),
-            layer: Layer::Project,
-            rule,
-        })
-        .collect();
+    let mut out = kept;
+    out.extend(project.into_iter().map(|rule| Resolved {
+        id: rule.id.clone(),
+        layer: Layer::Project,
+        rule,
+    }));
     for candidate in candidates {
         if replaced.contains(candidate.id.as_str()) {
             continue;
         }
         let shadowed = candidate.layer == Layer::Example
             && (project_ids.contains(candidate.rule.id.as_str())
+                || local_ids.contains(candidate.rule.id.as_str())
                 || source_ids.contains(candidate.rule.id.as_str()));
         if !shadowed {
             out.push(candidate);

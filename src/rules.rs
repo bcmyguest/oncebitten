@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use include_dir::{include_dir, Dir};
@@ -11,6 +11,8 @@ use crate::sources::{checkout_locked, git, is_cloned, sources_root, sync_source}
 
 const PROJECT_DIR: &str = ".oncebitten";
 const PROJECT_RULES: &str = "rules";
+const LOCAL_RULES: &str = "rules.local";
+const LOCAL_IGNORE_LINES: [&str; 2] = ["rules.local/", crate::baseline::LOCAL_BASELINE_FILE];
 /// Under the sources root; a leading dot keeps it apart from source names.
 const SHIPPED_DIR: &str = ".shipped-examples";
 static EXAMPLES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/examples");
@@ -40,7 +42,33 @@ pub fn sync(inputs: &Inputs) -> Result<()> {
             commit,
         });
     }
+    ensure_local_ignored(&repo)?;
     lockfile::write(&repo, &lock)
+}
+
+/// Keeps `<repo>/.oncebitten/.gitignore` ignoring `rules.local/` and
+/// `baseline.local.json`. Creates the file, or appends the lines that are
+/// missing; existing lines stay.
+pub fn ensure_local_ignored(repo: &Path) -> Result<()> {
+    let dir = repo.join(PROJECT_DIR);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(".gitignore");
+    let mut text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    for line in LOCAL_IGNORE_LINES {
+        if text.lines().any(|have| have.trim_end_matches('\r') == line) {
+            continue;
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(line);
+        text.push('\n');
+    }
+    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
 }
 
 /// Checks out each source at its `rules.lock` commit. Never fetches, never writes the lock.
@@ -147,9 +175,11 @@ fn load_with(
         sources.push((source.name.clone(), dir));
     }
     let project = repo.join(PROJECT_DIR).join(PROJECT_RULES);
+    let local = repo.join(PROJECT_DIR).join(LOCAL_RULES);
     let examples =
         examples_dir(&root, &loaded.config.rules.use_examples).map_err(Failure::CouldNotRun)?;
     let layers = Layers {
+        local: (!ci && local.is_dir()).then_some(local),
         project: project.is_dir().then_some(project),
         sources,
         examples,

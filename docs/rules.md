@@ -1,6 +1,6 @@
 # Rules
 
-A rule is a directory. Rules come from three layers, and the project layer wins.
+A rule is a directory. Rules come from four layers: local, project, sources and examples.
 
 ## Rule directory
 
@@ -53,11 +53,12 @@ Unknown keys fail the load. Every error names the file.
 
 | Layer | Location | Qualified id |
 |---|---|---|
+| local | `<repo>/.oncebitten/rules.local/<id>/`, gitignored | `local/<id>` |
 | project | `<repo>/.oncebitten/rules/<id>/` | `<id>` |
 | source | `[[rules.sources]]` clone, `<name>` in config | `<source>/<id>` |
 | examples | shipped in the binary (`examples/` in the repository), only those named in `rules.use_examples` | `examples/<id>` |
 
-Precedence: project, then sources in config order, then examples.
+Precedence: local, then project, then sources in config order, then examples. On a same-id clash the shared rule wins; see [Local rules](#local-rules).
 
 Examples are opt-in. Without `rules.use_examples`, no example is loaded, extracted or shown by `check`, `rules list` or `rules validate`. Each id in `rules.use_examples` must name a shipped example directory, and that rule is then loaded as active. Shipped examples have `status = "proposed"` in their file; listing one overrides that. To change a listed example, copy it into `.oncebitten/rules/` under an id of its own.
 
@@ -82,6 +83,16 @@ Native rules fire only when the command exits with a code in `fired_exit_codes` 
 
 A project rule with a bare id equal to a source rule's id is an error unless it sets `overrides`. `overrides` must name an existing id. A project rule with `overrides = "team/x"` replaces `team/x`. Two sources defining the same qualified id is an error.
 
+## Local rules
+
+`.oncebitten/rules.local/<id>/` is your own rule layer. The rule directory format is the same as a project rule's. `rules sync` and a triage draft write add `rules.local/` and `baseline.local.json` to `.oncebitten/.gitignore`, so neither is committed. A source named `local` is a config error: the name is reserved.
+
+Local rules add to the shared ones. A local rule with a bare id equal to a project or source rule's id is dropped without an error; the shared rule wins. A local rule may set `overrides = "<source>/<id>"` exactly as a project rule may, and then the local rule wins; the override rescues a bare-id clash only when it names a rule with the local rule's own id. A kept local rule shadows a same-id shipped example, as a project rule does.
+
+`check`, `replay --stale`, `rules list`, `rules validate`, `gate pre-push`, the steer hook, `rules retire` and `rules rollback` treat a local rule like a project rule. `rules list` prints its origin as `local`. Baseline entries of local rules live in `.oncebitten/baseline.local.json` as `local/<id>` (see [gate.md](gate.md#baseline)). Nothing reads the layer or that file in CI: with `--ci`, and in `gate pr`, local rules are invisible even when the directory exists.
+
+Drafted proposals land here (see [proposals.md](proposals.md)). `proposals deliver --to pr` moves a drafted rule to `.oncebitten/rules/` before committing it, and moves its baseline entries into `baseline.json` and its exceptions to the bare id; `--to rules-repo` copies it and keeps the local one.
+
 ## Sources and the lockfile
 
 Each `[[rules.sources]]` entry needs a `name` (kebab-case, unique) and a `url`. An optional `rev` names the branch, tag or commit to check out.
@@ -105,11 +116,11 @@ Git runs through the `git` binary.
 | `oncebitten rules sync --frozen` | Clone any missing source, check out each locked commit, fetching one only when the clone lacks it; never writes `rules.lock` | 0 on success; 2 when the lock is missing, a source has no entry, the lock names a source the config no longer has, or a locked commit is unreachable after fetching |
 | `oncebitten rules list [--ci]` | Print `id  mode  status  origin` per rule | 0; 1 on rule errors; 2 when the check cannot run |
 | `oncebitten rules validate [--ci]` | Load and resolve every rule | 0 if clean; 1 on rule errors; 2 when the check cannot run |
-| `oncebitten rules retire <id> --reason <text>` | Set `status = "retired"` and `retired_reason` on a project rule (see [lifecycle.md](lifecycle.md#retire)) | 0 retired; 2 unknown, source or example rule, empty reason, or already retired |
-| `oncebitten rules rollback <id>` | Return an active project rule to `proposed`, keep its files and proof, print the git commands that restore an earlier version (see [lifecycle.md](lifecycle.md#rollback)) | 0 rolled back; 2 unknown, source or example rule, or not active |
+| `oncebitten rules retire <id> --reason <text>` | Set `status = "retired"` and `retired_reason` on a project or local rule (see [lifecycle.md](lifecycle.md#retire)) | 0 retired; 2 unknown, source or example rule, empty reason, or already retired |
+| `oncebitten rules rollback <id>` | Return an active project or local rule to `proposed`, keep its files and proof, print the git commands that restore an earlier version (see [lifecycle.md](lifecycle.md#rollback)) | 0 rolled back; 2 unknown, source or example rule, or not active |
 | `oncebitten exception add\|list` | Add or list exceptions in `.oncebitten/exceptions.toml` (see [lifecycle.md](lifecycle.md#exceptions)) | 0; 2 invalid entry or file |
 | `oncebitten doctor [--gateway <endpoint>]` | Read-only checks of the installation and the repository (see [doctor.md](doctor.md)) | 0 no check failed; 1 a check failed |
-| `oncebitten replay --stale [--checker <path>] [--gateway <endpoint>] [--local]` | Replay every project rule with status `active` or `proposed` whose proof is missing or stale; print `<id>: proven`, `<id>: rejected: <reason>` or `<id>: could not run: <reason>` per rule | 0 all proven or none needed; 1 any rejected; 2 any could not run (2 wins) |
+| `oncebitten replay --stale [--checker <path>] [--gateway <endpoint>] [--local]` | Replay every project and local rule with status `active` or `proposed` whose proof is missing or stale; print `<id>: proven`, `<id>: rejected: <reason>` or `<id>: could not run: <reason>` per rule | 0 all proven or none needed; 1 any rejected; 2 any could not run (2 wins) |
 | `oncebitten replay <rule-id> [--checker <path>] [--gateway <endpoint>] [--local]` | Replay one ast-grep or diff rule and write `proof.json` when an OpenShell replay proves it; replay a steer rule with the matcher and write `proof.json` when it proves it (see [Replay](#replay)) | 0 proven; 1 rejected; 2 could not run |
 | `oncebitten steer --host <host>` | Agent hook: match the payload on stdin against active steer rules and print the host's output; on claude and codex also deliver `at = "stop"` messages at the stop and announce waiting proposals at session start (see [steer.md](steer.md)) | always 0 |
 | `oncebitten gate pre-push [--base <ref>]`, `oncebitten gate pr --base <ref>` | Run active block rules on the changed paths, require proofs (for active steer rules too), apply the baseline (see [gate.md](gate.md)) | 0 clean; 1 a new violation; 2 could not run, or (`pr`) a proof is missing or stale |

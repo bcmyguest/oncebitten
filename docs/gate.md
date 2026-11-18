@@ -67,7 +67,7 @@ It checks the paths that changed in a range of commits:
 
 The pre-commit framework sets `PRE_COMMIT_FROM_REF` (the remote's commit) and `PRE_COMMIT_TO_REF` (the local commit) in the pre-push stage. Source: `pre_commit/commands/run.py` and `_pre_push_ns` in `pre_commit/commands/hook_impl.py` (read in pre-commit 4.6.0). It leaves them unset when a push contains the repository's root commit; it then runs hooks on all files, and the gate falls back to `@{upstream}` or every tracked file.
 
-The gate drops paths under `.oncebitten/rules/`: a rule's `fixtures/bad.*` exists to violate it. `rules.lock` and `baseline.json` stay in the range. Untracked files never count. The engines read the files in the working tree, as pre-commit hooks do: a pre-push run with uncommitted edits to a changed path checks the edited file. CI checks out the pull request, so there the working tree equals `HEAD`.
+The gate drops paths under `.oncebitten/rules/` and `.oncebitten/rules.local/`: a rule's `fixtures/bad.*` exists to violate it. `gate pre-push` runs active local rules; `gate pr` never reads the local layer (see [rules.md](rules.md#local-rules)). `rules.lock` and `baseline.json` stay in the range. Untracked files never count. The engines read the files in the working tree, as pre-commit hooks do: a pre-push run with uncommitted edits to a changed path checks the edited file. CI checks out the pull request, so there the working tree equals `HEAD`.
 
 The `native` engine runs over the whole repository whatever the range. A `diff` rule sees the range's paths.
 
@@ -85,7 +85,7 @@ A shipped example from `rules.use_examples` is active, but its directory sits in
 
 ## Baseline
 
-`.oncebitten/baseline.json` lists violations that predate the gate. A finding that matches an entry is known: it does not fail the gate, and the gate prints `<n> known violation(s) matched .oncebitten/baseline.json` to stderr. A missing file is an empty baseline; a file that does not parse exits 2.
+`.oncebitten/baseline.json` lists violations that predate the gate. A finding that matches an entry is known: it does not fail the gate, and the gate prints `<n> known violation(s) matched .oncebitten/baseline.json` to stderr. A missing file is an empty baseline; a file that does not parse exits 2. Entries of local rules (`local/<id>`) live in the gitignored `.oncebitten/baseline.local.json`, in the same format. Outside CI the gate reads the union of both files; `gate pr` and `--ci` never read the local one.
 
 ```json
 {
@@ -113,7 +113,7 @@ A shipped example from `rules.use_examples` is active, but its directory sits in
 oncebitten baseline update
 ```
 
-Replaces `.oncebitten/baseline.json` with the violations that the active block rules find now. It loads rules as `check` does and runs them on every tracked file, minus `.oncebitten/rules/`. Diff rules do not run. It prints `wrote <n> entries to <path>` and exits 0. A rule that could not run exits 2 and writes nothing; it never writes a partial baseline. A violation fixed since the last update drops out.
+Replaces `.oncebitten/baseline.json` with the violations that the active block rules find now. It loads rules as `check` does and runs them on every tracked file, minus `.oncebitten/rules/` and `.oncebitten/rules.local/`. Diff rules do not run. Entries of local rules go to `baseline.local.json`, all others to `baseline.json`; each file is replaced with its own share, and the local file is not created when no local rule has an entry. It prints `wrote <n> entries to <path>` per file written and exits 0. A rule that could not run exits 2 and writes nothing; it never writes a partial baseline. A violation fixed since the last update drops out.
 
 The file is pretty-printed JSON, entries sorted by `rule`, then `path`, then `sha256`, one key per line, ending in a newline. Running it twice on the same tree writes the same bytes, so a baseline change reads as a short diff.
 

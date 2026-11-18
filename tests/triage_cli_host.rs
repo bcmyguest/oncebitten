@@ -306,7 +306,7 @@ fn list_line(repo: &Repo, env: &HostEnv, id: &str) -> String {
 }
 
 fn rules_dir(repo: &Repo) -> PathBuf {
-    repo.project().join(".oncebitten").join("rules")
+    repo.project().join(".oncebitten").join("rules.local")
 }
 
 #[test]

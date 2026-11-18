@@ -52,7 +52,7 @@ impl Sandbox {
     }
 
     fn rules_dir(&self) -> PathBuf {
-        self.repo().join(".oncebitten").join("rules")
+        self.repo().join(".oncebitten").join("rules.local")
     }
 }
 
@@ -246,6 +246,75 @@ fn a_draft_whose_id_is_taken_is_not_written() {
 }
 
 #[test]
+fn a_draft_whose_id_is_a_project_rule_directory_is_not_written() {
+    let sandbox = Sandbox::new();
+    let existing = sandbox
+        .repo()
+        .join(".oncebitten")
+        .join("rules")
+        .join("docs-with-src");
+    fs::create_dir_all(&existing).unwrap();
+    fs::write(existing.join("keep.txt"), "mine").unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = cluster(&store);
+    let result = proposals::record(
+        &store,
+        &sandbox.inputs(),
+        &cluster,
+        &answer_with(Some(draft_json("docs-with-src"))),
+        &no_sandbox,
+        10,
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(existing.join("keep.txt")).unwrap(),
+        "mine"
+    );
+    assert!(!sandbox.rules_dir().join("docs-with-src").exists());
+    assert!(store.proposal(&cluster.id).unwrap().is_none());
+}
+
+#[test]
+fn a_draft_lands_in_the_local_layer_and_accept_makes_it_an_active_local_rule() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = cluster(&store);
+
+    let recorded = proposals::record(
+        &store,
+        &sandbox.inputs(),
+        &cluster,
+        &answer_with(Some(draft_json("docs-with-src"))),
+        &proving,
+        10,
+    )
+    .unwrap();
+    assert_eq!(recorded, Recorded::Proposed { proven: true });
+
+    let gitignore = sandbox.repo().join(".oncebitten").join(".gitignore");
+    assert!(
+        fs::read_to_string(&gitignore)
+            .unwrap()
+            .contains("rules.local/"),
+        "the local layer is not ignored"
+    );
+
+    proposals::accept(&store, &cluster.id).unwrap();
+
+    let resolved = oncebitten::rules::load(&sandbox.inputs(), false).unwrap();
+    let entry = resolved
+        .iter()
+        .find(|entry| entry.id == "local/docs-with-src")
+        .unwrap_or_else(|| panic!("no local rule: {:?}", ids(&resolved)));
+    assert_eq!(entry.layer, oncebitten::registry::Layer::Local);
+    assert_eq!(entry.rule.status, Status::Active);
+}
+
+fn ids(resolved: &[oncebitten::registry::Resolved]) -> Vec<&str> {
+    resolved.iter().map(|entry| entry.id.as_str()).collect()
+}
+
+#[test]
 fn accept_flips_a_proven_proposal_to_active_and_keeps_the_proof_valid() {
     let sandbox = Sandbox::new();
     let store = Store::open_in_memory().unwrap();
@@ -302,6 +371,29 @@ fn accept_refuses_an_unproven_proposal_and_a_finding() {
     .unwrap();
     assert!(proposals::accept(&store, &cluster.id).is_err());
     assert!(proposals::accept(&store, "000000000000").is_err());
+}
+
+#[test]
+fn accept_of_a_local_proposal_without_a_proof_names_the_qualified_id() {
+    let sandbox = Sandbox::new();
+    let store = Store::open_in_memory().unwrap();
+    let cluster = cluster(&store);
+    proposals::record(
+        &store,
+        &sandbox.inputs(),
+        &cluster,
+        &answer_with(Some(draft_json("docs-with-src"))),
+        &no_sandbox,
+        10,
+    )
+    .unwrap();
+
+    let error = proposals::accept(&store, &cluster.id).unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("oncebitten replay local/docs-with-src"),
+        "{error:#}"
+    );
 }
 
 #[test]

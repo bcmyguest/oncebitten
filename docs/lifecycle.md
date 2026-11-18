@@ -8,7 +8,7 @@ A rule moves through three statuses, set by `status` in its `rule.toml`:
 | `active` | runs; a `block` rule gates | yes, for ast-grep and diff rules in `gate pr` |
 | `retired` | never runs | no |
 
-`rules rollback` moves a rule from `active` to `proposed`; `rules retire` moves a project rule to `retired`. Exceptions let an active rule through on named paths until a date.
+`rules rollback` moves a rule from `active` to `proposed`; `rules retire` moves a project or local rule to `retired`. Exceptions let an active rule through on named paths until a date.
 
 ## Exceptions
 
@@ -16,7 +16,7 @@ A rule moves through three statuses, set by `status` in its `rule.toml`:
 
 ```toml
 [[exception]]
-rule = "team/no-unwrap"          # qualified id, as `rules list` prints it
+rule = "team/no-unwrap"          # qualified id, as `rules list` prints it; `local/<id>` for a local rule
 paths = ["src/legacy/**"]        # globs, repo-relative with `/`; required
 reason = "Rewrite lands in Q1"   # required, non-empty
 expires = "2027-03-31"           # required, YYYY-MM-DD, last day it applies (UTC)
@@ -47,7 +47,7 @@ oncebitten rules retire <id> --reason "Python 3.12 removed datetime.utcnow"
 
 Sets `status = "retired"` and `retired_reason` in the rule's `rule.toml`, keeping its comments and layout. A retired rule never runs in `check` or `gate` and needs no proof. The next `baseline update` drops its entries from `baseline.json`.
 
-- Only a project rule (`.oncebitten/rules/<id>/`) retires here. A source rule exits 2: retire it in its rules repo, or override it with a project rule that sets `overrides = "<source>/<id>"`. A shipped example exits 2: remove it from `rules.use_examples`.
+- Only a project rule (`.oncebitten/rules/<id>/`) or a local rule (`.oncebitten/rules.local/<id>/`, id `local/<id>`) retires here. A source rule exits 2: retire it in its rules repo, or override it with a project rule that sets `overrides = "<source>/<id>"`. A shipped example exits 2: remove it from `rules.use_examples`.
 - `--reason` must be non-empty. A rule already retired exits 2.
 - `retired_reason` is optional in `rule.toml`; when present it must be non-empty.
 
@@ -57,7 +57,7 @@ Sets `status = "retired"` and `retired_reason` in the rule's `rule.toml`, keepin
 oncebitten rules rollback <id>
 ```
 
-Returns an active project rule to `proposed`, so it stops blocking at once. The rule's files and `proof.json` stay. Setting `status = "active"` again re-approves it, and the proof stays valid, because `status` is not part of the proof hash.
+Returns an active project or local rule to `proposed`, so it stops blocking at once. The rule's files and `proof.json` stay. Setting `status = "active"` again re-approves it, and the proof stays valid, because `status` is not part of the proof hash.
 
 Rollback prints the git commands that restore an earlier version of the rule directory; it does not rewrite history itself:
 
@@ -66,4 +66,4 @@ git log --oneline -- .oncebitten/rules/<id>
 git restore --source <commit> -- .oncebitten/rules/<id>
 ```
 
-A restored rule needs a fresh `oncebitten replay` when its files differ from the proven ones. A rule that is not active exits 2; a source rule or shipped example exits 2 as in retire.
+A local rule is gitignored and has no history: rollback prints no git commands for it. A restored rule needs a fresh `oncebitten replay` when its files differ from the proven ones. A rule that is not active exits 2; a source rule or shipped example exits 2 as in retire.

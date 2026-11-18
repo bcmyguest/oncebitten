@@ -48,6 +48,7 @@ fn resolves_project_source_and_example_rules_with_qualified_ids() {
         project: Some(project),
         sources: vec![source("team", &team)],
         examples: Some(examples),
+        local: None,
     };
     let resolved = resolve(&layers).unwrap();
 
@@ -71,6 +72,7 @@ fn source_rules_follow_config_order_then_examples() {
         project: None,
         sources: vec![source("zeta", &zeta), source("alpha", &alpha)],
         examples: None,
+        local: None,
     };
 
     assert_eq!(ids(&resolve(&layers).unwrap()), ["zeta/one", "alpha/two"]);
@@ -92,6 +94,7 @@ fn override_replaces_the_source_rule() {
         project: Some(project),
         sources: vec![source("team", &team)],
         examples: None,
+        local: None,
     };
     let resolved = resolve(&layers).unwrap();
 
@@ -110,6 +113,7 @@ fn project_rule_shadows_an_example_with_the_same_id() {
         project: Some(project),
         sources: Vec::new(),
         examples: Some(examples),
+        local: None,
     };
 
     assert_eq!(ids(&resolve(&layers).unwrap()), ["no-unwrap"]);
@@ -126,6 +130,7 @@ fn source_rule_shadows_an_example_with_the_same_id() {
         project: None,
         sources: vec![source("team", &team)],
         examples: Some(examples),
+        local: None,
     };
 
     assert_eq!(ids(&resolve(&layers).unwrap()), ["team/no-unwrap"]);
@@ -146,6 +151,7 @@ fn override_of_a_missing_id_is_an_error() {
         project: Some(project),
         sources: vec![source("team", &team)],
         examples: None,
+        local: None,
     };
     let message = errors_of(&layers);
 
@@ -164,6 +170,7 @@ fn override_without_a_reason_is_an_error() {
         project: Some(project),
         sources: vec![source("team", &team)],
         examples: None,
+        local: None,
     };
     let message = errors_of(&layers);
 
@@ -181,6 +188,7 @@ fn project_rule_clashing_with_a_source_id_needs_an_override() {
         project: Some(project),
         sources: vec![source("team", &team)],
         examples: None,
+        local: None,
     };
     let message = errors_of(&layers);
 
@@ -199,6 +207,7 @@ fn two_sources_defining_the_same_qualified_id_is_an_error() {
         project: None,
         sources: vec![source("team", &first), source("team", &second)],
         examples: None,
+        local: None,
     };
     let message = errors_of(&layers);
 
@@ -218,6 +227,7 @@ fn every_invalid_rule_is_reported_with_its_file() {
         project: Some(project),
         sources: Vec::new(),
         examples: None,
+        local: None,
     };
     let errors = resolve(&layers).unwrap_err();
 
@@ -237,7 +247,198 @@ fn hidden_directories_are_not_rules() {
         project: None,
         sources: vec![source("team", &team)],
         examples: None,
+        local: None,
     };
 
     assert_eq!(ids(&resolve(&layers).unwrap()), ["team/no-unwrap"]);
+}
+
+#[test]
+fn local_rule_resolves_with_a_local_qualified_id() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    write_rule(&local, "no-print", "");
+    let layers = Layers {
+        project: None,
+        sources: Vec::new(),
+        examples: None,
+        local: Some(local),
+    };
+    let resolved = resolve(&layers).unwrap();
+
+    assert_eq!(ids(&resolved), ["local/no-print"]);
+    assert_eq!(resolved[0].layer, Layer::Local);
+    assert_eq!(Layer::Local.label(), "local");
+}
+
+#[test]
+fn local_rules_come_first_in_precedence_order() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let project = root.path().join("project");
+    let team = root.path().join("team");
+    write_rule(&local, "mine", "");
+    write_rule(&project, "theirs", "");
+    write_rule(&team, "shared", "");
+    let layers = Layers {
+        project: Some(project),
+        sources: vec![source("team", &team)],
+        examples: None,
+        local: Some(local),
+    };
+
+    assert_eq!(
+        ids(&resolve(&layers).unwrap()),
+        ["local/mine", "theirs", "team/shared"]
+    );
+}
+
+#[test]
+fn local_override_replaces_the_source_rule() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let team = root.path().join("team");
+    write_rule(
+        &local,
+        "no-unwrap",
+        "overrides = \"team/no-unwrap\"\nreason = \"Tests may unwrap.\"\n",
+    );
+    write_rule(&team, "no-unwrap", "");
+    write_rule(&team, "other", "");
+    let layers = Layers {
+        project: None,
+        sources: vec![source("team", &team)],
+        examples: None,
+        local: Some(local),
+    };
+    let resolved = resolve(&layers).unwrap();
+
+    assert_eq!(ids(&resolved), ["local/no-unwrap", "team/other"]);
+    assert_eq!(resolved[0].layer, Layer::Local);
+}
+
+#[test]
+fn local_override_of_a_missing_id_is_an_error() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let team = root.path().join("team");
+    write_rule(
+        &local,
+        "no-unwrap",
+        "overrides = \"team/missing\"\nreason = \"Why.\"\n",
+    );
+    write_rule(&team, "other", "");
+    let layers = Layers {
+        project: None,
+        sources: vec![source("team", &team)],
+        examples: None,
+        local: Some(local),
+    };
+    let message = errors_of(&layers);
+
+    assert!(message.contains("team/missing"), "{message}");
+    assert!(message.contains("rule.toml"), "{message}");
+}
+
+#[test]
+fn a_project_rule_wins_a_same_id_clash_with_a_local_rule() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let project = root.path().join("project");
+    write_rule(&local, "no-unwrap", "");
+    write_rule(&project, "no-unwrap", "");
+    let layers = Layers {
+        project: Some(project),
+        sources: Vec::new(),
+        examples: None,
+        local: Some(local),
+    };
+    let resolved = resolve(&layers).unwrap();
+
+    assert_eq!(ids(&resolved), ["no-unwrap"]);
+    assert_eq!(resolved[0].layer, Layer::Project);
+}
+
+#[test]
+fn a_source_rule_wins_a_same_id_clash_with_a_local_rule() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let team = root.path().join("team");
+    write_rule(&local, "no-unwrap", "");
+    write_rule(&team, "no-unwrap", "");
+    let layers = Layers {
+        project: None,
+        sources: vec![source("team", &team)],
+        examples: None,
+        local: Some(local),
+    };
+    let resolved = resolve(&layers).unwrap();
+
+    assert_eq!(ids(&resolved), ["team/no-unwrap"]);
+    assert_eq!(resolved[0].layer, Layer::Source("team".to_owned()));
+}
+
+#[test]
+fn a_local_override_wins_a_same_id_clash_with_a_source_rule() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let team = root.path().join("team");
+    write_rule(
+        &local,
+        "no-unwrap",
+        "overrides = \"team/no-unwrap\"\nreason = \"Stricter here.\"\n",
+    );
+    write_rule(&team, "no-unwrap", "");
+    let layers = Layers {
+        project: None,
+        sources: vec![source("team", &team)],
+        examples: None,
+        local: Some(local),
+    };
+    let resolved = resolve(&layers).unwrap();
+
+    assert_eq!(ids(&resolved), ["local/no-unwrap"]);
+    assert_eq!(resolved[0].layer, Layer::Local);
+}
+
+#[test]
+fn a_local_rule_shadows_an_example_with_the_same_id() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let examples = root.path().join("examples");
+    write_rule(&local, "no-unwrap", "");
+    write_rule(&examples, "no-unwrap", "");
+    let layers = Layers {
+        project: None,
+        sources: Vec::new(),
+        examples: Some(examples),
+        local: Some(local),
+    };
+
+    assert_eq!(ids(&resolve(&layers).unwrap()), ["local/no-unwrap"]);
+}
+
+#[test]
+fn an_unrelated_override_does_not_rescue_a_clashing_local_rule() {
+    let root = TempDir::new().unwrap();
+    let local = root.path().join("local");
+    let project = root.path().join("project");
+    let team = root.path().join("team");
+    write_rule(
+        &local,
+        "no-unwrap",
+        "overrides = \"team/other\"\nreason = \"Why.\"\n",
+    );
+    write_rule(&project, "no-unwrap", "");
+    write_rule(&team, "other", "");
+    let layers = Layers {
+        project: Some(project),
+        sources: vec![source("team", &team)],
+        examples: None,
+        local: Some(local),
+    };
+    let resolved = resolve(&layers).unwrap();
+
+    assert_eq!(ids(&resolved), ["no-unwrap", "team/other"]);
+    assert_eq!(resolved[0].layer, Layer::Project);
 }

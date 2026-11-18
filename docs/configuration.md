@@ -40,7 +40,7 @@ The home directory is `HOME`. On Windows, which sets no `HOME` by default, it fa
 | `triggers.gate` | `ONCEBITTEN_TRIGGERS_GATE` | `pre-push`, `pr-create` | Git points that run the gate. Stored only: `oncebitten gate` runs wherever its pre-commit hook or CI job is installed (see [gate.md](gate.md)). Other values are rejected. |
 | `sandbox.runtime` | `ONCEBITTEN_SANDBOX_RUNTIME` | `openshell` | Replay sandbox. The only accepted value is `openshell`. Stored only. |
 | `rules.use_examples` | none (file only) | empty list | Shipped example rules to load, by directory name, which equals the rule id (e.g. `rust-no-unwrap`). Each listed example is active. An unknown name is an error. Like other lists, a higher layer replaces the whole list. |
-| `rules.sources` | none (file only) | empty list | Rule repositories. Each entry has `name` (required; lowercase kebab-case, unique across entries), `url` (required), `writable` (default `false`) and `rev` (optional). At most one entry may set `writable = true`. Stored only. |
+| `rules.sources` | none (file only) | empty list | Rule repositories. Each entry has `name` (required; lowercase kebab-case, unique across entries; `local` is reserved for the local rule layer), `url` (required), `writable` (default `false`) and `rev` (optional). At most one entry may set `writable = true`. Stored only. |
 
 A triage target has the form `<host>:<agent>`. The host is `claude`, `codex`, `pi` or `opencode`. The agent is any non-empty string.
 

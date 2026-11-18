@@ -209,13 +209,13 @@ pub fn validity_with(rule: &Rule, checker: Option<&Path>) -> Validity {
     }
 }
 
-/// The project rules `replay --stale` runs: active or proposed, needing a
-/// proof, whose proof is missing, stale or not accepted.
+/// The project and local rules `replay --stale` runs: active or proposed,
+/// needing a proof, whose proof is missing, stale or not accepted.
 pub fn needing_replay(rules: &[Resolved]) -> Vec<&Resolved> {
     rules
         .iter()
         .filter(|resolved| {
-            resolved.layer == Layer::Project
+            matches!(resolved.layer, Layer::Project | Layer::Local)
                 && matches!(resolved.rule.status, Status::Active | Status::Proposed)
                 && !matches!(resolved.rule.check, Check::Native { .. })
                 && validity(&resolved.rule) != Validity::Valid

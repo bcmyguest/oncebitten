@@ -305,6 +305,22 @@ fn steer_cli_denies_a_matching_tool_call_for_claude() {
 }
 
 #[test]
+fn steer_cli_denies_with_an_active_local_rule() {
+    let repo = Repo::new();
+    repo.add_local_example("no-sudo", "active");
+
+    let output = steer(&repo, "claude", &sudo_payload(&repo, "sudo ls"), &[]);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["hookSpecificOutput"]["permissionDecision"], "deny");
+    assert!(value["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap()
+        .contains("local/no-sudo"));
+}
+
+#[test]
 fn steer_cli_prints_nothing_when_no_rule_matches() {
     let repo = repo_with_no_sudo();
 

@@ -19,7 +19,7 @@ use crate::triage::prompt::{classes_block, context_block, KnownClass};
 use crate::triage::verdict::Answer;
 
 pub const LIST_HINT: &str = "oncebitten proposals list";
-const PROJECT_RULES: [&str; 2] = [".oncebitten", "rules"];
+const DRAFT_RULES: [&str; 2] = [".oncebitten", "rules.local"];
 const PROPOSED_LINE: &str = "status = \"proposed\"";
 const ACTIVE_LINE: &str = "status = \"active\"";
 const DENY_ACTION: &str = "action = \"deny\"";
@@ -202,7 +202,7 @@ fn triage_locked(
 }
 
 /// Queues one triage answer for `cluster`. A draft becomes a rule directory
-/// with `status = "proposed"` under the repo's `.oncebitten/rules/`, then
+/// with `status = "proposed"` under the repo's gitignored `.oncebitten/rules.local/`, then
 /// `prove` replays it. A cluster is queued at most once.
 pub fn record(
     store: &Store,
@@ -294,7 +294,8 @@ fn record_answer(
     if existing.iter().any(|resolved| resolved.rule.id == draft.id) {
         bail!("a rule named `{}` already exists", draft.id);
     }
-    let dir = draft.write(&PROJECT_RULES.iter().fold(repo, |dir, part| dir.join(part)))?;
+    rules::ensure_local_ignored(&repo)?;
+    let dir = draft.write(&DRAFT_RULES.iter().fold(repo, |dir, part| dir.join(part)))?;
     let queued = queue_written(store, inputs, draft, &dir, row, prove, replaces);
     if !matches!(queued, Ok(Recorded::Proposed { .. })) {
         let _ = std::fs::remove_dir_all(&dir);
@@ -489,11 +490,22 @@ pub fn accept(store: &Store, id: &str) -> Result<PathBuf> {
     }
     match proof::validity(&rule) {
         Validity::Valid => {}
-        Validity::Missing => bail!(
-            "rule `{}` has no proof; replay it in a sandbox first: oncebitten replay {}",
-            rule.id,
-            rule.id
-        ),
+        Validity::Missing => {
+            let in_local = dir
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == DRAFT_RULES[1]);
+            // `replay` looks rules up by qualified id.
+            let replay_id = if in_local {
+                format!("local/{}", rule.id)
+            } else {
+                rule.id.clone()
+            };
+            bail!(
+                "rule `{}` has no proof; replay it in a sandbox first: oncebitten replay {replay_id}",
+                rule.id
+            )
+        }
         Validity::Stale(reason) => bail!("rule `{}` has a stale proof: {reason}", rule.id),
         Validity::NotProven(reason) => bail!("rule `{}` has no valid proof: {reason}", rule.id),
     }
@@ -680,7 +692,7 @@ pub fn find(store: &Store, id: &str) -> Result<ProposalRow> {
     }
 }
 
-fn load_rules(inputs: &Inputs) -> Result<Vec<crate::registry::Resolved>> {
+pub(crate) fn load_rules(inputs: &Inputs) -> Result<Vec<crate::registry::Resolved>> {
     rules::load(inputs, false).map_err(|failure| match failure {
         Failure::CouldNotRun(error) => error,
         Failure::Invalid(errors) => anyhow::anyhow!(errors

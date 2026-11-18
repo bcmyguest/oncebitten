@@ -88,7 +88,7 @@ pub fn run_with_forge(
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("not inside a git repository")))?;
     let range = range(inputs, &repo, stage, base).map_err(Failure::CouldNotRun)?;
     let changed = changed(inputs, &repo, &range).map_err(Failure::CouldNotRun)?;
-    let baseline = baseline::read(&repo).map_err(Failure::CouldNotRun)?;
+    let baseline = baseline::read_all(&repo, stage == Stage::Pr).map_err(Failure::CouldNotRun)?;
     let exceptions = exceptions::read(&repo).map_err(Failure::CouldNotRun)?;
     let today = exceptions::today();
     let gated = gated(&rules);
@@ -241,19 +241,17 @@ pub fn current_baseline(inputs: &Inputs) -> Result<(PathBuf, Baseline), Failure>
 }
 
 /// Writes the existing hits of one rule into the baseline, so an accepted
-/// rule does not fail the gate on code that predates it. Entries of other
-/// rules stay as they are.
+/// rule does not fail the gate on code that predates it. `rule_id` is the
+/// qualified id; a local rule's entries go to the local baseline file.
+/// Entries of other rules stay as they are.
 pub fn baseline_rule(inputs: &Inputs, rule_id: &str) -> Result<PathBuf, Failure> {
     let (repo, current) = current_baseline(inputs)?;
-    let mut merged = baseline::read(&repo).map_err(Failure::CouldNotRun)?;
-    merged.entries.retain(|entry| entry.rule != rule_id);
-    merged.entries.extend(
-        current
-            .entries
-            .into_iter()
-            .filter(|entry| entry.rule == rule_id),
-    );
-    baseline::write(&repo, &merged).map_err(Failure::CouldNotRun)
+    let ours = current
+        .entries
+        .into_iter()
+        .filter(|entry| entry.rule == rule_id)
+        .collect();
+    baseline::replace_rule(&repo, rule_id, ours).map_err(Failure::CouldNotRun)
 }
 
 /// The rules the gate enforces: active and in block mode.

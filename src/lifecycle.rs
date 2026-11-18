@@ -1,5 +1,5 @@
-//! `rules retire` and `rules rollback`: status changes to a project rule's
-//! `rule.toml`, made in place so its comments and layout survive.
+//! `rules retire` and `rules rollback`: status changes to a project or local
+//! rule's `rule.toml`, made in place so its comments and layout survive.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -20,12 +20,12 @@ pub struct RolledBack {
     pub restore: Vec<String>,
 }
 
-/// Sets `status = "retired"` and `retired_reason` on a project rule.
+/// Sets `status = "retired"` and `retired_reason` on a project or local rule.
 pub fn retire(inputs: &Inputs, id: &str, reason: &str) -> Result<PathBuf, Failure> {
     if reason.trim().is_empty() {
         return Err(Failure::CouldNotRun(anyhow!("--reason is empty")));
     }
-    let resolved = project_rule(inputs, id, "retire it")?;
+    let resolved = editable_rule(inputs, id, "retire it")?;
     if resolved.rule.status == Status::Retired {
         return Err(Failure::CouldNotRun(anyhow!("`{id}` is already retired")));
     }
@@ -37,9 +37,9 @@ pub fn retire(inputs: &Inputs, id: &str, reason: &str) -> Result<PathBuf, Failur
     Ok(resolved.rule.file)
 }
 
-/// Returns an active project rule to `proposed`. Its files and proof stay.
+/// Returns an active project or local rule to `proposed`. Its files and proof stay.
 pub fn rollback(inputs: &Inputs, id: &str) -> Result<RolledBack, Failure> {
-    let resolved = project_rule(inputs, id, "roll it back")?;
+    let resolved = editable_rule(inputs, id, "roll it back")?;
     if resolved.rule.status != Status::Active {
         return Err(Failure::CouldNotRun(anyhow!(
             "`{id}` is {}; only an active rule rolls back",
@@ -59,17 +59,22 @@ pub fn rollback(inputs: &Inputs, id: &str) -> Result<RolledBack, Failure> {
         .and_then(|dir| dir.strip_prefix(&repo).ok())
         .map(slashed)
         .ok_or_else(|| Failure::CouldNotRun(anyhow!("`{id}` lies outside the repository")))?;
-    Ok(RolledBack {
-        file: resolved.rule.file,
-        restore: vec![
+    // A gitignored local rule has no history to restore from.
+    let restore = match resolved.layer {
+        Layer::Local => Vec::new(),
+        _ => vec![
             format!("git log --oneline -- {dir}"),
             format!("git restore --source <commit> -- {dir}"),
         ],
+    };
+    Ok(RolledBack {
+        file: resolved.rule.file,
+        restore,
     })
 }
 
 /// `action` reads as an instruction, such as "retire it".
-fn project_rule(inputs: &Inputs, id: &str, action: &str) -> Result<Resolved, Failure> {
+fn editable_rule(inputs: &Inputs, id: &str, action: &str) -> Result<Resolved, Failure> {
     let resolved = rules::load(inputs, false)?;
     let Some(found) = resolved.into_iter().find(|entry| entry.id == id) else {
         return Err(Failure::CouldNotRun(anyhow!(
@@ -77,7 +82,7 @@ fn project_rule(inputs: &Inputs, id: &str, action: &str) -> Result<Resolved, Fai
         )));
     };
     match &found.layer {
-        Layer::Project => Ok(found),
+        Layer::Local | Layer::Project => Ok(found),
         Layer::Source(name) => Err(Failure::CouldNotRun(anyhow!(
             "`{id}` comes from rules source `{name}`; {action} in that rules repo, \
              or override it with a project rule that sets overrides = \"{id}\""

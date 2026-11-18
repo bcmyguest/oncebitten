@@ -508,3 +508,18 @@ fn validity_with_a_checker_compares_the_recorded_hash() {
     ));
     assert_eq!(proof::validity_with(&rule, None), Validity::Valid);
 }
+
+#[test]
+fn cli_replay_stale_picks_up_a_local_rule_with_a_missing_proof() {
+    let repo = Repo::new();
+    repo.add_local_example("py-utcnow", "proposed");
+
+    let output = repo.run(&["replay", "--stale", "--local", "--checker", CHECKER], &[]);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    assert!(
+        stdout(&output).contains("py-utcnow: proven"),
+        "{}",
+        both(&output)
+    );
+}

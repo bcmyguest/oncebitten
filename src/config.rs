@@ -320,6 +320,9 @@ impl Config {
                     source.name
                 );
             }
+            if source.name == "local" {
+                bail!("rules.sources: source name `local` is reserved for the local rule layer");
+            }
             if !names.insert(source.name.as_str()) {
                 bail!("rules.sources: duplicate source name `{}`", source.name);
             }

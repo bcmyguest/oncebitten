@@ -76,6 +76,43 @@ impl Repo {
         dest
     }
 
+    pub fn local_rule_dir(&self, id: &str) -> PathBuf {
+        self.project()
+            .join(".oncebitten")
+            .join("rules.local")
+            .join(id)
+    }
+
+    /// Like `add_example`, into the gitignored local layer.
+    pub fn add_local_example(&self, id: &str, status: &str) -> PathBuf {
+        self.ignore_local();
+        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(id);
+        let dest = self.local_rule_dir(id);
+        copy_dir(&src, &dest);
+        let toml = fs::read_to_string(dest.join("rule.toml")).unwrap();
+        fs::write(
+            dest.join("rule.toml"),
+            toml.replace("status = \"proposed\"", &format!("status = \"{status}\"")),
+        )
+        .unwrap();
+        dest
+    }
+
+    /// A local rule with the given `rule.toml` and placeholder diff fixtures.
+    pub fn add_local_rule(&self, id: &str, body: &str) {
+        self.ignore_local();
+        let dir = format!(".oncebitten/rules.local/{id}");
+        self.write(&format!("{dir}/rule.toml"), body);
+        self.write(&format!("{dir}/fixtures/bad.diff"), "bad\n");
+        self.write(&format!("{dir}/fixtures/fixed.diff"), "fixed\n");
+    }
+
+    fn ignore_local(&self) {
+        self.write(".oncebitten/.gitignore", "rules.local/\n");
+    }
+
     pub fn add_rule(&self, id: &str, body: &str) {
         let dir = format!(".oncebitten/rules/{id}");
         self.write(&format!("{dir}/rule.toml"), body);
