@@ -56,7 +56,7 @@ install_pip() {
     export UV_TOOL_DIR="$work/uv-tools" UV_TOOL_BIN_DIR="$work/uv-bin"
     case "$mode" in
         artifacts) uv tool install "$(find_one '*.whl')" >&2 ;;
-        published) uv tool install "oncebitten==$arg" >&2 ;;
+        published) uv tool install --refresh "oncebitten==$arg" >&2 ;; # a cached index hides a just-published version
     esac
     echo "$UV_TOOL_BIN_DIR"
 }
