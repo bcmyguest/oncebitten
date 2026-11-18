@@ -65,7 +65,9 @@ install_pip() {
 serve_release() {
     local release version archive url
     archive="$(find_one 'oncebitten-*.tar.gz')"
-    version="$(tar -xzOf "$(find_one 'oncebitten-[0-9]*.tgz')" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')"
+    # From the file name: GNU tar reads a D:/ path as a remote host.
+    version="$(basename "$(find_one 'oncebitten-[0-9]*.tgz')" .tgz)"
+    version="${version#oncebitten-}"
     release="$work/release/download/v$version"
     mkdir -p "$release"
     cp "$archive" "$archive.sha256" "$release/"
