@@ -540,12 +540,12 @@ fn run_accept(store: &Store, inputs: &Inputs, id: &str, deny: bool) -> Result<()
     } else {
         proposals::accept(store, id)?
     };
-    let rule = oncebitten::rule::load_rule(&dir)?;
     let in_repo = Inputs {
         cwd: repo,
         vars: inputs.vars.clone(),
     };
-    match gate::baseline_rule(&in_repo, &rule.id) {
+    let qualified = qualified_id(&in_repo, &dir)?;
+    match gate::baseline_rule(&in_repo, &qualified) {
         Ok(path) => {
             println!(
                 "accepted {id}: {} is active; existing hits baselined in {}",
@@ -556,6 +556,27 @@ fn run_accept(store: &Store, inputs: &Inputs, id: &str, deny: bool) -> Result<()
         }
         Err(failure) => exit_could_not_run(failure),
     }
+}
+
+/// The qualified id of the loaded rule whose directory is `dir`.
+fn qualified_id(inputs: &Inputs, dir: &Path) -> Result<String> {
+    let dir = std::fs::canonicalize(dir).with_context(|| format!("resolving {}", dir.display()))?;
+    let loaded = match rules::load(inputs, false) {
+        Ok(loaded) => loaded,
+        Err(failure) => exit_could_not_run(failure),
+    };
+    loaded
+        .into_iter()
+        .find(|entry| {
+            entry
+                .rule
+                .file
+                .parent()
+                .and_then(|parent| std::fs::canonicalize(parent).ok())
+                .is_some_and(|parent| parent == dir)
+        })
+        .map(|entry| entry.id)
+        .with_context(|| format!("no loaded rule lives in {}", dir.display()))
 }
 
 fn run_proposals(action: ProposalsAction) -> Result<()> {
@@ -833,9 +854,11 @@ fn run_rules(action: RulesAction) -> Result<()> {
                     "{id} is proposed again in {}; it no longer blocks",
                     rolled.file.display()
                 );
-                println!("to restore an earlier version of the rule, pick a commit and run:");
-                for command in &rolled.restore {
-                    println!("  {command}");
+                if !rolled.restore.is_empty() {
+                    println!("to restore an earlier version of the rule, pick a commit and run:");
+                    for command in &rolled.restore {
+                        println!("  {command}");
+                    }
                 }
             }
             Err(failure) => exit_with(failure),
@@ -1007,15 +1030,23 @@ fn run_baseline_update() -> Result<()> {
         Ok(found) => found,
         Err(failure) => exit_could_not_run(failure),
     };
-    let path = match baseline::write(&repo, &current) {
-        Ok(path) => path,
+    let (path, local) = match baseline::write_split(&repo, &current) {
+        Ok(paths) => paths,
         Err(error) => exit_could_not_run(Failure::CouldNotRun(error)),
     };
+    let local_count = current
+        .entries
+        .iter()
+        .filter(|entry| entry.rule.starts_with(baseline::LOCAL_PREFIX))
+        .count();
     println!(
         "wrote {} entries to {}",
-        current.entries.len(),
+        current.entries.len() - local_count,
         path.display()
     );
+    if let Some(local) = local {
+        println!("wrote {local_count} entries to {}", local.display());
+    }
     Ok(())
 }
 

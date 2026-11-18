@@ -136,6 +136,28 @@ fn fired_exits_1_and_names_the_rule() {
 }
 
 #[test]
+fn an_active_local_rule_fires_and_is_named_with_its_local_id() {
+    let repo = Repo::new();
+    repo.write("src/api/users.rs", "fn a() {}\n");
+    repo.write(".oncebitten/.gitignore", "rules.local/\n");
+    let dir = ".oncebitten/rules.local/arch-diagram";
+    repo.write(&format!("{dir}/rule.toml"), &diagram_rule("active"));
+    repo.write(&format!("{dir}/fixtures/bad.diff"), "bad\n");
+    repo.write(&format!("{dir}/fixtures/fixed.diff"), "fixed\n");
+    repo.commit_all("baseline");
+    repo.write("src/api/users.rs", "fn a() { 1; }\n");
+
+    let output = repo.check(&[]);
+
+    assert_eq!(code(&output), 1, "{}{}", stdout(&output), stderr(&output));
+    assert!(
+        stdout(&output).contains("local/arch-diagram"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn requirement_satisfied_in_the_same_change_is_clean() {
     let repo = committed_repo_with_rule("active");
     repo.write("src/api/users.rs", "fn a() { 1; }\n");

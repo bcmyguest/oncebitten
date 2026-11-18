@@ -241,6 +241,18 @@ fn duplicate_source_names_are_rejected() {
 }
 
 #[test]
+fn source_named_local_is_rejected() {
+    let sandbox = Sandbox::new();
+    sandbox.write_project(
+        "[[rules.sources]]\nname = \"local\"\nurl = \"https://example.invalid/a.git\"\n",
+    );
+    let message = error_chain(load(&sandbox.inputs(&[])));
+
+    assert!(message.contains("reserved"), "{message}");
+    assert!(message.contains("`local`"), "{message}");
+}
+
+#[test]
 fn unknown_top_level_key_is_rejected() {
     let sandbox = Sandbox::new();
     sandbox.write_user("[bogus]\nvalue = 1\n");

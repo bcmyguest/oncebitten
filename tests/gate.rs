@@ -153,6 +153,40 @@ fn proposed_rules_need_no_proof() {
 }
 
 #[test]
+fn pr_ignores_the_local_layer() {
+    let repo = Repo::new();
+    repo.write("src/app.py", "x = 1\n");
+    let sync = repo.run(&["rules", "sync"], &[]);
+    assert_eq!(code(&sync), 0, "{}", both(&sync));
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    // An active diff rule that the change would fire, in the local layer only.
+    let dir = ".oncebitten/rules.local/diagram";
+    repo.write(
+        &format!("{dir}/rule.toml"),
+        r#"id = "diagram"
+description = "update the diagram with the API"
+mode = "block"
+status = "active"
+engine = "diff"
+when_changed = ["src/**"]
+require_changed = ["docs/diagram.md"]
+"#,
+    );
+    repo.write(&format!("{dir}/fixtures/bad.diff"), "src/app.py\n");
+    repo.write(
+        &format!("{dir}/fixtures/fixed.diff"),
+        "src/app.py\ndocs/diagram.md\n",
+    );
+    repo.write("src/app.py", "x = 9\n");
+    repo.commit_all("change");
+
+    let output = pr(&repo);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+}
+
+#[test]
 fn pr_needs_rules_lock() {
     let repo = gated_repo();
     fs::remove_file(repo.project().join(".oncebitten").join("rules.lock")).unwrap();
@@ -478,4 +512,44 @@ fn hook_and_templates_call_real_gate_commands() {
     }
     let help = repo.run(&["gate", "pr", "--help"], &[]);
     assert_eq!(code(&help), 0, "{}", both(&help));
+}
+
+#[test]
+fn pre_push_fires_an_active_local_block_rule() {
+    let repo = gated_repo();
+    repo.add_local_rule(
+        "diagram",
+        r#"id = "diagram"
+description = "update the diagram with the API"
+mode = "block"
+status = "active"
+engine = "diff"
+when_changed = ["src/**"]
+require_changed = ["docs/diagram.md"]
+"#,
+    );
+    repo.write("src/app.py", "x = 9\n");
+    repo.commit_all("change");
+
+    let output = repo.run(&["gate", "pre-push", "--base", "main"], &[]);
+
+    assert_eq!(code(&output), 1, "{}", both(&output));
+    assert!(both(&output).contains("local/diagram"), "{}", both(&output));
+}
+
+#[test]
+fn pr_ignores_the_local_baseline_and_pre_push_honours_it() {
+    let repo = gated_repo();
+    repo.add_rule("git-fails", NATIVE);
+    repo.write(
+        ".oncebitten/baseline.local.json",
+        r#"{"entries":[{"rule":"git-fails"}]}"#,
+    );
+    repo.commit_all("native");
+
+    let pr = pr(&repo);
+    let push = repo.run(&["gate", "pre-push", "--base", "main"], &[]);
+
+    assert_eq!(code(&pr), 1, "{}", both(&pr));
+    assert_eq!(code(&push), 0, "{}", both(&push));
 }

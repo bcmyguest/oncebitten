@@ -171,6 +171,69 @@ pub fn add(repo: &Path, exception: &Exception) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// What moving one rule's exceptions leaves in `exceptions.toml`.
+pub struct Moved {
+    /// The working file with the rule's exceptions renamed in place.
+    pub full: String,
+    /// `head` plus only the rule's exceptions, renamed.
+    pub committed: String,
+}
+
+/// Renames every exception for rule `from` to `to`, in place so comments and
+/// layout stay. `head` is the file's committed text, empty when absent.
+/// Returns `None` when no exception names `from`; writes nothing.
+pub fn move_rule(repo: &Path, from: &str, to: &str, head: &str) -> Result<Option<Moved>> {
+    let path = path(repo);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let mut document = text
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    let mut moved = toml_edit::ArrayOfTables::new();
+    if let Some(tables) = document
+        .get_mut(TABLE)
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    {
+        for table in tables.iter_mut() {
+            if table.get("rule").and_then(toml_edit::Item::as_str) == Some(from) {
+                table["rule"] = toml_edit::value(to);
+                moved.push(table.clone());
+            }
+        }
+    }
+    if moved.is_empty() {
+        return Ok(None);
+    }
+    let mut committed = head
+        .parse::<toml_edit::DocumentMut>()
+        .context("parsing the committed exceptions.toml")?;
+    match committed
+        .entry(TABLE)
+        .or_insert(toml_edit::Item::ArrayOfTables(
+            toml_edit::ArrayOfTables::new(),
+        ))
+        .as_array_of_tables_mut()
+    {
+        Some(tables) => {
+            for table in moved {
+                tables.push(table);
+            }
+        }
+        None => bail!("the committed exceptions.toml has a non-table `{TABLE}`"),
+    }
+    let mut committed = committed.to_string();
+    if !committed.ends_with('\n') {
+        committed.push('\n');
+    }
+    Ok(Some(Moved {
+        full: document.to_string(),
+        committed,
+    }))
+}
+
 /// Today's date in UTC, so a laptop and CI agree on when an exception expires.
 pub fn today() -> Date {
     Timestamp::now().to_zoned(TimeZone::UTC).date()

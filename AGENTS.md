@@ -25,15 +25,15 @@ scripts/e2e-live.sh   # real Claude Code sessions: capture, background triage, a
 
 - `src/config.rs`: layered configuration loader, validation, origin rendering.
 - `src/rule.rs`: rule directory schema and loader (`rule.toml`, check file, fixtures).
-- `src/registry.rs`: resolves project, source and example rules into qualified ids; precedence and overrides.
+- `src/registry.rs`: resolves local, project, source and example rules into qualified ids; precedence and overrides.
 - `src/sources.rs`: source clone location and `git` invocations.
 - `src/lockfile.rs`: `.oncebitten/rules.lock` read and write.
 - `src/rules.rs`: `rules sync`, `rules list` and `rules validate` logic, including `--ci` checks.
 - `src/proof.rs`: `proof.json` in a rule directory: directory hash, validity, writing a proof after an OpenShell or matcher replay.
 - `src/gate.rs`: `gate pre-push|pr`: range of changed paths, proof checks, baseline filtering. Reuses `src/check.rs`.
-- `src/baseline.rs`: `.oncebitten/baseline.json` entries, matching and writing. `gate::current_baseline` backs `baseline update`.
+- `src/baseline.rs`: `.oncebitten/baseline.json` and the gitignored `baseline.local.json` (entries of `local/` rules) entries, matching, reading (union outside CI) and writing. `gate::current_baseline` backs `baseline update`.
 - `src/exceptions.rs`: `.oncebitten/exceptions.toml`: parsing, expiry, matching findings, appending entries. Applied by `check`, `gate` and `baseline update`.
-- `src/lifecycle.rs`: `rules retire` and `rules rollback`: in-place `rule.toml` status edits for project rules.
+- `src/lifecycle.rs`: `rules retire` and `rules rollback`: in-place `rule.toml` status edits for project and local rules.
 - `src/doctor.rs`: `oncebitten doctor` read-only checks. Reuses the config, lockfile, rule, proof, exception, hook and store loaders.
 - `src/forge.rs`: `Forge` trait (find open PR, open PR, read PR text) with `gh`, `glab` and `az repos` backends, chosen from the `forge` key or the `origin` remote. `tests/support/fake_forge.rs`: the `fake-forge` test binary, copied as `gh`, `glab` or `az`. `tests/forge.rs` covers it. `tests/support/fake_host.rs`: the `fake-host` test binary, copied as `claude` (`claude.cmd` on Windows); `tests/triage_cli_host.rs` runs the CLI against it.
 - `src/delivery.rs`: `proposals deliver` (PR commit or rules-repo branch). `tests/delivery.rs` covers it. `docs/proposals.md` has the flow.

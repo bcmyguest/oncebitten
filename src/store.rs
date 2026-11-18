@@ -853,6 +853,18 @@ impl Store {
         Ok(())
     }
 
+    /// Points a proposal at its rule directory's new location.
+    pub fn set_proposal_dir(&self, cluster: &str, dir: &Path) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE proposals SET dir = ?2 WHERE cluster = ?1",
+            params![cluster, dir.to_string_lossy()],
+        )?;
+        if changed == 0 {
+            bail!("no proposal `{cluster}`");
+        }
+        Ok(())
+    }
+
     /// Records the proof state a delivery replay left.
     pub fn set_proposal_proof(
         &self,

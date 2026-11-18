@@ -148,7 +148,7 @@ fn written_rule(sandbox: &Sandbox) -> Rule {
         &sandbox
             .repo()
             .join(".oncebitten")
-            .join("rules")
+            .join("rules.local")
             .join("use-uv"),
     )
     .unwrap()

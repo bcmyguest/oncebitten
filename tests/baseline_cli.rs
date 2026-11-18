@@ -173,3 +173,58 @@ fn update_writes_nothing_when_a_rule_could_not_run() {
     assert!(both(&output).contains("broken"), "{}", both(&output));
     assert!(!baseline_path(&repo).exists());
 }
+
+fn local_baseline_path(repo: &Repo) -> PathBuf {
+    repo.project()
+        .join(".oncebitten")
+        .join("baseline.local.json")
+}
+
+#[test]
+fn update_splits_local_rule_entries_into_the_local_file() {
+    let repo = utcnow_repo();
+    repo.add_local_rule("git-fails", NATIVE);
+    repo.write("src/a.py", &format!("import datetime\nz = {CALL}\n"));
+    repo.commit_all("violations");
+
+    update(&repo);
+
+    let hash = proof::text_sha256(CALL);
+    assert_eq!(
+        read_baseline(&repo),
+        json!({ "entries": [{ "rule": "py-utcnow", "path": "src/a.py", "sha256": hash }] })
+    );
+    let local: Value =
+        serde_json::from_str(&fs::read_to_string(local_baseline_path(&repo)).unwrap()).unwrap();
+    assert_eq!(local, json!({ "entries": [{ "rule": "local/git-fails" }] }));
+}
+
+#[test]
+fn update_creates_no_local_file_without_local_entries() {
+    let repo = utcnow_repo();
+    repo.write("src/a.py", &format!("import datetime\nz = {CALL}\n"));
+    repo.commit_all("violations");
+
+    update(&repo);
+
+    assert!(!local_baseline_path(&repo).exists());
+}
+
+#[test]
+fn update_ignores_the_local_file_even_for_a_hand_made_local_rule() {
+    let repo = utcnow_repo();
+    let dir = ".oncebitten/rules.local/git-fails";
+    repo.write(&format!("{dir}/rule.toml"), NATIVE);
+    repo.write(&format!("{dir}/fixtures/bad.diff"), "bad\n");
+    repo.write(&format!("{dir}/fixtures/fixed.diff"), "fixed\n");
+    let gitignore = repo.project().join(".oncebitten").join(".gitignore");
+    let _ = fs::remove_file(&gitignore);
+
+    update(&repo);
+
+    assert_eq!(
+        fs::read_to_string(&gitignore).unwrap(),
+        "rules.local/\nbaseline.local.json\n"
+    );
+    assert!(local_baseline_path(&repo).exists());
+}

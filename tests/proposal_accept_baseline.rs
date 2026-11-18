@@ -22,9 +22,18 @@ fn baseline(repo: &Repo) -> Value {
 /// A repo with a proposed `py-utcnow` rule that replays as proven, and one
 /// committed file that already contains a hit.
 fn proposed_repo() -> Repo {
+    proposed_repo_in(false)
+}
+
+/// `proposed_repo` with the rule in the gitignored local layer when `local`.
+fn proposed_repo_in(local: bool) -> Repo {
     let repo = Repo::new();
-    repo.add_example("py-utcnow", "proposed");
-    let rule = load_rule(&repo.rule_dir("py-utcnow")).unwrap();
+    let dir = if local {
+        repo.add_local_example("py-utcnow", "proposed")
+    } else {
+        repo.add_example("py-utcnow", "proposed")
+    };
+    let rule = load_rule(&dir).unwrap();
     let replayed = proof::replay_rule(
         &rule,
         &PathBuf::from(CHECKER),
@@ -44,7 +53,7 @@ fn proposed_repo() -> Repo {
             kind: Kind::Proposal,
             state: State::Waiting,
             rule: Some("py-utcnow".into()),
-            dir: Some(repo.rule_dir("py-utcnow")),
+            dir: Some(dir),
             proven: true,
             note: None,
             verdict: "{}".into(),
@@ -166,4 +175,37 @@ fn accept_from_another_repo_baselines_the_proposals_own_repo() {
             .any(|entry| entry["rule"] == "py-utcnow" && entry["path"] == "src/old.py"),
         "{entries}"
     );
+}
+
+#[test]
+fn accept_baselines_a_local_rule_into_the_local_file() {
+    let repo = proposed_repo_in(true);
+    let oncebitten = repo.project().join(".oncebitten");
+
+    let accept = repo.run(&["proposals", "accept", "c1"], &[]);
+    assert_eq!(code(&accept), 0, "{}", both(&accept));
+
+    assert!(!oncebitten.join("baseline.json").exists());
+    let text = fs::read_to_string(oncebitten.join("baseline.local.json")).unwrap();
+    let local: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(local["entries"].as_array().map(Vec::len), Some(1), "{text}");
+    assert_eq!(local["entries"][0]["rule"], "local/py-utcnow", "{text}");
+    assert_eq!(local["entries"][0]["path"], "src/old.py", "{text}");
+    assert!(
+        stdout_of(&accept).contains("baseline.local.json"),
+        "{}",
+        both(&accept)
+    );
+
+    repo.write(
+        "src/old.py",
+        &format!("import datetime\n# note\nx = {CALL}\n"),
+    );
+    repo.commit_all("touch old hit");
+    let push = repo.run(&["gate", "pre-push", "--base", "main"], &[]);
+    assert_eq!(code(&push), 0, "{}", both(&push));
+}
+
+fn stdout_of(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }

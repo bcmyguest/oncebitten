@@ -213,3 +213,38 @@ fn rollback_refuses_a_rule_that_is_not_active() {
     assert_eq!(code(&output), 2, "{}", both(&output));
     assert!(stderr(&output).contains("is proposed"), "{}", both(&output));
 }
+
+#[test]
+fn retire_works_on_a_local_rule() {
+    let repo = Repo::new();
+    repo.add_local_example("py-utcnow", "active");
+
+    let output = repo.run(
+        &[
+            "rules",
+            "retire",
+            "local/py-utcnow",
+            "--reason",
+            "not needed",
+        ],
+        &[],
+    );
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    let rule = load_rule(&repo.local_rule_dir("py-utcnow")).unwrap();
+    assert_eq!(rule.status, Status::Retired);
+}
+
+#[test]
+fn rollback_works_on_a_local_rule_and_prints_no_git_hints() {
+    let repo = Repo::new();
+    repo.add_local_example("py-utcnow", "active");
+
+    let output = repo.run(&["rules", "rollback", "local/py-utcnow"], &[]);
+
+    assert_eq!(code(&output), 0, "{}", both(&output));
+    let rule = load_rule(&repo.local_rule_dir("py-utcnow")).unwrap();
+    assert_eq!(rule.status, Status::Proposed);
+    assert!(!stdout(&output).contains("git "), "{}", both(&output));
+    assert!(!stdout(&output).contains("restore"), "{}", both(&output));
+}
