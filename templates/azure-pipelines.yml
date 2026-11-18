@@ -17,7 +17,7 @@ steps:
     fetchDepth: 0
   # Pin the release for reproducible gates.
   - bash: |
-      curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.2.0/install.sh | ONCEBITTEN_VERSION=0.2.0 sh
+      curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.3.0/install.sh | ONCEBITTEN_VERSION=0.3.0 sh
       echo "##vso[task.prependpath]$HOME/.local/bin"
     displayName: Install oncebitten
   - bash: oncebitten rules sync --frozen

@@ -1,6 +1,6 @@
 {
   "name": "oncebitten",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Records prompts so repeated agent mistakes can be turned into rules.",
   "license": "Apache-2.0",
   "repository": "https://github.com/bcmyguest/oncebitten",

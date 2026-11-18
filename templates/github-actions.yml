@@ -20,7 +20,7 @@ jobs:
       # Pin the release for reproducible gates.
       - name: Install oncebitten
         run: |
-          curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.2.0/install.sh | ONCEBITTEN_VERSION=0.2.0 sh
+          curl -fsSL https://raw.githubusercontent.com/bcmyguest/oncebitten/v0.3.0/install.sh | ONCEBITTEN_VERSION=0.3.0 sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Sync rules at the locked commits
         run: oncebitten rules sync --frozen
